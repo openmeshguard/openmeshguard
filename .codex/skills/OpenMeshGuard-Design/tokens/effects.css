@@ -1,0 +1,32 @@
+/* ============================================================
+   OpenMeshGuard — Effects: radius, borders, shadows, motion
+   Restrained & utilitarian. Soft cool-tinted shadows, modest radii.
+   ============================================================ */
+
+:root {
+  /* ---- Radius (modest — this is a governance tool, not a consumer app) ---- */
+  --radius-xs:   3px;
+  --radius-sm:   4px;
+  --radius-md:   6px;
+  --radius-lg:   8px;
+  --radius-xl:   12px;
+  --radius-pill: 9999px;
+
+  /* ---- Border widths ---- */
+  --border-hair:  1px;
+  --border-thick: 2px;
+
+  /* ---- Shadows (cool slate tint, subtle) ---- */
+  --shadow-xs:  0 1px 2px rgba(11, 18, 32, 0.06);
+  --shadow-sm:  0 1px 3px rgba(11, 18, 32, 0.08), 0 1px 2px rgba(11, 18, 32, 0.04);
+  --shadow-md:  0 4px 10px -2px rgba(11, 18, 32, 0.10), 0 2px 4px -2px rgba(11, 18, 32, 0.06);
+  --shadow-lg:  0 12px 24px -6px rgba(11, 18, 32, 0.14), 0 4px 8px -4px rgba(11, 18, 32, 0.08);
+  --shadow-focus: 0 0 0 3px rgba(53, 96, 209, 0.25);
+
+  /* ---- Motion (short, no bounce — trust & precision) ---- */
+  --ease-standard: cubic-bezier(0.2, 0, 0.2, 1);  /* @kind other */
+  --ease-out:      cubic-bezier(0.16, 1, 0.3, 1); /* @kind other */
+  --dur-fast:   120ms; /* @kind other */
+  --dur-normal: 180ms; /* @kind other */
+  --dur-slow:   260ms; /* @kind other */
+}

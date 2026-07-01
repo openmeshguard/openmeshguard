@@ -1,0 +1,46 @@
+<!-- @dsCard group="Components" viewport="700x360" name="Data — Card, DataTable, Tabs, Avatar" subtitle="Dense table with status cells, tabs, owners" -->
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="../../styles.css">
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<script src="../../_ds_bundle.js"></script>
+</head>
+<body style="margin:0;padding:20px;background:var(--surface-page)">
+<div id="root"></div>
+<script type="text/babel">
+const { Card, DataTable, Tabs, Avatar, StatusBadge, ProgressBar } = window.OpenMeshGuardDesignSystem_65348c;
+const rows=[
+  {name:'payments-api',ns:'payments',owner:'team-payments',mtls:'Enforced',cov:98},
+  {name:'checkout-web',ns:'checkout',owner:'team-web',mtls:'Permissive',cov:64},
+  {name:'ledger-svc',ns:'ledger',owner:'team-core',mtls:'Disabled',cov:22},
+];
+const mtlsStatus={Enforced:'pass',Permissive:'warn',Disabled:'fail'};
+function Demo(){
+  const [tab,setTab]=React.useState('all');
+  return (
+    <Card padded={false} title="Workloads" subtitle="prod-eu-1 · last scanned 4h ago">
+      <div style={{padding:'0 20px'}}>
+        <Tabs value={tab} onChange={setTab} items={[{id:'all',label:'All',count:42},{id:'mtls',label:'mTLS'},{id:'authz',label:'Authorization',count:12}]}/>
+      </div>
+      <DataTable
+        rowKey="name"
+        columns={[
+          {key:'name',header:'Workload',mono:true},
+          {key:'ns',header:'Namespace',mono:true},
+          {key:'owner',header:'Owner',render:v=><span style={{display:'inline-flex',alignItems:'center',gap:6}}><Avatar name={v} size="sm"/><span style={{fontFamily:'var(--font-mono)',fontSize:12}}>{v}</span></span>},
+          {key:'mtls',header:'mTLS',render:v=><StatusBadge status={mtlsStatus[v]}>{v}</StatusBadge>},
+          {key:'cov',header:'Coverage',width:180,render:v=><ProgressBar value={v}/>},
+        ]}
+        rows={rows}
+      />
+    </Card>
+  );
+}
+ReactDOM.createRoot(document.getElementById('root')).render(<Demo/>);
+</script>
+</body>
+</html>

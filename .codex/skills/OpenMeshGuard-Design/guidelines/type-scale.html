@@ -1,0 +1,21 @@
+<!-- @dsCard group="Type" viewport="700x280" name="Type scale" subtitle="Dense enterprise scale — 14px default body" -->
+<!doctype html><meta charset="utf-8">
+<link rel="stylesheet" href="../styles.css">
+<body style="margin:0;padding:20px;background:var(--surface-card);font-family:var(--font-sans)">
+  <div id="scale" style="display:flex;flex-direction:column;gap:10px"></div>
+  <script>
+    const rows=[['Display','--text-display','30px / 600','Strict mTLS enforced',600],
+      ['H1','--text-h1','24px / 600','Cluster posture overview',600],
+      ['H2','--text-h2','20px / 600','Findings by severity',600],
+      ['H3','--text-h3','16px / 600','AuthorizationPolicy coverage',600],
+      ['Body','--text-base','14px / 400','Default UI body text used across tables and panels.',400],
+      ['Small','--text-sm','13px / 400','Secondary descriptions and table cells.',400],
+      ['XS','--text-xs','12px / 400','Dense meta and footnotes.',400]];
+    document.getElementById('scale').innerHTML=rows.map(([name,tok,spec,sample,w])=>`
+      <div style="display:flex;align-items:baseline;gap:16px">
+        <code style="width:130px;flex:none;font-size:11px;color:var(--text-subtle)">${tok}</code>
+        <span style="width:70px;flex:none;font-size:11px;color:var(--text-muted);font-family:var(--font-mono)">${spec}</span>
+        <span style="font-size:var(${tok});font-weight:${w};color:var(--text-strong);line-height:1.2">${sample}</span>
+      </div>`).join('');
+  </script>
+</body>

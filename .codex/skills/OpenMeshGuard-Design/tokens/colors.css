@@ -1,0 +1,132 @@
+/* ============================================================
+   OpenMeshGuard — Color tokens
+   Cool slate neutrals · "guard blue" primary · emerald "verified" accent
+   Governance semantics: pass / warn / fail / info
+   ============================================================ */
+
+:root {
+  /* ---- Neutrals (cool slate) ---- */
+  --slate-0:   #ffffff;
+  --slate-50:  #f8fafc;
+  --slate-100: #f1f5f9;
+  --slate-200: #e5eaf1;
+  --slate-300: #cbd5e1;
+  --slate-400: #94a3b8;
+  --slate-500: #64748b;
+  --slate-600: #475569;
+  --slate-700: #334155;
+  --slate-800: #1e293b;
+  --slate-900: #131c2b;
+  --slate-950: #0b1220;
+
+  /* ---- Brand: guard blue ---- */
+  --brand-50:  #eef3fd;
+  --brand-100: #dae4fb;
+  --brand-200: #b6c8f5;
+  --brand-300: #8aa5ec;
+  --brand-400: #5a7ee0;
+  --brand-500: #3560d1;   /* primary */
+  --brand-600: #2a4ec0;
+  --brand-700: #223f9e;
+  --brand-800: #1e357e;
+  --brand-900: #1b2f66;
+
+  /* ---- Verified: emerald ---- */
+  --emerald-50:  #ecfdf5;
+  --emerald-100: #d1fae5;
+  --emerald-200: #a7f3d0;
+  --emerald-500: #10b981;
+  --emerald-600: #059669;
+  --emerald-700: #047857;
+  --emerald-800: #065f46;
+
+  /* ---- Amber (warn / expiring) ---- */
+  --amber-50:  #fffbeb;
+  --amber-100: #fef3c7;
+  --amber-200: #fde68a;
+  --amber-500: #f59e0b;
+  --amber-600: #d97706;
+  --amber-700: #b45309;
+
+  /* ---- Red (fail / exposed / critical) ---- */
+  --red-50:  #fef2f2;
+  --red-100: #fee2e2;
+  --red-200: #fecaca;
+  --red-500: #ef4444;
+  --red-600: #dc2626;
+  --red-700: #b91c1c;
+  --red-800: #991b1b;
+
+  /* ---- Info blue (distinct from brand for status) ---- */
+  --info-50:  #eff6ff;
+  --info-100: #dbeafe;
+  --info-500: #3b82f6;
+  --info-600: #2563eb;
+  --info-700: #1d4ed8;
+
+  /* ============================================================
+     SEMANTIC ALIASES — reference these in components
+     ============================================================ */
+
+  /* Surfaces */
+  --surface-page:      var(--slate-50);
+  --surface-card:      var(--slate-0);
+  --surface-sunken:    var(--slate-100);
+  --surface-raised:    var(--slate-0);
+  --surface-inverse:   var(--slate-900);
+  --surface-hover:     var(--slate-100);
+  --surface-active:    var(--slate-200);
+  --surface-brand-soft: var(--brand-50);
+
+  /* Text */
+  --text-strong:   var(--slate-900);
+  --text-body:     var(--slate-700);
+  --text-muted:    var(--slate-500);
+  --text-subtle:   var(--slate-400);
+  --text-inverse:  var(--slate-0);
+  --text-brand:    var(--brand-600);
+  --text-link:     var(--brand-600);
+
+  /* Borders */
+  --border-subtle:  var(--slate-200);
+  --border-default: var(--slate-300);
+  --border-strong:  var(--slate-400);
+  --border-brand:   var(--brand-500);
+  --focus-ring:     var(--brand-400);
+
+  /* Primary action */
+  --action-bg:        var(--brand-500);
+  --action-bg-hover:  var(--brand-600);
+  --action-bg-active: var(--brand-700);
+  --action-fg:        var(--slate-0);
+
+  /* Status: pass / verified */
+  --status-pass-fg:     var(--emerald-700);
+  --status-pass-bg:     var(--emerald-50);
+  --status-pass-border: var(--emerald-200);
+  --status-pass-solid:  var(--emerald-600);
+
+  /* Status: warn / expiring */
+  --status-warn-fg:     var(--amber-700);
+  --status-warn-bg:     var(--amber-50);
+  --status-warn-border: var(--amber-200);
+  --status-warn-solid:  var(--amber-500);
+
+  /* Status: fail / exposed */
+  --status-fail-fg:     var(--red-700);
+  --status-fail-bg:     var(--red-50);
+  --status-fail-border: var(--red-200);
+  --status-fail-solid:  var(--red-600);
+
+  /* Status: info / neutral note */
+  --status-info-fg:     var(--info-700);
+  --status-info-bg:     var(--info-50);
+  --status-info-border: var(--info-100);
+  --status-info-solid:  var(--info-600);
+
+  /* Status: unknown / not-scanned */
+  --status-none-fg:     var(--slate-600);
+  --status-none-bg:     var(--slate-100);
+  --status-none-border: var(--slate-300);
+  --status-none-solid:  var(--slate-500);
+}

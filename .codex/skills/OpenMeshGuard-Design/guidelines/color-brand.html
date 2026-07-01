@@ -1,0 +1,18 @@
+<!-- @dsCard group="Colors" viewport="700x150" name="Brand — Guard Blue" subtitle="Primary action, links, active nav, logo" -->
+<!doctype html><meta charset="utf-8">
+<link rel="stylesheet" href="../styles.css">
+<body style="margin:0;padding:16px;background:var(--surface-card)">
+  <div style="display:flex;gap:0;border-radius:var(--radius-md);overflow:hidden;border:1px solid var(--border-subtle)">
+    <div data-s="50"></div><div data-s="100"></div><div data-s="200"></div><div data-s="300"></div>
+    <div data-s="400"></div><div data-s="500"></div><div data-s="600"></div><div data-s="700"></div>
+    <div data-s="800"></div><div data-s="900"></div>
+  </div>
+  <script>
+    const shades = [['50','#eef3fd'],['100','#dae4fb'],['200','#b6c8f5'],['300','#8aa5ec'],['400','#5a7ee0'],['500','#3560d1'],['600','#2a4ec0'],['700','#223f9e'],['800','#1e357e'],['900','#1b2f66']];
+    document.querySelectorAll('[data-s]').forEach((el,i)=>{
+      const [n,hex]=shades[i]; const light=i<4;
+      el.style.cssText=`flex:1;height:96px;display:flex;flex-direction:column;justify-content:flex-end;padding:8px;background:var(--brand-${n});color:${light?'#1b2f66':'#fff'};font-family:var(--font-mono);font-size:11px`;
+      el.innerHTML=`<div style="font-weight:600">${n}${n==='500'?' ●':''}</div><div style="opacity:.8">${hex}</div>`;
+    });
+  </script>
+</body>

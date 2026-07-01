@@ -1,0 +1,6 @@
+/* OpenMeshGuard webfonts.
+   NOTE: Fonts are loaded from the Google Fonts CDN (see substitution note in readme.md).
+   To fully self-host, drop the .woff2 files into assets/fonts/ and replace the @import
+   below with local @font-face rules pointing at those files. */
+
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap');

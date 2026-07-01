@@ -1,0 +1,12 @@
+<svg width="216" height="36" viewBox="0 0 216 36" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="OpenMeshGuard">
+  <rect x="2" y="4" width="28" height="28" rx="8" fill="#3560d1"></rect>
+  <g stroke="#ffffff" stroke-width="1.6" stroke-linecap="round" opacity="0.95">
+    <line x1="16" y1="12.5" x2="10.8" y2="22.5"></line>
+    <line x1="16" y1="12.5" x2="21.2" y2="22.5"></line>
+    <line x1="10.8" y1="22.5" x2="21.2" y2="22.5"></line>
+  </g>
+  <circle cx="16" cy="12.5" r="2.5" fill="#ffffff"></circle>
+  <circle cx="10.8" cy="22.5" r="2.5" fill="#ffffff"></circle>
+  <circle cx="21.2" cy="22.5" r="2.5" fill="#ffffff"></circle>
+  <text x="42" y="24" font-family="&#39;IBM Plex Sans&#39;, sans-serif" font-size="18" font-weight="600" fill="#ffffff" letter-spacing="-0.2">Open<tspan fill="#8aa5ec">Mesh</tspan>Guard</text>
+</svg>

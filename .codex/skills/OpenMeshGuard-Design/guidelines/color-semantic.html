@@ -1,0 +1,21 @@
+<!-- @dsCard group="Colors" viewport="700x180" name="Semantic surfaces & text" subtitle="Aliases used in components — not raw palette values" -->
+<!doctype html><meta charset="utf-8">
+<link rel="stylesheet" href="../styles.css">
+<body style="margin:0;padding:16px;background:var(--surface-card);font-family:var(--font-sans);font-size:12px">
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px">
+    <div>
+      <div class="omg-eyebrow" style="margin-bottom:8px">Surfaces</div>
+      <div id="surf" style="display:flex;flex-direction:column;gap:6px"></div>
+    </div>
+    <div>
+      <div class="omg-eyebrow" style="margin-bottom:8px">Text</div>
+      <div id="txt" style="display:flex;flex-direction:column;gap:6px"></div>
+    </div>
+  </div>
+  <script>
+    const surf=[['page','--surface-page'],['card','--surface-card'],['sunken','--surface-sunken'],['hover','--surface-hover'],['inverse','--surface-inverse']];
+    document.getElementById('surf').innerHTML=surf.map(([n,v])=>`<div style="display:flex;align-items:center;gap:8px"><span style="width:26px;height:26px;border-radius:var(--radius-sm);border:1px solid var(--border-default);background:var(${v})"></span><code style="color:var(--text-muted)">${v}</code></div>`).join('');
+    const txt=[['strong','--text-strong'],['body','--text-body'],['muted','--text-muted'],['subtle','--text-subtle'],['brand','--text-brand']];
+    document.getElementById('txt').innerHTML=txt.map(([n,v])=>`<div style="display:flex;align-items:center;gap:8px"><span style="font-size:14px;font-weight:600;color:var(${v})">Aa</span><code style="color:var(--text-muted)">${v}</code></div>`).join('');
+  </script>
+</body>

@@ -1,0 +1,34 @@
+/* ============================================================
+   OpenMeshGuard — Spacing & layout tokens
+   4px base grid · dense, table-friendly rhythm
+   ============================================================ */
+
+:root {
+  --space-0:  0;
+  --space-1:  2px;
+  --space-2:  4px;
+  --space-3:  6px;
+  --space-4:  8px;
+  --space-5:  12px;
+  --space-6:  16px;
+  --space-7:  20px;
+  --space-8:  24px;
+  --space-9:  32px;
+  --space-10: 40px;
+  --space-11: 48px;
+  --space-12: 64px;
+  --space-13: 80px;
+
+  /* Component paddings */
+  --pad-control-x: 12px;   /* buttons / inputs horizontal */
+  --pad-control-y: 7px;    /* buttons / inputs vertical */
+  --pad-card:      20px;
+  --pad-cell-x:    12px;    /* table cell */
+  --pad-cell-y:    9px;
+
+  /* Layout */
+  --sidebar-width:   248px;
+  --topbar-height:   56px;
+  --content-max:     1360px;
+  --gutter:          24px;
+}

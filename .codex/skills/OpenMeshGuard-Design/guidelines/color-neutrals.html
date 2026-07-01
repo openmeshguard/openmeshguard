@@ -1,0 +1,13 @@
+<!-- @dsCard group="Colors" viewport="700x150" name="Neutrals — Slate" subtitle="Page, surfaces, text, borders — the bulk of every screen" -->
+<!doctype html><meta charset="utf-8">
+<link rel="stylesheet" href="../styles.css">
+<body style="margin:0;padding:16px;background:var(--surface-card)">
+  <div style="display:flex;gap:0;border-radius:var(--radius-md);overflow:hidden;border:1px solid var(--border-subtle)" id="row"></div>
+  <script>
+    const shades=[['0','#ffffff'],['50','#f8fafc'],['100','#f1f5f9'],['200','#e5eaf1'],['300','#cbd5e1'],['400','#94a3b8'],['500','#64748b'],['600','#475569'],['700','#334155'],['800','#1e293b'],['900','#131c2b'],['950','#0b1220']];
+    document.getElementById('row').innerHTML=shades.map(([n,hex],i)=>{
+      const light=i<6;
+      return `<div style="flex:1;height:96px;display:flex;flex-direction:column;justify-content:flex-end;padding:7px 6px;background:var(--slate-${n});color:${light?'#334155':'#fff'};font-family:var(--font-mono);font-size:10.5px;border-right:${i===0?'1px solid #e5eaf1':'none'}"><div style="font-weight:600">${n}</div><div style="opacity:.8">${hex}</div></div>`;
+    }).join('');
+  </script>
+</body>

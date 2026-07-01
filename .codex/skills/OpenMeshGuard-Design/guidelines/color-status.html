@@ -1,0 +1,16 @@
+<!-- @dsCard group="Colors" viewport="700x230" name="Status semantics" subtitle="pass · warn · fail · info · none — each with fg / bg / border / solid" -->
+<!doctype html><meta charset="utf-8">
+<link rel="stylesheet" href="../styles.css">
+<body style="margin:0;padding:16px;background:var(--surface-card);font-family:var(--font-sans)">
+  <div style="display:flex;flex-direction:column;gap:8px" id="rows"></div>
+  <script>
+    const st=[['pass','Pass · Verified · Enforced'],['warn','Warn · Expiring · Permissive'],['fail','Fail · Exposed · Critical'],['info','Info · Note'],['none','None · Not scanned']];
+    document.getElementById('rows').innerHTML=st.map(([k,label])=>`
+      <div style="display:flex;align-items:center;gap:12px">
+        <span style="width:10px;height:10px;border-radius:50%;background:var(--status-${k}-solid);flex:none"></span>
+        <span style="display:inline-flex;align-items:center;gap:6px;padding:2px 10px;border-radius:var(--radius-pill);font-size:12px;font-weight:600;color:var(--status-${k}-fg);background:var(--status-${k}-bg);border:1px solid var(--status-${k}-border)">${k.toUpperCase()}</span>
+        <span style="font-size:13px;color:var(--text-body)">${label}</span>
+        <code style="margin-left:auto;font-size:11px;color:var(--text-subtle)">--status-${k}-*</code>
+      </div>`).join('');
+  </script>
+</body>
