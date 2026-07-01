@@ -1,0 +1,10 @@
+.DS_Store
+node_modules/
+dist/
+coverage/
+.playwright-mcp/
+openmeshguard-*.png
+openmeshguard-*-snapshot.md
+.env
+.env.*
+!.env.example
