@@ -12,7 +12,7 @@ Istio can create a false sense of security when teams assume that adopting a ser
 
 OpenMeshGuard exists to answer:
 
-> Is our service mesh actually secure, compliant, owned, and operating according to enterprise controls?
+> Is our service mesh actually secure, governed, owned, and producing evidence that enterprise control teams can trust?
 
 ## 2. Positioning
 
@@ -22,7 +22,7 @@ Primary positioning:
 
 Supporting message:
 
-> Use Kyverno, OPA, or admission controls to block violations. Use OpenMeshGuard to understand whether your mesh is actually secure, governed, and compliant across every cluster.
+> Use Kyverno, OPA, or admission controls to block violations. Use OpenMeshGuard to understand whether your mesh is actually secure, governed, and backed by trustworthy evidence across every cluster.
 
 Category:
 
@@ -32,7 +32,7 @@ Initial beachhead:
 
 > Istio Governance Posture Management
 
-Long-term expansion can include vendor-validated Istio distributions, Envoy-based service connectivity, Gateway API posture, Cilium service mesh posture, Linkerd, Kuma, and broader service-to-service security governance. The wedge stays focused on posture, evidence, ownership, exception, drift, and lifecycle management.
+Long-term expansion can include vendor-validated Istio distributions, Envoy-based service connectivity, Gateway API posture, Cilium service mesh posture, Linkerd, Kuma, source traceability, and broader service-to-service security governance. The wedge stays focused on posture, evidence, ownership, exception, and lifecycle management.
 
 ## 3. Buyers and Users
 
@@ -53,7 +53,7 @@ Primary users:
 
 - Platform engineers who own mesh enablement.
 - Security engineers who need zero-trust and segmentation evidence.
-- SREs who manage version skew, drift, and upgrade readiness.
+- SREs who manage version skew, lifecycle risk, and upgrade readiness.
 - Risk and compliance teams who need audit-ready control evidence.
 
 Initial ICP:
@@ -137,6 +137,7 @@ MVP inputs:
 - Gateway API CRDs where used by Istio ambient, waypoints, or Kubernetes Gateway
 - Optional Prometheus
 - Optional app ownership CSV or YAML mapping
+- Optional exception YAML mapping
 
 MVP outputs:
 
@@ -160,7 +161,7 @@ Decisions:
 - Future richer local or enterprise UI: TypeScript.
 - Custom control configuration: YAML.
 - Framework mapping: defensible control tags only, not compliance claims.
-- Drift/source posture for v1: Level 0 deployed-state posture only. Do not require GitOps, source traceability, repository access, or manifest comparison for OSS v1.
+- Drift/source posture for v1: Level 0 deployed-state posture only. Do not require GitOps, source traceability, repository access, repo metadata, or manifest comparison for OSS v1.
 
 Client strategy:
 
@@ -192,7 +193,25 @@ Validation strategy:
 - The multicluster fixture should model `cluster1` and `cluster2` as separate primary clusters, each with its own Istio control plane, cluster name, network identity, east-west gateway, and remote-secret based endpoint discovery.
 - The default multicluster fixture should use the multi-primary multi-network pattern because it validates cross-cluster gateway posture and matches the upstream ambient multicluster installation path.
 - Validation should assert both scanner behavior and API impact: expected findings, expected unknown/missing-evidence behavior, bounded API calls, and no write operations.
-- Distribution validation for OpenShift Service Mesh, Tetrate, and Solo should follow the same standard when feasible: real disposable or lab deployments first, sanitized exports only as supplemental regression cases.
+- Distribution validation for OpenShift Service Mesh and Solo/Gloo should follow the same standard when feasible: real disposable or lab deployments first, sanitized exports only as supplemental regression cases.
+
+Distribution validation tiers:
+
+| Tier | Target | Validation approach | v1 status |
+| --- | --- | --- | --- |
+| 0 | Upstream Istio on Kind | Required disposable Kind fixtures for sidecar, ambient, mixed mode, and two-cluster multi-primary multi-network. | Required for OSS v1. |
+| 1 | Managed Kubernetes with upstream Istio on AKS, GKE, and EKS | Optional harness that provisions managed clusters, installs upstream Istio, runs the same scanner fixtures, and compares results against Kind baseline behavior. | Later managed-Kubernetes conformance track. |
+| 2 | Red Hat OpenShift Service Mesh | Requires a dedicated OpenShift/OCP lab with the Service Mesh Operator, OpenShift networking, OpenShift RBAC/SCC behavior, and OpenShift-supported Gateway API/ambient configuration. | First platform-specific validation track. |
+| 3 | Solo / Gloo Mesh / Solo Enterprise for Istio | Requires lab access and may require enterprise licensing, especially for multicluster or enterprise ambient features. | Later compatibility validation when licensing/access is available. |
+
+Distribution validation gaps:
+
+- Upstream Kind validation proves the scanner's Kubernetes, Istio, Gateway API, sidecar, ambient, and multicluster logic. It does not prove OpenShift-specific behavior.
+- Managed Kubernetes validation should prove that the scanner behaves consistently on AKS, GKE, and EKS when upstream Istio is installed through the same supported APIs. It should not block OSS v1.
+- OpenShift support needs special validation because OpenShift Service Mesh is Operator-managed and runs on OpenShift-supported platform/network/RBAC assumptions, not Kind.
+- OpenShift validation must check OpenShift projects/namespaces, Operator-created Istio resources, SCC/RBAC effects on scanner permissions, OpenShift networking, ambient ztunnel/waypoint deployment, and any OpenShift-specific Gateway API caveats.
+- Solo / Gloo Mesh / Solo Enterprise for Istio should be treated as vendor-platform validation, not OSS v1 acceptance, because their value often comes from control-plane APIs, enterprise operators, or licensed features.
+- Tetrate-specific validation is intentionally deferred until market relevance, customer demand, and lab access justify the investment.
 
 ## 9. OSS v1 Support Contract
 
@@ -229,8 +248,9 @@ Provider and distribution policy:
 | --- | --- |
 | Upstream Istio | First-class OSS v1 target. |
 | Red Hat OpenShift Service Mesh | Validate compatibility through Kubernetes, Istio, and Gateway API resources. Add OpenShift-specific checks only when the normalized model is insufficient. |
-| Tetrate | Validate compatibility through Kubernetes, Istio, and Gateway API resources. Add Tetrate APIs only when needed for ownership, lifecycle, or policy context that is not visible through OSS APIs. |
 | Solo / Gloo Mesh / Solo Enterprise for Istio | Validate compatibility through Kubernetes, Istio, and Gateway API resources. Add Solo APIs only when needed for ownership, lifecycle, or policy context that is not visible through OSS APIs. |
+
+Tetrate-specific validation remains deferred until customer demand, market relevance, and practical lab access justify the work.
 
 Provider support is not a promise to replace those platforms. The goal is to prove whether OpenMeshGuard can govern the Istio posture they deploy. Vendor-specific APIs are roadmap extensions, not OSS v1 prerequisites.
 
@@ -276,7 +296,7 @@ Optional permissions:
 | configmaps get/list in Istio control-plane namespaces | Improves meshConfig and revision analysis, but should be scoped to known control-plane namespaces where possible. |
 | pods/log get | Useful only for diagnostics; not required for baseline posture. |
 | Prometheus read access | Improves traffic and policy-use evidence; not required for static configuration posture. |
-| Vendor API read access | Enables richer OpenShift, Tetrate, or Solo context only when normalized Kubernetes/Istio/Gateway resources are insufficient. |
+| Vendor API read access | Enables richer OpenShift or Solo/Gloo context only when normalized Kubernetes/Istio/Gateway resources are insufficient. |
 
 Explicitly not required for OSS v1 baseline scans:
 
@@ -313,7 +333,7 @@ Rule Engine
         |
 Findings + Scores + Evidence
         |
-CLI / Local Dashboard / JSON / SARIF / HTML Report
+CLI / JSON / SARIF / Static HTML Report
 ```
 
 Enterprise architecture:
@@ -353,7 +373,7 @@ Discovers:
 - ztunnel DaemonSets, versions, readiness, and node coverage
 - Waypoint proxies, GatewayClass usage, enrollment labels, and target scope
 - Multi-cluster topology hints, trust domains, networks, east-west gateways, and remote secrets where observable
-- Owner, app, environment, and repo metadata
+- Owner, app, and environment metadata
 
 Goal:
 
@@ -486,10 +506,13 @@ Goal:
 
 ### 12.8 Remediation Workflow
 
-The first versions should not mutate production directly. They should produce:
+OSS v1 should not mutate production directly or create external workflow records. It should produce:
 
 - Remediation guidance
 - Suggested YAML
+
+Later enterprise versions may also produce:
+
 - GitHub or GitLab pull requests
 - Jira tickets
 - ServiceNow items
@@ -543,11 +566,11 @@ Goal:
 | Control ID | Control |
 | --- | --- |
 | OMG-OWN-001 | Mesh resources must map to an application owner. |
-| OMG-OWN-002 | Production mesh resources must include app ID, environment, owner, and repo metadata. |
+| OMG-OWN-002 | Production mesh resources must include app ID, environment, and owner metadata. |
 | OMG-EXC-001 | Exceptions must include approver, justification, ticket, and expiration. |
 | OMG-EXC-002 | Expired exceptions must be escalated. |
 
-### Category E: Lifecycle and Drift
+### Category E: Lifecycle and Advanced Risk
 
 | Control ID | Control |
 | --- | --- |
@@ -617,7 +640,7 @@ The value is the maintained governance foundation:
 - Normalized multi-cluster inventory
 - Ownership mapping
 - Exception lifecycle
-- Deployed-state drift detection
+- Deployed-state posture checks
 - Audit evidence
 - Historical posture
 - Enterprise workflow integrations
@@ -679,10 +702,10 @@ AI makes it easier to build a first scanner. It does not remove the need for a t
 
 ### Phase 5: Distribution Validation
 
-- OpenShift Service Mesh compatibility validation
-- OpenShift Service Mesh ambient validation
-- Tetrate compatibility validation
-- Solo / Gloo Mesh / Solo Enterprise for Istio compatibility validation
+- Managed Kubernetes validation harness for upstream Istio on AKS, GKE, and EKS
+- OpenShift Service Mesh compatibility validation in a dedicated OpenShift/OCP lab
+- OpenShift Service Mesh ambient validation in a dedicated OpenShift/OCP lab
+- Solo / Gloo Mesh / Solo Enterprise for Istio compatibility validation when licensing and lab access are available
 - Vendor API gap analysis
 - Provider-specific caveat reporting where normalized Istio resources are insufficient
 
@@ -705,8 +728,27 @@ First hero:
 
 Subtext:
 
-> Istio gives enterprises powerful mTLS, identity, and policy controls, but misconfiguration can leave services permissive, overexposed, or unauditable. OpenMeshGuard continuously validates Istio security posture, ownership, exceptions, drift, and compliance evidence across every cluster.
+> Istio gives enterprises powerful mTLS, identity, and policy controls, but misconfiguration can leave services permissive, overexposed, or unauditable. OpenMeshGuard validates deployed Istio security posture, ownership, exceptions, lifecycle, and evidence across sidecar and ambient mesh environments.
 
-## 19. Open Questions
+## 19. OSS v1 Ready Definition
 
-- Which subset of distribution validation can realistically run in disposable or lab environments without vendor licensing friction?
+OpenMeshGuard Community v1 is ready when:
+
+- The Go CLI can scan a namespace or cluster using only the documented least-privilege `get/list` RBAC profile.
+- The scanner discovers Kubernetes, Istio, and Gateway API resources through typed clients for supported upstream resources, with discovery/dynamic fallback only where needed.
+- The scanner produces canonical OpenMeshGuard JSON with inventory, findings, evidence, scores, permission summary, and unknown/missing-evidence states.
+- The static HTML report renders from the same canonical JSON without needing a server.
+- SARIF export maps OpenMeshGuard findings into SARIF 2.1.0 for CI consumers without becoming the internal data model.
+- The first control library covers mTLS, authorization, gateway exposure, egress exposure, ownership metadata, exception hygiene, lifecycle, EnvoyFilter risk, and ambient-specific ztunnel/waypoint posture.
+- OSS v1 does not require GitOps, source traceability, repository access, vendor APIs, Kubernetes secrets, watch permissions, or write verbs.
+- Kind acceptance fixtures install and scan real upstream Istio sidecar, ambient, mixed sidecar/ambient, and two-cluster multi-primary multi-network topologies.
+- Validation proves no write operations are attempted and API usage stays bounded for the one-shot CLI scan model.
+- Documentation clearly explains permissions, unsupported inputs, unknown findings, and the boundary between OSS v1 and later enterprise workflow features.
+
+## 20. Remaining Validation Gaps
+
+- Define whether the managed Kubernetes harness should use ephemeral AKS/GKE/EKS clusters, pre-provisioned shared lab clusters, or both.
+- Decide which managed Kubernetes provider should be validated first after Kind.
+- Define the OpenShift/OCP lab shape for OpenShift Service Mesh validation.
+- Decide whether the OpenShift lab should use self-managed OCP, ROSA, ARO, OpenShift Dedicated, or another supported OpenShift environment.
+- Decide when Solo/Gloo Mesh validation becomes worth the licensing and lab setup cost.
