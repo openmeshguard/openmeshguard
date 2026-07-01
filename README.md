@@ -4,7 +4,7 @@ Move from assumed mesh security to verified Istio posture.
 
 OpenMeshGuard is an open-core service mesh governance platform, starting with Istio. It helps platform, security, and risk teams continuously verify mTLS, authorization, exposure, ownership, exceptions, drift, lifecycle, and compliance evidence across clusters.
 
-The first product surface is a read-only posture scanner and report generator. It is not another Kiali, not a mesh distribution, and not a generic observability dashboard. OpenMeshGuard sits above the mesh as a governance and evidence layer.
+The first product surface is a least-privilege, read-only posture scanner and report generator. It is not another Kiali, not a mesh distribution, and not a generic observability dashboard. OpenMeshGuard sits above the mesh as a governance and evidence layer.
 
 ## Why This Exists
 
@@ -16,10 +16,11 @@ Large organizations need to answer questions like:
 - Which mesh-enabled apps have no AuthorizationPolicy?
 - Which Gateways or VirtualServices create exposure risk?
 - Which Istio resources are missing owner, app, environment, or repo metadata?
-- Which policies changed in-cluster without a GitOps source of truth?
+- Which risky policies, routes, and exceptions are deployed right now?
 - Which teams have active, expired, or missing exceptions?
 - Which workloads block an Istio or ambient mesh migration?
 - Can platform and security teams export audit-ready evidence without spreadsheets?
+- What are the minimum cluster permissions required to prove posture, and what evidence is unavailable without them?
 
 ## Product Thesis
 
@@ -65,7 +66,7 @@ OpenMeshGuard is not trying to replace:
 - Grafana, Prometheus, Datadog, or OpenTelemetry
 - CNAPP or KSPM tools
 
-The first principle is read-only intelligence. Remediation should flow through GitOps, pull requests, tickets, policy engines, or existing enterprise change workflows.
+The first principle is least-privilege, read-only intelligence. OpenMeshGuard Community should publish exact RBAC requirements, explain why every permission is needed, and degrade findings to missing evidence rather than silently requiring broader access. Remediation should flow through GitOps, pull requests, tickets, policy engines, or existing enterprise change workflows.
 
 ## Initial Control Areas
 
@@ -76,7 +77,7 @@ OpenMeshGuard starts with a small, high-signal control library:
 - Gateway and egress exposure
 - Ownership and metadata completeness
 - Exception lifecycle
-- GitOps traceability and drift
+- Deployed-state posture and lifecycle drift
 - Proxy and control-plane lifecycle
 - EnvoyFilter and advanced customization review
 - Ambient migration readiness
@@ -87,12 +88,14 @@ Community edition focuses on practitioner trust and local value:
 
 - CLI scanner
 - Istio and Kubernetes discovery
+- Go scanner core and CLI
 - Built-in OpenMeshGuard baseline controls
 - Basic posture score
 - Local HTML report
 - JSON and SARIF export
 - Custom rule files
 - CI mode
+- Published least-privilege RBAC profiles
 
 Enterprise edition should monetize scale and workflow:
 
