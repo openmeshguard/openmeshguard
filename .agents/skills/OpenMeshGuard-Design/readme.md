@@ -154,7 +154,7 @@ exclusively to communicate *status*, never for decoration.
 **Root**
 - `styles.css` — global entry point (consumers link this). `@import`s only.
 - `readme.md` — this file.
-- `SKILL.md` — Agent Skill wrapper for use in Claude Code.
+- `SKILL.md` — Agent-compatible skill wrapper for this design bundle.
 
 **`tokens/`** — foundations (all `@import`ed by `styles.css`)
 - `fonts.css` · `colors.css` · `typography.css` · `spacing.css` · `effects.css` · `base.css`

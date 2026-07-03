@@ -46,6 +46,7 @@ deploy/rbac/              Published RBAC profiles (Role, ClusterRole, add-ons)
 test/fixtures/            Kind fixture manifests + expected findings (golden files)
 test/e2e/                 Kind acceptance harness
 plan/                     Milestone task files
+.agents/skills/           Agent-neutral reusable skill/context bundles for OSS contributors
 ```
 
 ## Toolchain and conventions
