@@ -9,7 +9,7 @@ import (
 
 const (
 	versionPlaceholder         = "dev"
-	resolverVersionPlaceholder = "resolver-v0-placeholder"
+	resolverVersionPlaceholder = "resolver-m1-provisional"
 )
 
 var errNotImplemented = errors.New("not implemented")
@@ -35,7 +35,8 @@ func newRootCommand(info versionInfo) *cobra.Command {
 	}
 
 	cmd.AddCommand(newVersionCommand(info))
-	for _, name := range []string{"scan", "report", "export", "score"} {
+	cmd.AddCommand(newScanCommand(info))
+	for _, name := range []string{"report", "export", "score"} {
 		cmd.AddCommand(newStubCommand(name))
 	}
 

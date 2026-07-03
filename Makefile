@@ -16,8 +16,11 @@ lint: fmt-check
 	$(GOLANGCI_LINT) run
 
 schema-test:
-	@$(GO) test ./internal/output -list '^TestReportSchemaFixtures$$' | grep -q '^TestReportSchemaFixtures$$'
-	$(GO) test ./internal/output -run '^TestReportSchemaFixtures$$' -count=1
+	@tests="$$( $(GO) test ./internal/output -list '^(TestReportSchemaFixtures|TestGeneratedScanOutputMatchesSchema|TestExternalScanOutputMatchesSchema)$$' )"; \
+	echo "$$tests" | grep -q '^TestReportSchemaFixtures$$'; \
+	echo "$$tests" | grep -q '^TestGeneratedScanOutputMatchesSchema$$'; \
+	echo "$$tests" | grep -q '^TestExternalScanOutputMatchesSchema$$'
+	$(GO) test ./internal/output -run '^(TestReportSchemaFixtures|TestGeneratedScanOutputMatchesSchema|TestExternalScanOutputMatchesSchema)$$' -count=1
 
 fmt-check:
 	@files="$$(git ls-files '*.go')"; \

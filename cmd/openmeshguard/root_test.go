@@ -28,7 +28,7 @@ func TestVersionCommandPrintsScannerAndResolverVersions(t *testing.T) {
 }
 
 func TestStubCommandsReturnNotImplementedExitCode(t *testing.T) {
-	for _, name := range []string{"scan", "report", "export", "score"} {
+	for _, name := range []string{"report", "export", "score"} {
 		t.Run(name, func(t *testing.T) {
 			_, _, err := executeForTest(t, defaultVersionInfo(), name)
 			if !errors.Is(err, errNotImplemented) {
@@ -38,6 +38,16 @@ func TestStubCommandsReturnNotImplementedExitCode(t *testing.T) {
 				t.Fatalf("%s exit code = %d, want 2", name, got)
 			}
 		})
+	}
+}
+
+func TestScanRequiresExplicitScope(t *testing.T) {
+	_, _, err := executeForTest(t, defaultVersionInfo(), "scan")
+	if err == nil {
+		t.Fatal("scan without scope returned nil error")
+	}
+	if !strings.Contains(err.Error(), "scan scope required") {
+		t.Fatalf("scan error = %v, want scope validation", err)
 	}
 }
 
