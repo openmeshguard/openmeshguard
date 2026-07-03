@@ -1,0 +1,48 @@
+version: "2"
+run:
+  tests: true
+linters:
+  enable:
+    - depguard
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
+  settings:
+    depguard:
+      rules:
+        resolver-purity:
+          list-mode: lax
+          files:
+            - internal/resolver/*.go
+            - internal/resolver/**/*.go
+            - "**/internal/resolver/*.go"
+            - "**/internal/resolver/**/*.go"
+          deny:
+            - pkg: os
+              desc: internal/resolver must remain pure and perform no OS I/O
+            - pkg: net
+              desc: internal/resolver must remain pure and perform no network I/O
+            - pkg: syscall
+              desc: internal/resolver must remain pure and perform no system calls
+            - pkg: k8s.io/client-go
+              desc: internal/resolver must never depend on Kubernetes clients
+            - pkg: github.com/openmeshguard/openmeshguard/internal/
+              desc: internal/resolver must not import sibling internal packages that can hide I/O dependencies
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+formatters:
+  exclusions:
+    generated: lax
+    paths:
+      - third_party$
+      - builtin$
+      - examples$

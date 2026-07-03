@@ -1,0 +1,65 @@
+{
+  "schemaVersion": "v1alpha1",
+  "generatedAt": "2026-01-01T00:00:00Z",
+  "scanner": {
+    "version": "dev",
+    "resolverVersion": "resolver-v0-placeholder",
+    "controlPacks": [
+      {
+        "name": "builtin-empty",
+        "version": "0.0.0",
+        "source": "builtin"
+      }
+    ]
+  },
+  "scan": {
+    "clusterContext": "fixture",
+    "scope": {
+      "allNamespaces": true
+    },
+    "dataSources": {
+      "kubernetesAPI": true,
+      "prometheus": {
+        "enabled": false
+      }
+    }
+  },
+  "permissionSummary": [],
+  "inventory": {
+    "counts": {},
+    "dataPlane": {
+      "mode": "unknown"
+    },
+    "multiCluster": {
+      "participationDetected": false,
+      "evaluated": false
+    }
+  },
+  "workloadPostures": [
+    {
+      "workload": {
+        "cluster": "cluster-a",
+        "namespace": "payments",
+        "name": "api",
+        "kind": "Deployment"
+      },
+      "dataPlaneMode": "unknown",
+      "mtls": {
+        "effective": "unknown",
+        "clientTLSContradiction": false,
+        "chain": [],
+        "unknownReason": "mesh defaults unavailable"
+      },
+      "authorization": {
+        "effective": "unknown",
+        "chain": [],
+        "unknownReason": "authorization policies unavailable"
+      }
+    }
+  ],
+  "findings": [],
+  "scores": {
+    "overall": null,
+    "categories": []
+  }
+}

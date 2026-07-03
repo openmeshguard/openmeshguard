@@ -95,4 +95,4 @@ See `CONTRIBUTING.md` (coming with the repo opening) for details.
 
 ## License
 
-Apache License 2.0. See [LICENSE](LICENSE).
+Apache License 2.0. See [LICENSE](LICENSE) for the canonical text.
