@@ -2,103 +2,153 @@ package resolver
 
 import "testing"
 
-func TestProvisionalResolverMeshAndNamespacePeerAuthenticationPrecedence(t *testing.T) {
-	resolver := NewProvisional()
-
-	result := resolver.ResolveMTLS(WorkloadInput{
-		Ref: WorkloadRef{
-			Namespace: "payments",
-			Name:      "api",
-			Kind:      "Deployment",
-		},
-		MeshDefaults: MeshDefaults{
-			RootNamespace: "istio-system",
-			Known:         true,
-		},
-		PeerAuthN: []PeerAuthenticationView{
-			{Name: "default", Namespace: "istio-system", Mode: "STRICT"},
-			{Name: "default", Namespace: "payments", Mode: "PERMISSIVE"},
-		},
-	})
-
-	if result.Effective != MTLSPermissive {
-		t.Fatalf("effective = %q, want %q", result.Effective, MTLSPermissive)
-	}
-	if result.UnknownReason != "" {
-		t.Fatalf("unknown reason = %q, want empty", result.UnknownReason)
-	}
-	if len(result.Chain) != 3 {
-		t.Fatalf("chain length = %d, want 3: %#v", len(result.Chain), result.Chain)
-	}
-	if result.Chain[1].Namespace != "istio-system" || result.Chain[2].Namespace != "payments" {
-		t.Fatalf("chain did not record mesh then namespace precedence: %#v", result.Chain)
-	}
-}
-
-func TestProvisionalResolverDefaultsToPermissiveWithChain(t *testing.T) {
-	result := NewProvisional().ResolveMTLS(WorkloadInput{
-		Ref: WorkloadRef{Namespace: "default", Name: "api", Kind: "Deployment"},
-		MeshDefaults: MeshDefaults{
-			RootNamespace: "istio-system",
-			Known:         true,
-		},
-	})
-
-	if result.Effective != MTLSPermissive {
-		t.Fatalf("effective = %q, want %q", result.Effective, MTLSPermissive)
-	}
-	if len(result.Chain) != 1 || result.Chain[0].Kind != "MeshConfigDefault" {
-		t.Fatalf("default result chain = %#v, want MeshConfigDefault", result.Chain)
-	}
-}
-
-func TestProvisionalResolverM2InputsReturnUnknown(t *testing.T) {
+func TestProvisionalResolverResolveMTLS(t *testing.T) {
 	tests := []struct {
-		name string
-		in   WorkloadInput
+		name              string
+		in                WorkloadInput
+		wantEffective     MTLSEffective
+		wantUnknownReason string
+		wantChainKinds    []string
 	}{
 		{
-			name: "selector PeerAuthentication",
+			name: "namespace PeerAuthentication overrides mesh-wide PeerAuthentication",
+			in: WorkloadInput{
+				Ref: WorkloadRef{
+					Namespace: "payments",
+					Name:      "api",
+					Kind:      "Deployment",
+				},
+				MeshDefaults: MeshDefaults{
+					RootNamespace: "istio-system",
+					Known:         true,
+				},
+				PeerAuthN: []PeerAuthenticationView{
+					{Name: "default", Namespace: "istio-system", Mode: "STRICT"},
+					{Name: "default", Namespace: "payments", Mode: "PERMISSIVE"},
+				},
+			},
+			wantEffective:  MTLSPermissive,
+			wantChainKinds: []string{"MeshConfigDefault", "PeerAuthentication", "PeerAuthentication"},
+		},
+		{
+			name: "defaults to permissive with chain",
+			in: WorkloadInput{
+				Ref: WorkloadRef{Namespace: "default", Name: "api", Kind: "Deployment"},
+				MeshDefaults: MeshDefaults{
+					RootNamespace: "istio-system",
+					Known:         true,
+				},
+			},
+			wantEffective:  MTLSPermissive,
+			wantChainKinds: []string{"MeshConfigDefault"},
+		},
+		{
+			name: "selector PeerAuthentication is M2",
 			in: WorkloadInput{
 				MeshDefaults: MeshDefaults{Known: true},
 				PeerAuthN:    []PeerAuthenticationView{{Name: "api", Namespace: "payments", Mode: "STRICT", SelectorMatch: true}},
 			},
+			wantEffective:     MTLSUnknown,
+			wantUnknownReason: notImplementedM2Reason,
 		},
 		{
-			name: "port level PeerAuthentication",
+			name: "port level PeerAuthentication is M2",
 			in: WorkloadInput{
 				MeshDefaults: MeshDefaults{Known: true},
 				PeerAuthN:    []PeerAuthenticationView{{Name: "api", Namespace: "payments", Mode: "STRICT", PortLevelModes: map[int32]string{8080: "DISABLE"}}},
 			},
+			wantEffective:     MTLSUnknown,
+			wantUnknownReason: notImplementedM2Reason,
 		},
 		{
-			name: "DestinationRule interplay",
+			name: "DestinationRule interplay is M2",
 			in: WorkloadInput{
 				MeshDefaults: MeshDefaults{Known: true},
 				DestRules:    []DestinationRuleView{{Name: "api", Namespace: "payments", Host: "api.payments.svc.cluster.local"}},
 			},
+			wantEffective:     MTLSUnknown,
+			wantUnknownReason: notImplementedM2Reason,
+		},
+		{
+			name: "multiple mesh-wide PeerAuthentications are M2",
+			in: WorkloadInput{
+				Ref: WorkloadRef{Namespace: "payments", Name: "api", Kind: "Deployment"},
+				MeshDefaults: MeshDefaults{
+					RootNamespace: "istio-system",
+					Known:         true,
+				},
+				PeerAuthN: []PeerAuthenticationView{
+					{Name: "a", Namespace: "istio-system", Mode: "STRICT"},
+					{Name: "b", Namespace: "istio-system", Mode: "PERMISSIVE"},
+				},
+			},
+			wantEffective:     MTLSUnknown,
+			wantUnknownReason: notImplementedM2Reason,
+		},
+		{
+			name: "multiple namespace PeerAuthentications are M2",
+			in: WorkloadInput{
+				Ref:          WorkloadRef{Namespace: "payments", Name: "api", Kind: "Deployment"},
+				MeshDefaults: MeshDefaults{RootNamespace: "istio-system", Known: true},
+				PeerAuthN: []PeerAuthenticationView{
+					{Name: "a", Namespace: "payments", Mode: "STRICT"},
+					{Name: "b", Namespace: "payments", Mode: "PERMISSIVE"},
+				},
+			},
+			wantEffective:     MTLSUnknown,
+			wantUnknownReason: notImplementedM2Reason,
 		},
 	}
 
+	resolver := NewProvisional()
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := NewProvisional().ResolveMTLS(tt.in)
-			if result.Effective != MTLSUnknown {
-				t.Fatalf("effective = %q, want unknown", result.Effective)
+			result := resolver.ResolveMTLS(tt.in)
+			if result.Effective != tt.wantEffective {
+				t.Fatalf("effective = %q, want %q", result.Effective, tt.wantEffective)
 			}
-			if result.UnknownReason != notImplementedM2Reason {
-				t.Fatalf("unknown reason = %q, want %q", result.UnknownReason, notImplementedM2Reason)
+			if result.UnknownReason != tt.wantUnknownReason {
+				t.Fatalf("unknown reason = %q, want %q", result.UnknownReason, tt.wantUnknownReason)
+			}
+			if len(tt.wantChainKinds) > 0 {
+				if len(result.Chain) != len(tt.wantChainKinds) {
+					t.Fatalf("chain length = %d, want %d: %#v", len(result.Chain), len(tt.wantChainKinds), result.Chain)
+				}
+				for i, want := range tt.wantChainKinds {
+					if result.Chain[i].Kind != want {
+						t.Fatalf("chain[%d].Kind = %q, want %q: %#v", i, result.Chain[i].Kind, want, result.Chain)
+					}
+				}
 			}
 		})
 	}
 }
 
-func TestProvisionalResolverAuthzUnknown(t *testing.T) {
-	result := NewProvisional().ResolveAuthz(WorkloadInput{})
-	if result.Effective != AuthzUnknown {
-		t.Fatalf("effective = %q, want %q", result.Effective, AuthzUnknown)
+func TestProvisionalResolverResolveAuthz(t *testing.T) {
+	tests := []struct {
+		name              string
+		in                WorkloadInput
+		wantEffective     AuthzEffective
+		wantUnknownReason string
+	}{
+		{
+			name:              "authz is M2",
+			in:                WorkloadInput{},
+			wantEffective:     AuthzUnknown,
+			wantUnknownReason: notImplementedM2Reason,
+		},
 	}
-	if result.UnknownReason != notImplementedM2Reason {
-		t.Fatalf("unknown reason = %q, want %q", result.UnknownReason, notImplementedM2Reason)
+
+	resolver := NewProvisional()
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := resolver.ResolveAuthz(tt.in)
+			if result.Effective != tt.wantEffective {
+				t.Fatalf("effective = %q, want %q", result.Effective, tt.wantEffective)
+			}
+			if result.UnknownReason != tt.wantUnknownReason {
+				t.Fatalf("unknown reason = %q, want %q", result.UnknownReason, tt.wantUnknownReason)
+			}
+		})
 	}
 }

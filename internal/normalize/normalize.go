@@ -10,6 +10,7 @@ import (
 	istiosecurityv1beta1 "istio.io/client-go/pkg/apis/security/v1beta1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 )
 
 const defaultRootNamespace = "istio-system"
@@ -25,14 +26,12 @@ func Build(snapshot collect.Snapshot) Result {
 
 	peerAuthenticationsAvailable := snapshot.PeerAuthenticationsAvailable()
 	peerAuthentications := projectPeerAuthentications(snapshot.PeerAuthentications)
-	meshMTLSMode := meshWideMode(peerAuthentications)
 
 	builder := workloadBuilder{
 		namespaces:                   namespaceLabels,
 		pods:                         snapshot.Pods,
 		peerAuthentications:          peerAuthentications,
 		peerAuthenticationsAvailable: peerAuthenticationsAvailable,
-		meshMTLSMode:                 meshMTLSMode,
 	}
 
 	for _, deployment := range snapshot.Deployments {
@@ -117,7 +116,6 @@ type workloadBuilder struct {
 	pods                         []corev1.Pod
 	peerAuthentications          []peerAuthenticationProjection
 	peerAuthenticationsAvailable bool
-	meshMTLSMode                 string
 
 	workloads []resolver.WorkloadInput
 }
@@ -125,8 +123,8 @@ type workloadBuilder struct {
 func (b *workloadBuilder) addController(kind, namespace, name string, template corev1.PodTemplateSpec, selector *metav1.LabelSelector) {
 	labels := copyStringMap(template.Labels)
 	nsLabels := b.namespaces[namespace]
-	pods := podsMatching(b.pods, namespace, selectorMatchLabels(selector))
-	mode := detectDataPlaneMode(nsLabels, template.Labels, template.Annotations, template.Spec.Containers, pods)
+	pods := podsMatching(b.pods, namespace, selector)
+	mode := detectDataPlaneMode(nsLabels, template.Labels, template.Annotations, template.Spec, pods)
 
 	b.workloads = append(b.workloads, resolver.WorkloadInput{
 		Ref: resolver.WorkloadRef{
@@ -142,7 +140,6 @@ func (b *workloadBuilder) addController(kind, namespace, name string, template c
 			AmbientEnrolled: resolver.Unobserved,
 		},
 		MeshDefaults: resolver.MeshDefaults{
-			MeshMTLSMode:  b.meshMTLSMode,
 			RootNamespace: defaultRootNamespace,
 			Known:         b.peerAuthenticationsAvailable,
 		},
@@ -153,7 +150,7 @@ func (b *workloadBuilder) addController(kind, namespace, name string, template c
 func (b *workloadBuilder) addPod(pod corev1.Pod) {
 	labels := copyStringMap(pod.Labels)
 	nsLabels := b.namespaces[pod.Namespace]
-	mode := detectDataPlaneMode(nsLabels, pod.Labels, pod.Annotations, pod.Spec.Containers, []corev1.Pod{pod})
+	mode := detectDataPlaneMode(nsLabels, pod.Labels, pod.Annotations, pod.Spec, []corev1.Pod{pod})
 
 	b.workloads = append(b.workloads, resolver.WorkloadInput{
 		Ref: resolver.WorkloadRef{
@@ -169,7 +166,6 @@ func (b *workloadBuilder) addPod(pod corev1.Pod) {
 			AmbientEnrolled: resolver.Unobserved,
 		},
 		MeshDefaults: resolver.MeshDefaults{
-			MeshMTLSMode:  b.meshMTLSMode,
 			RootNamespace: defaultRootNamespace,
 			Known:         b.peerAuthenticationsAvailable,
 		},
@@ -236,29 +232,14 @@ func projectPeerAuthentications(peerAuthentications []*istiosecurityv1beta1.Peer
 	return out
 }
 
-func meshWideMode(peerAuthentications []peerAuthenticationProjection) string {
-	for _, peerAuthentication := range peerAuthentications {
-		if peerAuthentication.Namespace == defaultRootNamespace && !peerAuthentication.hasSelector {
-			return peerAuthentication.Mode
-		}
-	}
-	return ""
-}
-
-func selectorMatchLabels(selector *metav1.LabelSelector) map[string]string {
-	if selector == nil {
-		return nil
-	}
-	return selector.MatchLabels
-}
-
-func podsMatching(pods []corev1.Pod, namespace string, selector map[string]string) []corev1.Pod {
-	if len(selector) == 0 {
+func podsMatching(pods []corev1.Pod, namespace string, selector *metav1.LabelSelector) []corev1.Pod {
+	compiled, err := metav1.LabelSelectorAsSelector(selector)
+	if err != nil || compiled.Empty() {
 		return nil
 	}
 	var matches []corev1.Pod
 	for _, pod := range pods {
-		if pod.Namespace == namespace && matchLabels(selector, pod.Labels) {
+		if pod.Namespace == namespace && compiled.Matches(labels.Set(pod.Labels)) {
 			matches = append(matches, pod)
 		}
 	}
@@ -269,14 +250,14 @@ func detectDataPlaneMode(
 	namespaceLabels map[string]string,
 	workloadLabels map[string]string,
 	workloadAnnotations map[string]string,
-	templateContainers []corev1.Container,
+	templateSpec corev1.PodSpec,
 	pods []corev1.Pod,
 ) resolver.DataPlaneMode {
-	if hasIstioProxy(templateContainers) {
+	if hasIstioProxy(templateSpec) {
 		return resolver.ModeSidecar
 	}
 	for _, pod := range pods {
-		if hasIstioProxy(pod.Spec.Containers) {
+		if hasIstioProxy(pod.Spec) {
 			return resolver.ModeSidecar
 		}
 	}
@@ -293,8 +274,8 @@ func ambientDetectionStub(map[string]string, map[string]string) resolver.DataPla
 	return resolver.ModeUnknown
 }
 
-func hasIstioProxy(containers []corev1.Container) bool {
-	for _, container := range containers {
+func hasIstioProxy(spec corev1.PodSpec) bool {
+	for _, container := range append(spec.Containers, spec.InitContainers...) {
 		if container.Name == "istio-proxy" {
 			return true
 		}

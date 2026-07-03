@@ -4,15 +4,23 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"sync"
 
+	istiosecurityv1beta1 "istio.io/client-go/pkg/apis/security/v1beta1"
 	istioclient "istio.io/client-go/pkg/clientset/versioned"
+	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/client-go/kubernetes"
 )
 
-const defaultMaxConcurrentLists = 4
+const (
+	defaultMaxConcurrentLists = 4
+	defaultListLimit          = int64(500)
+)
 
 // Collector performs bounded, read-only list collection through typed clients.
 type Collector struct {
@@ -65,107 +73,199 @@ func (c *Collector) Collect(ctx context.Context, scope Scope) (Snapshot, error) 
 		return nil
 	}
 
-	namespaces, err := c.kube.CoreV1().Namespaces().List(ctx, metav1.ListOptions{})
+	namespaces, err := c.collectNamespaces(ctx, scope)
 	if err != nil {
 		if err := appendDegraded(namespaceMeta, err); err != nil {
 			return Snapshot{}, err
 		}
 	} else {
 		mu.Lock()
-		snapshot.Namespaces = append(snapshot.Namespaces, namespaces.Items...)
+		snapshot.Namespaces = append(snapshot.Namespaces, namespaces...)
 		mu.Unlock()
 		appendPermission(namespaceMeta.permission(true))
 	}
 
 	var tasks []func(context.Context) error
-	for _, namespace := range collectionNamespaces(scope) {
+	for _, namespace := range workloadNamespaces(scope) {
 		ns := namespace
 		tasks = append(tasks,
-			func(ctx context.Context) error {
-				pods, err := c.kube.CoreV1().Pods(ns).List(ctx, metav1.ListOptions{})
-				if err != nil {
-					return appendDegraded(podMeta, err)
+			c.listTask(podMeta, func(ctx context.Context) error {
+				items, err := listPages(ctx, func(ctx context.Context, opts metav1.ListOptions) ([]corev1.Pod, string, error) {
+					list, err := c.kube.CoreV1().Pods(ns).List(ctx, opts)
+					if err != nil {
+						return nil, "", err
+					}
+					return list.Items, list.Continue, nil
+				})
+				if err == nil {
+					mu.Lock()
+					snapshot.Pods = append(snapshot.Pods, items...)
+					mu.Unlock()
 				}
-				mu.Lock()
-				snapshot.Pods = append(snapshot.Pods, pods.Items...)
-				mu.Unlock()
-				appendPermission(podMeta.permission(true))
-				return nil
-			},
-			func(ctx context.Context) error {
-				services, err := c.kube.CoreV1().Services(ns).List(ctx, metav1.ListOptions{})
-				if err != nil {
-					return appendDegraded(serviceMeta, err)
+				return err
+			}, appendPermission, appendDegraded),
+			c.listTask(serviceMeta, func(ctx context.Context) error {
+				items, err := listPages(ctx, func(ctx context.Context, opts metav1.ListOptions) ([]corev1.Service, string, error) {
+					list, err := c.kube.CoreV1().Services(ns).List(ctx, opts)
+					if err != nil {
+						return nil, "", err
+					}
+					return list.Items, list.Continue, nil
+				})
+				if err == nil {
+					mu.Lock()
+					snapshot.Services = append(snapshot.Services, items...)
+					mu.Unlock()
 				}
-				mu.Lock()
-				snapshot.Services = append(snapshot.Services, services.Items...)
-				mu.Unlock()
-				appendPermission(serviceMeta.permission(true))
-				return nil
-			},
-			func(ctx context.Context) error {
-				deployments, err := c.kube.AppsV1().Deployments(ns).List(ctx, metav1.ListOptions{})
-				if err != nil {
-					return appendDegraded(deploymentMeta, err)
+				return err
+			}, appendPermission, appendDegraded),
+			c.listTask(deploymentMeta, func(ctx context.Context) error {
+				items, err := listPages(ctx, func(ctx context.Context, opts metav1.ListOptions) ([]appsv1.Deployment, string, error) {
+					list, err := c.kube.AppsV1().Deployments(ns).List(ctx, opts)
+					if err != nil {
+						return nil, "", err
+					}
+					return list.Items, list.Continue, nil
+				})
+				if err == nil {
+					mu.Lock()
+					snapshot.Deployments = append(snapshot.Deployments, items...)
+					mu.Unlock()
 				}
-				mu.Lock()
-				snapshot.Deployments = append(snapshot.Deployments, deployments.Items...)
-				mu.Unlock()
-				appendPermission(deploymentMeta.permission(true))
-				return nil
-			},
-			func(ctx context.Context) error {
-				replicaSets, err := c.kube.AppsV1().ReplicaSets(ns).List(ctx, metav1.ListOptions{})
-				if err != nil {
-					return appendDegraded(replicaSetMeta, err)
+				return err
+			}, appendPermission, appendDegraded),
+			c.listTask(replicaSetMeta, func(ctx context.Context) error {
+				items, err := listPages(ctx, func(ctx context.Context, opts metav1.ListOptions) ([]appsv1.ReplicaSet, string, error) {
+					list, err := c.kube.AppsV1().ReplicaSets(ns).List(ctx, opts)
+					if err != nil {
+						return nil, "", err
+					}
+					return list.Items, list.Continue, nil
+				})
+				if err == nil {
+					mu.Lock()
+					snapshot.ReplicaSets = append(snapshot.ReplicaSets, items...)
+					mu.Unlock()
 				}
-				mu.Lock()
-				snapshot.ReplicaSets = append(snapshot.ReplicaSets, replicaSets.Items...)
-				mu.Unlock()
-				appendPermission(replicaSetMeta.permission(true))
-				return nil
-			},
-			func(ctx context.Context) error {
-				statefulSets, err := c.kube.AppsV1().StatefulSets(ns).List(ctx, metav1.ListOptions{})
-				if err != nil {
-					return appendDegraded(statefulSetMeta, err)
+				return err
+			}, appendPermission, appendDegraded),
+			c.listTask(statefulSetMeta, func(ctx context.Context) error {
+				items, err := listPages(ctx, func(ctx context.Context, opts metav1.ListOptions) ([]appsv1.StatefulSet, string, error) {
+					list, err := c.kube.AppsV1().StatefulSets(ns).List(ctx, opts)
+					if err != nil {
+						return nil, "", err
+					}
+					return list.Items, list.Continue, nil
+				})
+				if err == nil {
+					mu.Lock()
+					snapshot.StatefulSets = append(snapshot.StatefulSets, items...)
+					mu.Unlock()
 				}
-				mu.Lock()
-				snapshot.StatefulSets = append(snapshot.StatefulSets, statefulSets.Items...)
-				mu.Unlock()
-				appendPermission(statefulSetMeta.permission(true))
-				return nil
-			},
-			func(ctx context.Context) error {
-				daemonSets, err := c.kube.AppsV1().DaemonSets(ns).List(ctx, metav1.ListOptions{})
-				if err != nil {
-					return appendDegraded(daemonSetMeta, err)
+				return err
+			}, appendPermission, appendDegraded),
+			c.listTask(daemonSetMeta, func(ctx context.Context) error {
+				items, err := listPages(ctx, func(ctx context.Context, opts metav1.ListOptions) ([]appsv1.DaemonSet, string, error) {
+					list, err := c.kube.AppsV1().DaemonSets(ns).List(ctx, opts)
+					if err != nil {
+						return nil, "", err
+					}
+					return list.Items, list.Continue, nil
+				})
+				if err == nil {
+					mu.Lock()
+					snapshot.DaemonSets = append(snapshot.DaemonSets, items...)
+					mu.Unlock()
 				}
-				mu.Lock()
-				snapshot.DaemonSets = append(snapshot.DaemonSets, daemonSets.Items...)
-				mu.Unlock()
-				appendPermission(daemonSetMeta.permission(true))
-				return nil
-			},
-			func(ctx context.Context) error {
-				peerAuthentications, err := c.istio.SecurityV1beta1().PeerAuthentications(ns).List(ctx, metav1.ListOptions{})
-				if err != nil {
-					return appendDegraded(peerAuthenticationMeta, err)
-				}
-				mu.Lock()
-				snapshot.PeerAuthentications = append(snapshot.PeerAuthentications, peerAuthentications.Items...)
-				mu.Unlock()
-				appendPermission(peerAuthenticationMeta.permission(true))
-				return nil
-			},
+				return err
+			}, appendPermission, appendDegraded),
 		)
+	}
+	for _, namespace := range peerAuthenticationNamespaces(scope) {
+		ns := namespace
+		tasks = append(tasks, c.listTask(peerAuthenticationMeta, func(ctx context.Context) error {
+			items, err := listPages(ctx, func(ctx context.Context, opts metav1.ListOptions) ([]*istiosecurityv1beta1.PeerAuthentication, string, error) {
+				list, err := c.istio.SecurityV1beta1().PeerAuthentications(ns).List(ctx, opts)
+				if err != nil {
+					return nil, "", err
+				}
+				return list.Items, list.Continue, nil
+			})
+			if err == nil {
+				mu.Lock()
+				snapshot.PeerAuthentications = append(snapshot.PeerAuthentications, items...)
+				mu.Unlock()
+			}
+			return err
+		}, appendPermission, appendDegraded))
 	}
 
 	if err := c.runBounded(ctx, tasks); err != nil {
 		return Snapshot{}, err
 	}
+	snapshot.PermissionSummary = mergePermissions(snapshot.PermissionSummary)
 
 	return snapshot, nil
+}
+
+func (c *Collector) collectNamespaces(ctx context.Context, scope Scope) ([]corev1.Namespace, error) {
+	if scope.AllNamespaces {
+		return listPages(ctx, func(ctx context.Context, opts metav1.ListOptions) ([]corev1.Namespace, string, error) {
+			list, err := c.kube.CoreV1().Namespaces().List(ctx, opts)
+			if err != nil {
+				return nil, "", err
+			}
+			return list.Items, list.Continue, nil
+		})
+	}
+
+	var out []corev1.Namespace
+	for _, name := range scope.Namespaces {
+		items, err := listPages(ctx, func(ctx context.Context, opts metav1.ListOptions) ([]corev1.Namespace, string, error) {
+			opts.FieldSelector = fields.OneTermEqualSelector("metadata.name", name).String()
+			list, err := c.kube.CoreV1().Namespaces().List(ctx, opts)
+			if err != nil {
+				return nil, "", err
+			}
+			return list.Items, list.Continue, nil
+		})
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, items...)
+	}
+	return out, nil
+}
+
+func (c *Collector) listTask(
+	meta resourceMeta,
+	list func(context.Context) error,
+	appendPermission func(Permission),
+	appendDegraded func(resourceMeta, error) error,
+) func(context.Context) error {
+	return func(ctx context.Context) error {
+		if err := list(ctx); err != nil {
+			return appendDegraded(meta, err)
+		}
+		appendPermission(meta.permission(true))
+		return nil
+	}
+}
+
+func listPages[T any](ctx context.Context, list func(context.Context, metav1.ListOptions) ([]T, string, error)) ([]T, error) {
+	var out []T
+	opts := metav1.ListOptions{Limit: defaultListLimit}
+	for {
+		items, next, err := list(ctx, opts)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, items...)
+		if next == "" {
+			return out, nil
+		}
+		opts.Continue = next
+	}
 }
 
 func (c *Collector) runBounded(ctx context.Context, tasks []func(context.Context) error) error {
@@ -208,7 +308,7 @@ func (c *Collector) runBounded(ctx context.Context, tasks []func(context.Context
 
 func normalizeScope(scope Scope) Scope {
 	if scope.AllNamespaces || len(scope.Namespaces) == 0 {
-		return Scope{AllNamespaces: true}
+		return Scope{AllNamespaces: true, RootNamespace: rootNamespace(scope)}
 	}
 	seen := map[string]struct{}{}
 	namespaces := make([]string, 0, len(scope.Namespaces))
@@ -223,20 +323,92 @@ func normalizeScope(scope Scope) Scope {
 		namespaces = append(namespaces, namespace)
 	}
 	if len(namespaces) == 0 {
-		return Scope{AllNamespaces: true}
+		return Scope{AllNamespaces: true, RootNamespace: rootNamespace(scope)}
 	}
-	return Scope{Namespaces: namespaces}
+	return Scope{Namespaces: namespaces, RootNamespace: rootNamespace(scope)}
 }
 
-func collectionNamespaces(scope Scope) []string {
+func workloadNamespaces(scope Scope) []string {
 	if scope.AllNamespaces {
 		return []string{metav1.NamespaceAll}
 	}
 	return scope.Namespaces
 }
 
+func peerAuthenticationNamespaces(scope Scope) []string {
+	if scope.AllNamespaces {
+		return []string{metav1.NamespaceAll}
+	}
+	return appendIfMissing(scope.Namespaces, rootNamespace(scope))
+}
+
+func rootNamespace(scope Scope) string {
+	if scope.RootNamespace != "" {
+		return scope.RootNamespace
+	}
+	return DefaultRootNamespace
+}
+
+func appendIfMissing(values []string, value string) []string {
+	out := append([]string(nil), values...)
+	for _, existing := range out {
+		if existing == value {
+			return out
+		}
+	}
+	return append(out, value)
+}
+
 func isDegradedListError(err error) bool {
 	return apierrors.IsForbidden(err) || apierrors.IsNotFound(err)
+}
+
+func mergePermissions(permissions []Permission) []Permission {
+	merged := map[string]Permission{}
+	for _, permission := range permissions {
+		key := permission.APIGroup + "/" + permission.Resource
+		existing, ok := merged[key]
+		if !ok {
+			merged[key] = permission
+			continue
+		}
+		existing.Granted = existing.Granted && permission.Granted
+		existing.Verbs = mergeStrings(existing.Verbs, permission.Verbs)
+		existing.AffectedControls = mergeStrings(existing.AffectedControls, permission.AffectedControls)
+		if existing.Impact == "" {
+			existing.Impact = permission.Impact
+		}
+		existing.Optional = existing.Optional && permission.Optional
+		merged[key] = existing
+	}
+
+	out := make([]Permission, 0, len(merged))
+	for _, permission := range merged {
+		out = append(out, permission)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].APIGroup != out[j].APIGroup {
+			return out[i].APIGroup < out[j].APIGroup
+		}
+		return out[i].Resource < out[j].Resource
+	})
+	return out
+}
+
+func mergeStrings(left, right []string) []string {
+	seen := map[string]struct{}{}
+	var out []string
+	for _, values := range [][]string{left, right} {
+		for _, value := range values {
+			if _, ok := seen[value]; ok {
+				continue
+			}
+			seen[value] = struct{}{}
+			out = append(out, value)
+		}
+	}
+	sort.Strings(out)
+	return out
 }
 
 type resourceMeta struct {

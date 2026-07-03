@@ -3,9 +3,15 @@ package resolver
 import "sort"
 
 const (
-	provisionalVersion     = "resolver-m1-provisional"
 	notImplementedM2Reason = "not yet implemented (M2)"
 )
+
+const provisionalVersion = "resolver-m1-provisional"
+
+// ProvisionalVersion returns the version string used in scan output.
+func ProvisionalVersion() string {
+	return provisionalVersion
+}
 
 // ProvisionalResolver implements the narrow M1 mTLS path. It is replaced by
 // full Istio mTLS semantics in M2.
@@ -17,7 +23,7 @@ func NewProvisional() ProvisionalResolver {
 }
 
 func (ProvisionalResolver) Version() string {
-	return provisionalVersion
+	return ProvisionalVersion()
 }
 
 func (ProvisionalResolver) ResolveMTLS(in WorkloadInput) MTLSResult {
@@ -29,7 +35,9 @@ func (ProvisionalResolver) ResolveMTLS(in WorkloadInput) MTLSResult {
 			UnknownReason:          "PeerAuthentication resources unavailable",
 		}
 	}
-	if len(in.DestRules) > 0 || hasM2PeerAuthenticationInputs(in.PeerAuthN) {
+	if len(in.DestRules) > 0 ||
+		hasM2PeerAuthenticationInputs(in.PeerAuthN) ||
+		hasSameScopePeerAuthenticationConflict(in) {
 		return MTLSResult{
 			Effective:              MTLSUnknown,
 			ClientTLSContradiction: false,
@@ -123,6 +131,27 @@ func (ProvisionalResolver) ResolveAuthz(WorkloadInput) AuthzResult {
 func hasM2PeerAuthenticationInputs(peerAuthentications []PeerAuthenticationView) bool {
 	for _, peerAuthentication := range peerAuthentications {
 		if peerAuthentication.SelectorMatch || len(peerAuthentication.PortLevelModes) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func hasSameScopePeerAuthenticationConflict(in WorkloadInput) bool {
+	rootNamespace := in.MeshDefaults.RootNamespace
+	if rootNamespace == "" {
+		rootNamespace = "istio-system"
+	}
+	counts := map[string]int{}
+	for _, peerAuthentication := range in.PeerAuthN {
+		if peerAuthentication.SelectorMatch {
+			continue
+		}
+		if peerAuthentication.Namespace != rootNamespace && peerAuthentication.Namespace != in.Ref.Namespace {
+			continue
+		}
+		counts[peerAuthentication.Namespace]++
+		if counts[peerAuthentication.Namespace] > 1 {
 			return true
 		}
 	}

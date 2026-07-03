@@ -141,14 +141,22 @@ func provisionalFindings(workloads []resolver.WorkloadResult) []finding {
 		if workload.MTLS.Effective != resolver.MTLSPermissive {
 			continue
 		}
+		status := "open"
+		confidence := "resolved"
+		unknownReason := ""
+		if workload.Mode == resolver.ModeUnknown || workload.Mode == resolver.ModeNotApplicable {
+			status = "unknown"
+			confidence = "unavailable"
+			unknownReason = "data plane membership unavailable"
+		}
 		findings = append(findings, finding{
 			ID:            findingID("MG-MTLS-001", workload.Ref),
 			ControlID:     "MG-MTLS-001",
 			Title:         "Effective mTLS is permissive",
 			Severity:      "medium",
 			EvidenceType:  "config",
-			Status:        "open",
-			Confidence:    "resolved",
+			Status:        status,
+			Confidence:    confidence,
 			DataPlaneMode: string(workload.Mode),
 			EvidenceSources: []string{
 				"kubernetes-api",
@@ -165,6 +173,7 @@ func provisionalFindings(workloads []resolver.WorkloadResult) []finding {
 				workload.Ref.Namespace,
 				workload.Ref.Name,
 			),
+			UnknownReason: unknownReason,
 		})
 	}
 	return findings
@@ -259,6 +268,7 @@ type finding struct {
 	Resources       []resourceRef   `json:"resources"`
 	ResolutionChain []resolver.Step `json:"resolutionChain,omitempty"`
 	Reasoning       string          `json:"reasoning"`
+	UnknownReason   string          `json:"unknownReason,omitempty"`
 }
 
 type resourceRef struct {

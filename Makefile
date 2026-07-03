@@ -16,7 +16,8 @@ lint: fmt-check
 	$(GOLANGCI_LINT) run
 
 schema-test:
-	@tests="$$( $(GO) test ./internal/output -list '^(TestReportSchemaFixtures|TestGeneratedScanOutputMatchesSchema|TestExternalScanOutputMatchesSchema)$$' )"; \
+	@set -e; \
+	tests="$$( $(GO) test ./internal/output -list '^(TestReportSchemaFixtures|TestGeneratedScanOutputMatchesSchema|TestExternalScanOutputMatchesSchema)$$' )"; \
 	echo "$$tests" | grep -q '^TestReportSchemaFixtures$$'; \
 	echo "$$tests" | grep -q '^TestGeneratedScanOutputMatchesSchema$$'; \
 	echo "$$tests" | grep -q '^TestExternalScanOutputMatchesSchema$$'

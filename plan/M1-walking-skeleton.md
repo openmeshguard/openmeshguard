@@ -71,7 +71,29 @@ spec:
     - name: http
       port: 80
       targetPort: 5678
----
+YAML
+
+kubectl -n istio-system apply -f - <<'YAML'
+apiVersion: security.istio.io/v1
+kind: PeerAuthentication
+metadata:
+  name: default
+  namespace: istio-system
+spec:
+  mtls:
+    mode: STRICT
+YAML
+
+kubectl -n omg-m1 rollout status deploy/api --timeout=180s
+go run ./cmd/openmeshguard scan --context kind-openmeshguard-m1 --namespace omg-m1 > /tmp/openmeshguard-m1-mesh-strict.json
+OPENMESHGUARD_SCHEMA_REPORT=/tmp/openmeshguard-m1-mesh-strict.json make schema-test
+
+jq -e '
+  any(.workloadPostures[]; .workload.namespace == "omg-m1" and .workload.name == "api" and .mtls.effective == "strict") and
+  ([.findings[] | select(any(.resources[]; .namespace == "omg-m1" and .name == "api"))] | length == 0)
+' /tmp/openmeshguard-m1-mesh-strict.json
+
+kubectl -n omg-m1 apply -f - <<'YAML'
 apiVersion: security.istio.io/v1
 kind: PeerAuthentication
 metadata:
@@ -82,30 +104,23 @@ spec:
     mode: PERMISSIVE
 YAML
 
-kubectl -n omg-m1 rollout status deploy/api --timeout=180s
 go run ./cmd/openmeshguard scan --context kind-openmeshguard-m1 --namespace omg-m1 > /tmp/openmeshguard-m1.json
 OPENMESHGUARD_SCHEMA_REPORT=/tmp/openmeshguard-m1.json make schema-test
 
-jq '.schemaVersion,
-    .scan.scope,
-    .inventory.counts.deployments,
-    .workloadPostures[] | select(.workload.namespace == "omg-m1" and .workload.name == "api") | .mtls.effective,
-    .findings[] | select(.resources[]?.namespace == "omg-m1" and .resources[]?.name == "api") | .controlId' /tmp/openmeshguard-m1.json
+jq -e '
+  .schemaVersion == "v1alpha1" and
+  .scan.scope.allNamespaces == false and
+  .scan.scope.namespaces == ["omg-m1"] and
+  .inventory.counts.deployments == 1 and
+  any(.workloadPostures[]; .workload.namespace == "omg-m1" and .workload.name == "api" and .mtls.effective == "permissive") and
+  any(.findings[]; .controlId == "MG-MTLS-001" and any(.resources[]; .namespace == "omg-m1" and .name == "api"))
+' /tmp/openmeshguard-m1.json
 ```
 
-Expected output includes:
+Expected: both `jq -e` commands exit `0`. The first scan proves a scoped namespace scan still sees the mesh-wide STRICT PeerAuthentication in `istio-system`; the second scan proves a namespace PERMISSIVE PeerAuthentication overrides it and emits the provisional M1 finding.
 
 ```text
-"v1alpha1"
-{
-  "allNamespaces": false,
-  "namespaces": [
-    "omg-m1"
-  ]
-}
-1
-"permissive"
-"MG-MTLS-001"
+true
 ```
 
 Cleanup:

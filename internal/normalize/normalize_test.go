@@ -76,11 +76,90 @@ func TestBuildNormalizesWorkloadsPeerAuthenticationsAndSidecarMode(t *testing.T)
 	if !workload.MeshDefaults.Known {
 		t.Fatal("MeshDefaults.Known = false, want true")
 	}
-	if workload.MeshDefaults.MeshMTLSMode != "STRICT" {
-		t.Fatalf("mesh mTLS mode = %q, want STRICT", workload.MeshDefaults.MeshMTLSMode)
-	}
 	if len(workload.PeerAuthN) != 2 {
 		t.Fatalf("peer authentications = %#v, want mesh and namespace", workload.PeerAuthN)
+	}
+}
+
+func TestBuildMatchesControllerPodsWithMatchExpressions(t *testing.T) {
+	result := Build(collect.Snapshot{
+		Namespaces: []corev1.Namespace{{
+			ObjectMeta: metav1.ObjectMeta{Name: "payments"},
+		}},
+		Deployments: []appsv1.Deployment{{
+			ObjectMeta: metav1.ObjectMeta{Name: "api", Namespace: "payments"},
+			Spec: appsv1.DeploymentSpec{
+				Selector: &metav1.LabelSelector{
+					MatchExpressions: []metav1.LabelSelectorRequirement{{
+						Key:      "app",
+						Operator: metav1.LabelSelectorOpIn,
+						Values:   []string{"api"},
+					}},
+				},
+				Template: corev1.PodTemplateSpec{
+					ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "api"}},
+				},
+			},
+		}},
+		Pods: []corev1.Pod{{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "api-1",
+				Namespace: "payments",
+				Labels:    map[string]string{"app": "api"},
+				OwnerReferences: []metav1.OwnerReference{{
+					Kind: "ReplicaSet",
+					Name: "api-abc123",
+				}},
+			},
+			Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "api"}, {Name: "istio-proxy"}}},
+		}},
+		PermissionSummary: []collect.Permission{{
+			APIGroup: "security.istio.io",
+			Resource: "peerauthentications",
+			Verbs:    []string{"list"},
+			Granted:  true,
+		}},
+	})
+
+	if len(result.Workloads) != 1 {
+		t.Fatalf("workloads = %d, want 1", len(result.Workloads))
+	}
+	if result.Workloads[0].DataPlaneMode != resolver.ModeSidecar {
+		t.Fatalf("mode = %q, want sidecar from matched pod", result.Workloads[0].DataPlaneMode)
+	}
+}
+
+func TestBuildDetectsIstioProxyNativeSidecarInitContainer(t *testing.T) {
+	result := Build(collect.Snapshot{
+		Namespaces: []corev1.Namespace{{
+			ObjectMeta: metav1.ObjectMeta{Name: "payments"},
+		}},
+		Deployments: []appsv1.Deployment{{
+			ObjectMeta: metav1.ObjectMeta{Name: "api", Namespace: "payments"},
+			Spec: appsv1.DeploymentSpec{
+				Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "api"}},
+				Template: corev1.PodTemplateSpec{
+					ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "api"}},
+					Spec: corev1.PodSpec{
+						Containers:     []corev1.Container{{Name: "api"}},
+						InitContainers: []corev1.Container{{Name: "istio-proxy"}},
+					},
+				},
+			},
+		}},
+		PermissionSummary: []collect.Permission{{
+			APIGroup: "security.istio.io",
+			Resource: "peerauthentications",
+			Verbs:    []string{"list"},
+			Granted:  true,
+		}},
+	})
+
+	if len(result.Workloads) != 1 {
+		t.Fatalf("workloads = %d, want 1", len(result.Workloads))
+	}
+	if result.Workloads[0].DataPlaneMode != resolver.ModeSidecar {
+		t.Fatalf("mode = %q, want sidecar from init container", result.Workloads[0].DataPlaneMode)
 	}
 }
 

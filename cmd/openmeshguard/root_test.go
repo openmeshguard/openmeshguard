@@ -8,9 +8,10 @@ import (
 )
 
 func TestVersionCommandPrintsScannerAndResolverVersions(t *testing.T) {
+	info := defaultVersionInfo()
 	stdout, stderr, err := executeForTest(t, versionInfo{
 		Version:         "test-version",
-		ResolverVersion: resolverVersionPlaceholder,
+		ResolverVersion: info.ResolverVersion,
 	}, "version")
 
 	if err != nil {
@@ -22,7 +23,7 @@ func TestVersionCommandPrintsScannerAndResolverVersions(t *testing.T) {
 	if !strings.Contains(stdout, "version=test-version") {
 		t.Fatalf("version output missing scanner version: %q", stdout)
 	}
-	if !strings.Contains(stdout, "resolverVersion="+resolverVersionPlaceholder) {
+	if !strings.Contains(stdout, "resolverVersion="+info.ResolverVersion) {
 		t.Fatalf("version output missing resolver version: %q", stdout)
 	}
 }
@@ -48,6 +49,16 @@ func TestScanRequiresExplicitScope(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "scan scope required") {
 		t.Fatalf("scan error = %v, want scope validation", err)
+	}
+}
+
+func TestScanRejectsEmptyNamespace(t *testing.T) {
+	_, _, err := executeForTest(t, defaultVersionInfo(), "scan", "--namespace", "")
+	if err == nil {
+		t.Fatal("scan with empty namespace returned nil error")
+	}
+	if !strings.Contains(err.Error(), "namespace must not be empty") {
+		t.Fatalf("scan error = %v, want empty namespace validation", err)
 	}
 }
 

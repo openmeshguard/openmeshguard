@@ -4,12 +4,12 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/openmeshguard/openmeshguard/internal/resolver"
 	"github.com/spf13/cobra"
 )
 
 const (
-	versionPlaceholder         = "dev"
-	resolverVersionPlaceholder = "resolver-m1-provisional"
+	versionPlaceholder = "dev"
 )
 
 var errNotImplemented = errors.New("not implemented")
@@ -22,7 +22,7 @@ type versionInfo struct {
 func defaultVersionInfo() versionInfo {
 	return versionInfo{
 		Version:         versionPlaceholder,
-		ResolverVersion: resolverVersionPlaceholder,
+		ResolverVersion: resolver.ProvisionalVersion(),
 	}
 }
 

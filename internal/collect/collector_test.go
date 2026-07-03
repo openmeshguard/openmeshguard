@@ -108,6 +108,90 @@ func TestCollectorDegradesForbiddenAndNotFound(t *testing.T) {
 	}
 }
 
+func TestCollectorScopedScanIncludesRootNamespacePeerAuthentications(t *testing.T) {
+	kube := kubefake.NewSimpleClientset(
+		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "payments"}},
+		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: DefaultRootNamespace}},
+		&appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "api", Namespace: "payments"}},
+	)
+	istio := istiofake.NewSimpleClientset(
+		&istiosecurityv1beta1.PeerAuthentication{
+			ObjectMeta: metav1.ObjectMeta{Name: "default", Namespace: DefaultRootNamespace},
+			Spec: securityapi.PeerAuthentication{
+				Mtls: &securityapi.PeerAuthentication_MutualTLS{Mode: securityapi.PeerAuthentication_MutualTLS_STRICT},
+			},
+		},
+	)
+
+	snapshot, err := New(kube, istio).Collect(context.Background(), Scope{Namespaces: []string{"payments"}})
+	if err != nil {
+		t.Fatalf("collect: %v", err)
+	}
+	if len(snapshot.PeerAuthentications) != 1 {
+		t.Fatalf("peer authentications = %d, want root namespace policy", len(snapshot.PeerAuthentications))
+	}
+	if got := snapshot.PeerAuthentications[0].Namespace; got != DefaultRootNamespace {
+		t.Fatalf("peer authentication namespace = %q, want %q", got, DefaultRootNamespace)
+	}
+
+	paNamespaces := map[string]bool{}
+	for _, action := range istio.Actions() {
+		if action.GetResource().Resource == "peerauthentications" {
+			paNamespaces[action.GetNamespace()] = true
+		}
+	}
+	for _, namespace := range []string{"payments", DefaultRootNamespace} {
+		if !paNamespaces[namespace] {
+			t.Fatalf("missing peerauthentication list for namespace %q; saw %#v", namespace, paNamespaces)
+		}
+	}
+}
+
+func TestCollectorScopedScanDoesNotListAllNamespaces(t *testing.T) {
+	kube := kubefake.NewSimpleClientset(&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "payments"}})
+	istio := istiofake.NewSimpleClientset()
+
+	if _, err := New(kube, istio).Collect(context.Background(), Scope{Namespaces: []string{"payments"}}); err != nil {
+		t.Fatalf("collect: %v", err)
+	}
+
+	for _, action := range kube.Actions() {
+		if action.GetResource().Resource != "namespaces" {
+			continue
+		}
+		listAction, ok := action.(ktesting.ListAction)
+		if !ok {
+			t.Fatalf("namespace action is not ListAction: %#v", action)
+		}
+		if got := listAction.GetListRestrictions().Fields.String(); got != "metadata.name=payments" {
+			t.Fatalf("namespace list field selector = %q, want metadata.name=payments", got)
+		}
+	}
+}
+
+func TestCollectorMergesPermissionSummaryAcrossNamespaces(t *testing.T) {
+	kube := kubefake.NewSimpleClientset(
+		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "payments"}},
+		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "orders"}},
+	)
+	istio := istiofake.NewSimpleClientset()
+
+	snapshot, err := New(kube, istio).Collect(context.Background(), Scope{Namespaces: []string{"payments", "orders"}})
+	if err != nil {
+		t.Fatalf("collect: %v", err)
+	}
+
+	counts := map[string]int{}
+	for _, permission := range snapshot.PermissionSummary {
+		counts[permission.APIGroup+"/"+permission.Resource]++
+	}
+	for key, count := range counts {
+		if count != 1 {
+			t.Fatalf("permission %s appears %d times in %#v", key, count, snapshot.PermissionSummary)
+		}
+	}
+}
+
 func assertPermission(t *testing.T, permissions []Permission, apiGroup, resource string, granted bool) {
 	t.Helper()
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"strings"
 
 	"github.com/openmeshguard/openmeshguard/internal/collect"
 	"github.com/openmeshguard/openmeshguard/internal/normalize"
@@ -29,7 +30,7 @@ func newScanCommand(info versionInfo) *cobra.Command {
 		Use:   "scan",
 		Short: "Scan a cluster and emit canonical JSON",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			if err := opts.validate(); err != nil {
+			if err := opts.normalizeAndValidate(); err != nil {
 				return err
 			}
 			return runScan(cmd.Context(), info, opts, cmd.OutOrStdout())
@@ -42,10 +43,24 @@ func newScanCommand(info versionInfo) *cobra.Command {
 	return cmd
 }
 
-func (o scanOptions) validate() error {
+func (o *scanOptions) normalizeAndValidate() error {
 	if o.AllNamespaces && len(o.Namespaces) > 0 {
 		return fmt.Errorf("choose either --all-namespaces or --namespace, not both")
 	}
+	namespaces := make([]string, 0, len(o.Namespaces))
+	seen := map[string]struct{}{}
+	for _, namespace := range o.Namespaces {
+		namespace = strings.TrimSpace(namespace)
+		if namespace == "" {
+			return fmt.Errorf("namespace must not be empty")
+		}
+		if _, ok := seen[namespace]; ok {
+			continue
+		}
+		seen[namespace] = struct{}{}
+		namespaces = append(namespaces, namespace)
+	}
+	o.Namespaces = namespaces
 	if !o.AllNamespaces && len(o.Namespaces) == 0 {
 		return fmt.Errorf("scan scope required: pass --all-namespaces or at least one --namespace")
 	}
@@ -69,6 +84,7 @@ func runScan(ctx context.Context, info versionInfo, opts scanOptions, stdout io.
 	snapshot, err := collect.New(kubeClient, istioClient).Collect(ctx, collect.Scope{
 		AllNamespaces: opts.AllNamespaces,
 		Namespaces:    opts.Namespaces,
+		RootNamespace: collect.DefaultRootNamespace,
 	})
 	if err != nil {
 		return fmt.Errorf("collect cluster resources: %w", err)

@@ -10,7 +10,10 @@ import (
 type Scope struct {
 	AllNamespaces bool
 	Namespaces    []string
+	RootNamespace string
 }
+
+const DefaultRootNamespace = "istio-system"
 
 // Permission records the evidence available for one attempted API resource list.
 type Permission struct {
