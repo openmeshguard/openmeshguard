@@ -1,0 +1,78 @@
+{
+  "schemaVersion": "v1alpha1",
+  "generatedAt": "2026-01-01T00:00:00Z",
+  "scanner": {
+    "version": "dev",
+    "resolverVersion": "resolver-v0-placeholder",
+    "controlPacks": [
+      {
+        "name": "builtin-empty",
+        "version": "0.0.0",
+        "source": "builtin"
+      }
+    ]
+  },
+  "scan": {
+    "clusterContext": "fixture",
+    "scope": {
+      "allNamespaces": true
+    },
+    "dataSources": {
+      "kubernetesAPI": true,
+      "prometheus": {
+        "enabled": false
+      }
+    }
+  },
+  "permissionSummary": [],
+  "inventory": {
+    "counts": {},
+    "dataPlane": {
+      "mode": "sidecar"
+    },
+    "multiCluster": {
+      "participationDetected": false,
+      "evaluated": false
+    }
+  },
+  "workloadPostures": [
+    {
+      "workload": {
+        "cluster": "cluster-a",
+        "namespace": "payments",
+        "name": "api",
+        "kind": "Deployment"
+      },
+      "dataPlaneMode": "sidecar",
+      "mtls": {
+        "effective": "strict",
+        "clientTLSContradiction": false,
+        "chain": [
+          {
+            "order": 1,
+            "kind": "PeerAuthentication",
+            "namespace": "payments",
+            "name": "default",
+            "effect": "sets namespace default STRICT"
+          }
+        ],
+        "typoField": true
+      },
+      "authorization": {
+        "effective": "no-policy",
+        "chain": [
+          {
+            "order": 1,
+            "kind": "AuthorizationPolicy",
+            "effect": "no policies selected workload"
+          }
+        ]
+      }
+    }
+  ],
+  "findings": [],
+  "scores": {
+    "overall": null,
+    "categories": []
+  }
+}

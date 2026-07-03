@@ -12,6 +12,7 @@
     "scanner": {
       "type": "object",
       "required": ["version", "resolverVersion", "controlPacks"],
+      "additionalProperties": false,
       "properties": {
         "version": { "type": "string" },
         "resolverVersion": { "type": "string", "description": "Version of the effective posture resolver semantics, tracked against Istio minor releases." },
@@ -21,6 +22,7 @@
           "items": {
             "type": "object",
             "required": ["name", "version", "source"],
+            "additionalProperties": false,
             "properties": {
               "name": { "type": "string" },
               "version": { "type": "string" },
@@ -33,11 +35,13 @@
     "scan": {
       "type": "object",
       "required": ["clusterContext", "scope", "dataSources"],
+      "additionalProperties": false,
       "properties": {
         "clusterContext": { "type": "string" },
         "scope": {
           "type": "object",
           "required": ["allNamespaces"],
+          "additionalProperties": false,
           "properties": {
             "allNamespaces": { "type": "boolean" },
             "namespaces": { "type": "array", "items": { "type": "string" } }
@@ -46,11 +50,13 @@
         "dataSources": {
           "type": "object",
           "required": ["kubernetesAPI", "prometheus"],
+          "additionalProperties": false,
           "properties": {
             "kubernetesAPI": { "type": "boolean" },
             "prometheus": {
               "type": "object",
               "required": ["enabled"],
+              "additionalProperties": false,
               "properties": {
                 "enabled": { "type": "boolean" },
                 "url": { "type": "string" },
@@ -60,6 +66,7 @@
             },
             "contextFiles": {
               "type": "object",
+              "additionalProperties": false,
               "properties": {
                 "scanConfig": { "type": "boolean" },
                 "ownershipImport": { "type": "boolean" },
@@ -77,6 +84,7 @@
       "items": {
         "type": "object",
         "required": ["apiGroup", "resource", "verbs", "granted"],
+        "additionalProperties": false,
         "properties": {
           "apiGroup": { "type": "string" },
           "resource": { "type": "string" },
@@ -91,6 +99,7 @@
     "inventory": {
       "type": "object",
       "required": ["counts", "dataPlane", "multiCluster"],
+      "additionalProperties": false,
       "properties": {
         "counts": {
           "type": "object",
@@ -99,6 +108,7 @@
         },
         "istio": {
           "type": "object",
+          "additionalProperties": false,
           "properties": {
             "controlPlaneNamespace": { "type": "string" },
             "controlPlaneVersion": { "type": "string" },
@@ -108,10 +118,12 @@
         "dataPlane": {
           "type": "object",
           "required": ["mode"],
+          "additionalProperties": false,
           "properties": {
             "mode": { "enum": ["sidecar", "ambient", "mixed", "unknown"] },
             "ztunnel": {
               "type": "object",
+              "additionalProperties": false,
               "properties": {
                 "present": { "type": "boolean" },
                 "nodesCovered": { "type": "integer" },
@@ -124,6 +136,7 @@
         "multiCluster": {
           "type": "object",
           "required": ["participationDetected", "evaluated"],
+          "additionalProperties": false,
           "properties": {
             "participationDetected": { "type": "boolean" },
             "evaluated": { "type": "boolean", "const": false, "description": "Always false in OSS v1: cross-cluster posture is detected but not evaluated." },
@@ -133,6 +146,7 @@
         },
         "classification": {
           "type": "object",
+          "additionalProperties": false,
           "properties": {
             "namespacesClassified": { "type": "integer" },
             "namespacesUnclassified": { "type": "integer" },
@@ -152,6 +166,7 @@
     "scores": {
       "type": "object",
       "required": ["categories"],
+      "additionalProperties": false,
       "properties": {
         "overall": { "type": ["number", "null"], "minimum": 0, "maximum": 100 },
         "categories": {
@@ -159,6 +174,7 @@
           "items": {
             "type": "object",
             "required": ["category", "grade", "passRate"],
+            "additionalProperties": false,
             "properties": {
               "category": { "type": "string" },
               "grade": { "enum": ["A", "B", "C", "D", "F", "unknown"] },
@@ -173,6 +189,7 @@
           "items": {
             "type": "object",
             "required": ["namespace", "score"],
+            "additionalProperties": false,
             "properties": {
               "namespace": { "type": "string" },
               "environment": { "type": ["string", "null"] },
@@ -189,6 +206,7 @@
       "type": "object",
       "description": "One step in the ordered chain of resources/rules that produced a resolved conclusion.",
       "required": ["order", "kind", "effect"],
+      "additionalProperties": false,
       "properties": {
         "order": { "type": "integer", "minimum": 1 },
         "kind": { "type": "string", "description": "e.g. PeerAuthentication, DestinationRule, AuthorizationPolicy, MeshConfigDefault." },
@@ -201,6 +219,7 @@
     "WorkloadRef": {
       "type": "object",
       "required": ["namespace", "name", "kind"],
+      "additionalProperties": false,
       "properties": {
         "cluster": { "type": "string" },
         "namespace": { "type": "string" },
@@ -211,6 +230,7 @@
     "WorkloadPosture": {
       "type": "object",
       "required": ["workload", "dataPlaneMode", "mtls", "authorization"],
+      "additionalProperties": false,
       "properties": {
         "workload": { "$ref": "#/$defs/WorkloadRef" },
         "environment": { "type": ["string", "null"] },
@@ -221,6 +241,16 @@
         "mtls": {
           "type": "object",
           "required": ["effective", "chain"],
+          "additionalProperties": false,
+          "allOf": [
+            {
+              "if": {
+                "properties": { "effective": { "const": "unknown" } },
+                "required": ["effective"]
+              },
+              "then": { "required": ["unknownReason"] }
+            }
+          ],
           "properties": {
             "effective": { "enum": ["strict", "permissive", "disabled", "mixed-by-port", "not-in-mesh", "unknown"] },
             "byPort": {
@@ -228,23 +258,36 @@
               "additionalProperties": { "enum": ["strict", "permissive", "disabled", "unknown"] }
             },
             "clientTLSContradiction": { "type": "boolean", "description": "True when a DestinationRule client TLS setting contradicts the server-side declared posture." },
-            "chain": { "type": "array", "items": { "$ref": "#/$defs/ResolutionStep" } }
+            "chain": { "type": "array", "items": { "$ref": "#/$defs/ResolutionStep" } },
+            "unknownReason": { "type": "string", "minLength": 1, "description": "Required when effective is unknown: which input/permission was missing." }
           }
         },
         "authorization": {
           "type": "object",
           "required": ["effective", "chain"],
+          "additionalProperties": false,
+          "allOf": [
+            {
+              "if": {
+                "properties": { "effective": { "const": "unknown" } },
+                "required": ["effective"]
+              },
+              "then": { "required": ["unknownReason"] }
+            }
+          ],
           "properties": {
             "effective": { "enum": ["default-deny-explicit-allow", "allow-only", "no-policy", "deny-present", "l7-policy-unenforced", "unknown"] },
             "policiesInScope": { "type": "array", "items": { "type": "string" } },
             "l7Unenforced": { "type": "array", "items": { "type": "string" }, "description": "Policies requiring L7 attributes with no waypoint in the enforcement path." },
-            "chain": { "type": "array", "items": { "$ref": "#/$defs/ResolutionStep" } }
+            "chain": { "type": "array", "items": { "$ref": "#/$defs/ResolutionStep" } },
+            "unknownReason": { "type": "string", "minLength": 1, "description": "Required when effective is unknown: which input/permission was missing." }
           }
         },
         "verified": {
           "type": ["object", "null"],
           "description": "Runtime-verified posture. Null when telemetry is unavailable.",
           "required": ["status", "window"],
+          "additionalProperties": false,
           "properties": {
             "status": { "enum": ["corroborated", "contradicted", "no-traffic-observed", "unknown"] },
             "window": { "type": "string" },
@@ -258,6 +301,16 @@
     "Finding": {
       "type": "object",
       "required": ["id", "controlId", "severity", "evidenceType", "status", "confidence", "resources", "reasoning"],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": { "status": { "const": "unknown" } },
+            "required": ["status"]
+          },
+          "then": { "required": ["unknownReason"] }
+        }
+      ],
       "properties": {
         "id": { "type": "string", "description": "Deterministic ID: hash of controlId + primary resource ref, stable across runs." },
         "controlId": { "type": "string", "pattern": "^[A-Z]+-[A-Z]+-[0-9]{3}$" },
@@ -277,6 +330,7 @@
           "items": {
             "type": "object",
             "required": ["kind", "name"],
+            "additionalProperties": false,
             "properties": {
               "apiVersion": { "type": "string" },
               "kind": { "type": "string" },
@@ -289,6 +343,7 @@
         "reasoning": { "type": "string", "description": "Plain-language explanation of what was observed/resolved and why it violates the control." },
         "remediation": {
           "type": "object",
+          "additionalProperties": false,
           "properties": {
             "guidance": { "type": "string" },
             "suggestedYAML": { "type": "string" }
@@ -296,6 +351,7 @@
         },
         "exception": {
           "type": ["object", "null"],
+          "additionalProperties": false,
           "properties": {
             "id": { "type": "string" },
             "expired": { "type": "boolean" },
@@ -304,7 +360,7 @@
             "ticket": { "type": "string" }
           }
         },
-        "unknownReason": { "type": ["string", "null"], "description": "Required when status is unknown: which input/permission was missing." }
+        "unknownReason": { "type": "string", "minLength": 1, "description": "Required when status is unknown: which input/permission was missing." }
       }
     }
   }

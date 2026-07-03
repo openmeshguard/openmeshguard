@@ -21,9 +21,13 @@ type controlMetadata struct {
 }
 
 func TestBuiltinControlPacksAreLoadable(t *testing.T) {
-	paths, err := filepath.Glob(filepath.Join("..", "..", "controls", "*.yaml"))
-	if err != nil {
-		t.Fatalf("glob control packs: %v", err)
+	var paths []string
+	for _, pattern := range []string{"*.yaml", "*.yml"} {
+		matches, err := filepath.Glob(filepath.Join("..", "..", "controls", pattern))
+		if err != nil {
+			t.Fatalf("glob control packs: %v", err)
+		}
+		paths = append(paths, matches...)
 	}
 	if len(paths) == 0 {
 		t.Fatal("expected at least one built-in control pack")

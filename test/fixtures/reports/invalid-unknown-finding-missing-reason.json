@@ -1,0 +1,60 @@
+{
+  "schemaVersion": "v1alpha1",
+  "generatedAt": "2026-01-01T00:00:00Z",
+  "scanner": {
+    "version": "dev",
+    "resolverVersion": "resolver-v0-placeholder",
+    "controlPacks": [
+      {
+        "name": "builtin-empty",
+        "version": "0.0.0",
+        "source": "builtin"
+      }
+    ]
+  },
+  "scan": {
+    "clusterContext": "fixture",
+    "scope": {
+      "allNamespaces": true
+    },
+    "dataSources": {
+      "kubernetesAPI": true,
+      "prometheus": {
+        "enabled": false
+      }
+    }
+  },
+  "permissionSummary": [],
+  "inventory": {
+    "counts": {},
+    "dataPlane": {
+      "mode": "unknown"
+    },
+    "multiCluster": {
+      "participationDetected": false,
+      "evaluated": false
+    }
+  },
+  "workloadPostures": [],
+  "findings": [
+    {
+      "id": "MG-ENV-001-default",
+      "controlId": "MG-ENV-001",
+      "severity": "medium",
+      "evidenceType": "context",
+      "status": "unknown",
+      "confidence": "unavailable",
+      "resources": [
+        {
+          "kind": "Namespace",
+          "name": "default"
+        }
+      ],
+      "reasoning": "Namespace classification could not be determined."
+    }
+  ],
+  "scores": {
+    "overall": null,
+    "categories": []
+  }
+}

@@ -8,10 +8,9 @@ import (
 	"github.com/santhosh-tekuri/jsonschema/v6"
 )
 
-func TestMinimalReportMatchesSchema(t *testing.T) {
+func TestReportSchemaFixtures(t *testing.T) {
 	root := filepath.Join("..", "..")
 	schemaPath := filepath.Join(root, "docs", "contracts", "canonical-json-schema.json")
-	fixturePath := filepath.Join(root, "test", "fixtures", "reports", "minimal-report.json")
 
 	compiler := jsonschema.NewCompiler()
 	schema, err := compiler.Compile(schemaPath)
@@ -19,18 +18,54 @@ func TestMinimalReportMatchesSchema(t *testing.T) {
 		t.Fatalf("compile canonical schema: %v", err)
 	}
 
-	file, err := os.Open(fixturePath)
-	if err != nil {
-		t.Fatalf("open minimal report fixture: %v", err)
+	tests := []struct {
+		name      string
+		fixture   string
+		wantValid bool
+	}{
+		{
+			name:      "minimal report",
+			fixture:   "minimal-report.json",
+			wantValid: true,
+		},
+		{
+			name:      "workload unknown report",
+			fixture:   "workload-unknown-report.json",
+			wantValid: true,
+		},
+		{
+			name:      "unknown finding without reason",
+			fixture:   "invalid-unknown-finding-missing-reason.json",
+			wantValid: false,
+		},
+		{
+			name:      "workload posture extra field",
+			fixture:   "invalid-workload-posture-extra-field.json",
+			wantValid: false,
+		},
 	}
-	defer file.Close()
 
-	report, err := jsonschema.UnmarshalJSON(file)
-	if err != nil {
-		t.Fatalf("decode minimal report fixture: %v", err)
-	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fixturePath := filepath.Join(root, "test", "fixtures", "reports", tt.fixture)
+			file, err := os.Open(fixturePath)
+			if err != nil {
+				t.Fatalf("open report fixture: %v", err)
+			}
+			defer file.Close()
 
-	if err := schema.Validate(report); err != nil {
-		t.Fatalf("minimal report does not match canonical schema: %v", err)
+			report, err := jsonschema.UnmarshalJSON(file)
+			if err != nil {
+				t.Fatalf("decode report fixture: %v", err)
+			}
+
+			err = schema.Validate(report)
+			if tt.wantValid && err != nil {
+				t.Fatalf("report fixture should match canonical schema: %v", err)
+			}
+			if !tt.wantValid && err == nil {
+				t.Fatal("report fixture unexpectedly matched canonical schema")
+			}
+		})
 	}
 }

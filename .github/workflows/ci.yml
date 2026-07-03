@@ -5,7 +5,10 @@ on:
   push:
     branches:
       - main
-      - m0-scaffold
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   scaffold:

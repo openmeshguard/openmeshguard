@@ -80,7 +80,10 @@ type WorkloadInput struct {
 }
 
 type WorkloadRef struct {
-	Cluster, Namespace, Name, Kind string
+	Cluster   string `json:"cluster,omitempty"`
+	Namespace string `json:"namespace"`
+	Name      string `json:"name"`
+	Kind      string `json:"kind"`
 }
 
 type NamespaceInput struct {
@@ -100,9 +103,9 @@ type MeshDefaults struct {
 type Tristate int
 
 const (
-	False Tristate = iota
+	Unobserved Tristate = iota
+	False
 	True
-	Unobserved
 )
 
 // PeerAuthenticationView, DestinationRuleView, AuthorizationPolicyView, and

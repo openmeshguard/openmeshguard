@@ -13,15 +13,19 @@ test:
 	$(GO) test ./...
 
 lint: fmt-check
-	$(GO) vet ./...
 	$(GOLANGCI_LINT) run
-	./scripts/check-resolver-imports.sh
 
 schema-test:
-	$(GO) test ./internal/output -run TestMinimalReportMatchesSchema -count=1
+	@$(GO) test ./internal/output -list '^TestReportSchemaFixtures$$' | grep -q '^TestReportSchemaFixtures$$'
+	$(GO) test ./internal/output -run '^TestReportSchemaFixtures$$' -count=1
 
 fmt-check:
-	@unformatted="$$(gofmt -l $$(find . -name '*.go' -not -path './.git/*'))"; \
+	@files="$$(git ls-files '*.go')"; \
+	if [ -n "$$files" ]; then \
+		unformatted="$$(gofmt -l $$files)"; \
+	else \
+		unformatted=""; \
+	fi; \
 	if [ -n "$$unformatted" ]; then \
 		echo "gofmt required:"; \
 		echo "$$unformatted"; \
@@ -29,7 +33,7 @@ fmt-check:
 	fi
 
 resolver-purity:
-	./scripts/check-resolver-imports.sh
+	$(GOLANGCI_LINT) run --enable-only depguard ./internal/resolver/...
 
 kind-up:
 	@echo "kind-up is deferred until M4"

@@ -8,7 +8,7 @@ OpenMeshGuard is a read-only Go CLI that scans Istio service meshes and reports 
 
 Authoritative documents, in order of precedence when they conflict:
 
-1. `docs/contracts/` — canonical JSON schema, control format, resolver types. **These are frozen interfaces. Never change them without explicit human approval. If a task seems to require a contract change, stop and flag it.**
+1. `docs/contracts/` — canonical JSON schema and control format. Exported resolver/output JSON shapes are frozen interfaces too, implemented in `internal/resolver` and `internal/output`. **Never change frozen interfaces without explicit human approval. If a task seems to require a contract change, stop and flag it.**
 2. `plan/M*.md` — the milestone task files. Work on exactly one milestone at a time.
 3. `SPEC.md` — full product spec. Use it for context and rationale; task files define your scope.
 
