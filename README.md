@@ -1,117 +1,98 @@
 # OpenMeshGuard
 
-Move from assumed mesh security to verified Istio posture.
+**Move from assumed mesh security to verified Istio posture.**
 
-OpenMeshGuard is an open-core service mesh governance platform, starting with Istio. It helps platform, security, and risk teams continuously verify mTLS, authorization, exposure, ownership, exceptions, drift, lifecycle, and compliance evidence across clusters.
+> ⚠️ **Early preview.** OpenMeshGuard is under active development and not yet ready for production use. The scanner, schemas, and control library are evolving. Feedback and issues are very welcome.
 
-The first product surface is a least-privilege, read-only posture scanner and report generator. It is not another Kiali, not a mesh distribution, and not a generic observability dashboard. OpenMeshGuard sits above the mesh as a governance and evidence layer.
+Adopting Istio is not the same as being protected by it. mTLS can be permissive where you believe it's strict, AuthorizationPolicies can silently enforce nothing, ambient L7 policies can sit unenforced without a waypoint, and none of it shows up until an audit — or an incident.
 
-## Why This Exists
+OpenMeshGuard is a read-only CLI scanner that tells you what your mesh security posture *actually is*:
 
-Istio gives enterprises powerful security primitives: workload identity, mTLS, authorization policy, ingress and egress controls, traffic policy, and telemetry. Those controls only create real zero-trust outcomes when they are configured correctly, consistently adopted, continuously validated, and mapped to enterprise ownership and controls.
+- **Resolved, not linted.** It computes per-workload *effective* posture using Istio's real evaluation semantics — layered PeerAuthentication (mesh/namespace/workload/port), DestinationRule TLS interplay, AuthorizationPolicy evaluation order (CUSTOM → DENY → ALLOW), Sidecar scoping, and the ambient L4/L7 split — instead of checking resources one YAML at a time.
+- **Verified, not assumed.** With optional Prometheus access, it corroborates declared posture against what actually happened on the wire: *"strict mTLS is declared for 71% of workloads — and no plaintext traffic was observed to 64% of them in the last 7 days. These 14 services did receive plaintext."*
+- **Honest about what it doesn't know.** Missing permissions, missing telemetry, and unclassified namespaces are reported as explicit unknowns — never silently passed or failed.
+- **Evidence you can hand to a security team.** Every finding carries its resolution chain: which resources, in which order, produced the conclusion.
 
-Large organizations need to answer questions like:
-
-- Are production namespaces enforcing strict mTLS?
-- Which mesh-enabled apps have no AuthorizationPolicy?
-- Which Gateways or VirtualServices create exposure risk?
-- Which Istio resources are missing owner, app, environment, or repo metadata?
-- Which risky policies, routes, and exceptions are deployed right now?
-- Which teams have active, expired, or missing exceptions?
-- Which workloads block an Istio or ambient mesh migration?
-- Can platform and security teams export audit-ready evidence without spreadsheets?
-- What are the minimum cluster permissions required to prove posture, and what evidence is unavailable without them?
-
-## Product Thesis
-
-OpenMeshGuard helps enterprises govern service mesh adoption and risk posture without taking over mesh operations.
-
-The initial category is:
-
-> Service Mesh Governance and Risk Posture Management
-
-The initial beachhead is:
-
-> Istio Governance Posture Management
-
-## First Scope
-
-OpenMeshGuard Community should let a platform engineer run a read-only scan against an Istio cluster and immediately receive a useful governance posture report.
-
-Planned CLI shape:
+## Quickstart
 
 ```bash
-openmeshguard scan --context prod-cluster --all-namespaces
-openmeshguard report --format html
-openmeshguard export --format sarif
-openmeshguard score --namespace payments-prod
+# Scan a cluster (read-only; see docs/rbac for the exact permissions)
+openmeshguard scan --context my-cluster --all-namespaces
+
+# Include runtime verification from Istio telemetry
+openmeshguard scan --context my-cluster --prometheus-url https://prometheus.example.com
+
+# Generate a local, server-less HTML report
+openmeshguard report --format html --output report.html
+
+# Export for CI / code scanning
+openmeshguard export --format sarif --output openmeshguard.sarif
 ```
 
-Initial outputs:
+First run requires **zero configuration files**. Ownership, environment classification, and exception records are optional inputs that unlock governance controls — see [docs/context](docs/) once available.
 
-- Mesh inventory across clusters, namespaces, workloads, services, Gateways, VirtualServices, DestinationRules, PeerAuthentications, AuthorizationPolicies, ServiceEntries, EnvoyFilters, proxy versions, and ambient labels.
-- Findings with severity, affected resources, evidence, and remediation guidance.
-- Posture scores by cluster, namespace, workload, application, and control area.
-- JSON, SARIF, and local HTML reports.
-- Framework-aligned evidence mapping where defensible.
+### Example summary
 
-## What OpenMeshGuard Is Not
+| Control area | Declared | Verified | Unknown |
+| --- | --- | --- | --- |
+| Strict mTLS (effective, per workload) | 71% | 64% — no plaintext in 7d | 7% — no telemetry |
+| Explicit authorization coverage | 54% | — | — |
+| Default-deny posture | 22% of namespaces | — | — |
+| Public gateway wildcard hosts | 3 findings | — | — |
+| Environment classification coverage | 61% | — | 39% unclassified |
 
-OpenMeshGuard is not trying to replace:
+## What it needs
 
-- Istio
-- Kiali
-- Solo or Tetrate platforms
-- Kyverno, OPA, or Gatekeeper
-- Grafana, Prometheus, Datadog, or OpenTelemetry
-- CNAPP or KSPM tools
+- Read-only access: `get`/`list` on core workload resources, Istio CRDs, and Gateway API resources. Published RBAC profiles (namespace-scoped Role, cluster-scoped ClusterRole, optional add-ons) ship with the project.
+- **Never required:** write verbs, Secrets access, `exec`/`attach`/`port-forward`, impersonation, `watch`, or cluster-admin.
+- Optional: a Prometheus endpoint with standard Istio proxy metrics, to enable verified-posture controls.
 
-The first principle is least-privilege, read-only intelligence. OpenMeshGuard Community should publish exact RBAC requirements, explain why every permission is needed, and degrade findings to missing evidence rather than silently requiring broader access. Remediation should flow through GitOps, pull requests, tickets, policy engines, or existing enterprise change workflows.
+Every report includes a permission summary showing which evidence was available and which findings were affected by missing access.
 
-## Initial Control Areas
+## What it is — and isn't
 
-OpenMeshGuard starts with a small, high-signal control library:
+OpenMeshGuard complements the tools you already run. It does not replace them.
 
-- mTLS assurance
-- Authorization and zero-trust coverage
-- Gateway and egress exposure
-- Ownership and metadata completeness
-- Exception lifecycle
-- Deployed-state posture and lifecycle drift
-- Proxy and control-plane lifecycle
-- EnvoyFilter and advanced customization review
-- Ambient migration readiness
+| You already use | Keep using it for | OpenMeshGuard adds |
+| --- | --- | --- |
+| `istioctl analyze` | Config validity checks | Effective per-workload posture, governance context, scoring, evidence, runtime verification |
+| Kiali | Live mesh visualization and ops | Control-oriented posture, audit evidence, exception awareness |
+| Kyverno / OPA Gatekeeper | Blocking violations at admission | Resolution of Istio's layered policy semantics that per-resource rules can't see; posture over time |
+| Prometheus / Grafana | Metrics and dashboards | Posture conclusions and evidence packaging from that signal |
 
-## Open Core Split
+Non-goals: installing or managing Istio, traffic management, replacing mesh vendors or policy engines, claiming NIST/PCI/HIPAA compliance (it produces framework-*aligned* evidence only), or mutating your clusters.
 
-Community edition focuses on practitioner trust and local value:
+## Controls
 
-- CLI scanner
-- Istio and Kubernetes discovery
-- Go scanner core and CLI
-- Built-in OpenMeshGuard baseline controls
-- Basic posture score
-- Local HTML report
-- JSON and SARIF export
-- Custom rule files
-- CI mode
-- Published least-privilege RBAC profiles
+Controls are **data, not code**: YAML metadata plus a CEL expression evaluated against the normalized mesh model and resolver outputs. The built-in library covers effective mTLS posture, authorization/zero-trust coverage, gateway and egress exposure, ownership and exception hygiene, and lifecycle/version risk — across both **sidecar and ambient** data planes, including ztunnel coverage and waypoint enforcement gaps.
 
-Enterprise edition should monetize scale and workflow:
+You can ship your own control packs alongside the built-ins, and contributing a control upstream doesn't require writing Go.
 
-- Multi-cluster fleet inventory
-- SSO and enterprise RBAC
-- Historical posture trends
-- Exception lifecycle management
-- Audit evidence packs
-- ServiceNow and Jira workflows
-- Backstage, CMDB, and GitOps ownership mapping
-- Remediation pull requests
-- Premium control packs
-- Support and SLA
+## Sidecar, ambient, multi-cluster
 
-## Repository Status
+- Sidecar and ambient modes (including mixed) are first-class.
+- Multi-cluster: v1 scans one cluster at a time and *detects* multi-cluster participation (east-west gateways, network topology labels), reporting honestly that cross-cluster posture is not yet evaluated. Full multi-cluster correlation is on the roadmap.
 
-This repository is the private product foundation for OpenMeshGuard. The current work is intentionally documentation-first: README, product spec, and landing-page positioning before implementation starts.
+## Roadmap (abridged)
 
-See [SPEC.md](./SPEC.md) for the first product specification.
+1. Scanner core, effective posture resolver, CEL rule engine, canonical JSON
+2. HTML report, Prometheus-verified controls, SARIF/CI mode
+3. Governance context: classification, ownership, Git-native exceptions
+4. Offline manifest scanning (`scan --local`) and source/drift traceability
+5. Multi-cluster correlation and distribution validation (OpenShift Service Mesh on ROSA first, then managed K8s with upstream Istio)
+
+See [SPEC.md](SPEC.md) for the full design.
+
+## Contributing
+
+The project is in early design. The most valuable contributions right now:
+
+- Try it against a real Istio environment and file honest issues — especially resolver disagreements ("OpenMeshGuard says X, my mesh does Y"). Those are gold.
+- Propose or contribute controls (YAML + CEL — no Go required).
+- Review the canonical JSON schema and control format before they stabilize.
+
+See `CONTRIBUTING.md` (coming with the repo opening) for details.
+
+## License
+
+Apache License 2.0. See [LICENSE](LICENSE).
