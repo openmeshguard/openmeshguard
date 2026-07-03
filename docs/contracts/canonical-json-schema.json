@@ -1,0 +1,311 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openmeshguard.io/schemas/report/v1alpha1.json",
+  "title": "OpenMeshGuard Canonical Report",
+  "description": "Canonical output schema for OpenMeshGuard scans. DRAFT v1alpha1 - breaking changes allowed until v1; after v1, additive changes only. This schema is a frozen contract: implementation must conform to it, not the reverse. Changes require human approval.",
+  "type": "object",
+  "required": ["schemaVersion", "generatedAt", "scanner", "scan", "permissionSummary", "inventory", "workloadPostures", "findings", "scores"],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": { "type": "string", "const": "v1alpha1" },
+    "generatedAt": { "type": "string", "format": "date-time" },
+    "scanner": {
+      "type": "object",
+      "required": ["version", "resolverVersion", "controlPacks"],
+      "properties": {
+        "version": { "type": "string" },
+        "resolverVersion": { "type": "string", "description": "Version of the effective posture resolver semantics, tracked against Istio minor releases." },
+        "istioSupportWindow": { "type": "array", "items": { "type": "string" }, "description": "Istio minor versions this scanner release considers supported." },
+        "controlPacks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "version", "source"],
+            "properties": {
+              "name": { "type": "string" },
+              "version": { "type": "string" },
+              "source": { "enum": ["builtin", "user"] }
+            }
+          }
+        }
+      }
+    },
+    "scan": {
+      "type": "object",
+      "required": ["clusterContext", "scope", "dataSources"],
+      "properties": {
+        "clusterContext": { "type": "string" },
+        "scope": {
+          "type": "object",
+          "required": ["allNamespaces"],
+          "properties": {
+            "allNamespaces": { "type": "boolean" },
+            "namespaces": { "type": "array", "items": { "type": "string" } }
+          }
+        },
+        "dataSources": {
+          "type": "object",
+          "required": ["kubernetesAPI", "prometheus"],
+          "properties": {
+            "kubernetesAPI": { "type": "boolean" },
+            "prometheus": {
+              "type": "object",
+              "required": ["enabled"],
+              "properties": {
+                "enabled": { "type": "boolean" },
+                "url": { "type": "string" },
+                "lookback": { "type": "string", "description": "Go duration string, e.g. 168h." },
+                "degradedTo": { "type": ["string", "null"], "description": "Set if guardrails forced a shorter window." }
+              }
+            },
+            "contextFiles": {
+              "type": "object",
+              "properties": {
+                "scanConfig": { "type": "boolean" },
+                "ownershipImport": { "type": "boolean" },
+                "exceptions": { "type": "boolean" }
+              }
+            }
+          }
+        },
+        "environmentInference": { "type": "boolean", "description": "True if --infer-environments heuristics were enabled." }
+      }
+    },
+    "permissionSummary": {
+      "type": "array",
+      "description": "One entry per permission the scanner attempted to use.",
+      "items": {
+        "type": "object",
+        "required": ["apiGroup", "resource", "verbs", "granted"],
+        "properties": {
+          "apiGroup": { "type": "string" },
+          "resource": { "type": "string" },
+          "verbs": { "type": "array", "items": { "enum": ["get", "list"] } },
+          "granted": { "type": "boolean" },
+          "optional": { "type": "boolean" },
+          "impact": { "type": "string", "description": "Human-readable description of which evidence/findings degrade without this permission." },
+          "affectedControls": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    },
+    "inventory": {
+      "type": "object",
+      "required": ["counts", "dataPlane", "multiCluster"],
+      "properties": {
+        "counts": {
+          "type": "object",
+          "description": "Resource kind -> count of discovered resources.",
+          "additionalProperties": { "type": "integer", "minimum": 0 }
+        },
+        "istio": {
+          "type": "object",
+          "properties": {
+            "controlPlaneNamespace": { "type": "string" },
+            "controlPlaneVersion": { "type": "string" },
+            "revisions": { "type": "array", "items": { "type": "string" } }
+          }
+        },
+        "dataPlane": {
+          "type": "object",
+          "required": ["mode"],
+          "properties": {
+            "mode": { "enum": ["sidecar", "ambient", "mixed", "unknown"] },
+            "ztunnel": {
+              "type": "object",
+              "properties": {
+                "present": { "type": "boolean" },
+                "nodesCovered": { "type": "integer" },
+                "nodesTotal": { "type": ["integer", "null"], "description": "Null when nodes permission is absent." }
+              }
+            },
+            "waypoints": { "type": "integer" }
+          }
+        },
+        "multiCluster": {
+          "type": "object",
+          "required": ["participationDetected", "evaluated"],
+          "properties": {
+            "participationDetected": { "type": "boolean" },
+            "evaluated": { "type": "boolean", "const": false, "description": "Always false in OSS v1: cross-cluster posture is detected but not evaluated." },
+            "signals": { "type": "array", "items": { "type": "string" }, "description": "e.g. east-west gateway service, topology.istio.io/network labels." },
+            "meshNetworks": { "type": "array", "items": { "type": "string" } }
+          }
+        },
+        "classification": {
+          "type": "object",
+          "properties": {
+            "namespacesClassified": { "type": "integer" },
+            "namespacesUnclassified": { "type": "integer" },
+            "byEnvironment": { "type": "object", "additionalProperties": { "type": "integer" } }
+          }
+        }
+      }
+    },
+    "workloadPostures": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/WorkloadPosture" }
+    },
+    "findings": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/Finding" }
+    },
+    "scores": {
+      "type": "object",
+      "required": ["categories"],
+      "properties": {
+        "overall": { "type": ["number", "null"], "minimum": 0, "maximum": 100 },
+        "categories": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["category", "grade", "passRate"],
+            "properties": {
+              "category": { "type": "string" },
+              "grade": { "enum": ["A", "B", "C", "D", "F", "unknown"] },
+              "passRate": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
+              "evaluated": { "type": "integer" },
+              "unknown": { "type": "integer" }
+            }
+          }
+        },
+        "namespaces": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["namespace", "score"],
+            "properties": {
+              "namespace": { "type": "string" },
+              "environment": { "type": ["string", "null"] },
+              "score": { "type": ["number", "null"], "minimum": 0, "maximum": 100 },
+              "capped": { "type": "boolean", "description": "True if a critical finding capped this score." }
+            }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "ResolutionStep": {
+      "type": "object",
+      "description": "One step in the ordered chain of resources/rules that produced a resolved conclusion.",
+      "required": ["order", "kind", "effect"],
+      "properties": {
+        "order": { "type": "integer", "minimum": 1 },
+        "kind": { "type": "string", "description": "e.g. PeerAuthentication, DestinationRule, AuthorizationPolicy, MeshConfigDefault." },
+        "name": { "type": "string" },
+        "namespace": { "type": "string" },
+        "field": { "type": "string", "description": "Specific field that mattered, e.g. spec.mtls.mode, spec.portLevelMtls.8080." },
+        "effect": { "type": "string", "description": "What this step contributed, e.g. 'sets namespace default PERMISSIVE', 'overrides port 8080 to STRICT'." }
+      }
+    },
+    "WorkloadRef": {
+      "type": "object",
+      "required": ["namespace", "name", "kind"],
+      "properties": {
+        "cluster": { "type": "string" },
+        "namespace": { "type": "string" },
+        "name": { "type": "string" },
+        "kind": { "type": "string", "description": "Deployment, StatefulSet, DaemonSet, or Pod-owner kind." }
+      }
+    },
+    "WorkloadPosture": {
+      "type": "object",
+      "required": ["workload", "dataPlaneMode", "mtls", "authorization"],
+      "properties": {
+        "workload": { "$ref": "#/$defs/WorkloadRef" },
+        "environment": { "type": ["string", "null"] },
+        "environmentConfidence": { "enum": ["observed", "resolved", "inferred", "user-supplied", "unavailable", null] },
+        "owner": { "type": ["string", "null"] },
+        "appId": { "type": ["string", "null"] },
+        "dataPlaneMode": { "enum": ["sidecar", "ambient", "mixed", "unknown", "not-applicable"] },
+        "mtls": {
+          "type": "object",
+          "required": ["effective", "chain"],
+          "properties": {
+            "effective": { "enum": ["strict", "permissive", "disabled", "mixed-by-port", "not-in-mesh", "unknown"] },
+            "byPort": {
+              "type": "object",
+              "additionalProperties": { "enum": ["strict", "permissive", "disabled", "unknown"] }
+            },
+            "clientTLSContradiction": { "type": "boolean", "description": "True when a DestinationRule client TLS setting contradicts the server-side declared posture." },
+            "chain": { "type": "array", "items": { "$ref": "#/$defs/ResolutionStep" } }
+          }
+        },
+        "authorization": {
+          "type": "object",
+          "required": ["effective", "chain"],
+          "properties": {
+            "effective": { "enum": ["default-deny-explicit-allow", "allow-only", "no-policy", "deny-present", "l7-policy-unenforced", "unknown"] },
+            "policiesInScope": { "type": "array", "items": { "type": "string" } },
+            "l7Unenforced": { "type": "array", "items": { "type": "string" }, "description": "Policies requiring L7 attributes with no waypoint in the enforcement path." },
+            "chain": { "type": "array", "items": { "$ref": "#/$defs/ResolutionStep" } }
+          }
+        },
+        "verified": {
+          "type": ["object", "null"],
+          "description": "Runtime-verified posture. Null when telemetry is unavailable.",
+          "required": ["status", "window"],
+          "properties": {
+            "status": { "enum": ["corroborated", "contradicted", "no-traffic-observed", "unknown"] },
+            "window": { "type": "string" },
+            "mtlsTrafficShare": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
+            "plaintextObserved": { "type": ["boolean", "null"] },
+            "plaintextSources": { "type": "array", "items": { "type": "string" } }
+          }
+        }
+      }
+    },
+    "Finding": {
+      "type": "object",
+      "required": ["id", "controlId", "severity", "evidenceType", "status", "confidence", "resources", "reasoning"],
+      "properties": {
+        "id": { "type": "string", "description": "Deterministic ID: hash of controlId + primary resource ref, stable across runs." },
+        "controlId": { "type": "string", "pattern": "^[A-Z]+-[A-Z]+-[0-9]{3}$" },
+        "title": { "type": "string" },
+        "severity": { "enum": ["critical", "high", "medium", "low", "info"] },
+        "evidenceType": { "enum": ["config", "runtime", "context"] },
+        "status": { "enum": ["open", "excepted", "unknown", "not-applicable"] },
+        "confidence": { "enum": ["observed", "resolved", "inferred", "user-supplied", "unavailable"] },
+        "dataPlaneMode": { "enum": ["sidecar", "ambient", "mixed", "unknown", "not-applicable"] },
+        "evidenceSources": {
+          "type": "array",
+          "items": { "enum": ["kubernetes-api", "istio-crd", "gateway-api", "prometheus", "scan-config", "ownership-import", "exception-record"] }
+        },
+        "resources": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["kind", "name"],
+            "properties": {
+              "apiVersion": { "type": "string" },
+              "kind": { "type": "string" },
+              "namespace": { "type": "string" },
+              "name": { "type": "string" }
+            }
+          }
+        },
+        "resolutionChain": { "type": "array", "items": { "$ref": "#/$defs/ResolutionStep" } },
+        "reasoning": { "type": "string", "description": "Plain-language explanation of what was observed/resolved and why it violates the control." },
+        "remediation": {
+          "type": "object",
+          "properties": {
+            "guidance": { "type": "string" },
+            "suggestedYAML": { "type": "string" }
+          }
+        },
+        "exception": {
+          "type": ["object", "null"],
+          "properties": {
+            "id": { "type": "string" },
+            "expired": { "type": "boolean" },
+            "expiresAt": { "type": "string", "format": "date-time" },
+            "approver": { "type": "string" },
+            "ticket": { "type": "string" }
+          }
+        },
+        "unknownReason": { "type": ["string", "null"], "description": "Required when status is unknown: which input/permission was missing." }
+      }
+    }
+  }
+}
