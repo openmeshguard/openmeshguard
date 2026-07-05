@@ -293,6 +293,9 @@ func detectDataPlaneMode(
 			return resolver.ModeSidecar
 		}
 	}
+	if len(pods) > 0 {
+		return resolver.ModeUnknown
+	}
 	if sidecarInjectionDisabled(workloadLabels, workloadAnnotations) {
 		return resolver.ModeUnknown
 	}

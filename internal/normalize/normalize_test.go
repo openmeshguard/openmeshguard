@@ -164,6 +164,52 @@ func TestBuildDetectsIstioProxyNativeSidecarInitContainer(t *testing.T) {
 	}
 }
 
+func TestBuildMarksObservedPodsWithoutProxyUnknownDespiteInjectionLabels(t *testing.T) {
+	result := Build(collect.Snapshot{
+		Namespaces: []corev1.Namespace{{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:   "payments",
+				Labels: map[string]string{"istio-injection": "enabled"},
+			},
+		}},
+		Deployments: []appsv1.Deployment{{
+			ObjectMeta: metav1.ObjectMeta{Name: "api", Namespace: "payments"},
+			Spec: appsv1.DeploymentSpec{
+				Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "api"}},
+				Template: corev1.PodTemplateSpec{
+					ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "api"}},
+					Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "api"}}},
+				},
+			},
+		}},
+		Pods: []corev1.Pod{{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "api-1",
+				Namespace: "payments",
+				Labels:    map[string]string{"app": "api"},
+				OwnerReferences: []metav1.OwnerReference{{
+					Kind: "ReplicaSet",
+					Name: "api-abc123",
+				}},
+			},
+			Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "api"}}},
+		}},
+		PermissionSummary: []collect.Permission{{
+			APIGroup: "security.istio.io",
+			Resource: "peerauthentications",
+			Verbs:    []string{"list"},
+			Granted:  true,
+		}},
+	})
+
+	if len(result.Workloads) != 1 {
+		t.Fatalf("workloads = %d, want 1", len(result.Workloads))
+	}
+	if result.Workloads[0].DataPlaneMode != resolver.ModeUnknown {
+		t.Fatalf("mode = %q, want unknown for observed pod without proxy", result.Workloads[0].DataPlaneMode)
+	}
+}
+
 func TestBuildScopesPeerAuthenticationAvailabilityToWorkloadNamespace(t *testing.T) {
 	result := Build(collect.Snapshot{
 		Namespaces: []corev1.Namespace{
