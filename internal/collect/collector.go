@@ -85,6 +85,11 @@ func (c *Collector) Collect(ctx context.Context, scope Scope) (Snapshot, error) 
 		defer mu.Unlock()
 		markScopedAvailability(&snapshot.PodAvailability, namespace, available)
 	}
+	markReplicaSetsAvailable := func(namespace string, available bool) {
+		mu.Lock()
+		defer mu.Unlock()
+		markScopedAvailability(&snapshot.ReplicaSetAvailability, namespace, available)
+	}
 	markPeerAuthenticationsAvailable := func(namespace string, available bool) {
 		mu.Lock()
 		defer mu.Unlock()
@@ -163,7 +168,7 @@ func (c *Collector) Collect(ctx context.Context, scope Scope) (Snapshot, error) 
 				}
 				return err
 			}, appendPermission, appendDegraded),
-			c.listTask(replicaSetMeta, permissionScopeName(ns), func(ctx context.Context) error {
+			func(ctx context.Context) error {
 				items, err := listPages(ctx, func(ctx context.Context, opts metav1.ListOptions) ([]appsv1.ReplicaSet, string, error) {
 					list, err := c.kube.AppsV1().ReplicaSets(ns).List(ctx, opts)
 					if err != nil {
@@ -171,13 +176,17 @@ func (c *Collector) Collect(ctx context.Context, scope Scope) (Snapshot, error) 
 					}
 					return list.Items, list.Continue, nil
 				})
-				if err == nil {
-					mu.Lock()
-					snapshot.ReplicaSets = append(snapshot.ReplicaSets, items...)
-					mu.Unlock()
+				if err != nil {
+					markReplicaSetsAvailable(ns, false)
+					return appendDegraded(replicaSetMeta, permissionScopeName(ns), err)
 				}
-				return err
-			}, appendPermission, appendDegraded),
+				mu.Lock()
+				snapshot.ReplicaSets = append(snapshot.ReplicaSets, items...)
+				mu.Unlock()
+				markReplicaSetsAvailable(ns, true)
+				appendPermission(replicaSetMeta.permissionForScope(true, permissionScopeName(ns)))
+				return nil
+			},
 			c.listTask(statefulSetMeta, permissionScopeName(ns), func(ctx context.Context) error {
 				items, err := listPages(ctx, func(ctx context.Context, opts metav1.ListOptions) ([]appsv1.StatefulSet, string, error) {
 					list, err := c.kube.AppsV1().StatefulSets(ns).List(ctx, opts)

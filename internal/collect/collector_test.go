@@ -297,6 +297,31 @@ func TestCollectorTracksPeerAuthenticationAvailabilityPerNamespace(t *testing.T)
 	}
 }
 
+func TestCollectorTracksReplicaSetAvailabilityPerNamespace(t *testing.T) {
+	kube := kubefake.NewSimpleClientset(
+		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "payments"}},
+		&appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "api", Namespace: "payments"}},
+	)
+	kube.PrependReactor("list", "replicasets", func(ktesting.Action) (bool, runtime.Object, error) {
+		return true, nil, apierrors.NewForbidden(
+			schema.GroupResource{Group: "apps", Resource: "replicasets"},
+			"",
+			errors.New("denied"),
+		)
+	})
+
+	snapshot, err := New(kube, istiofake.NewSimpleClientset()).Collect(context.Background(), Scope{Namespaces: []string{"payments"}})
+	if err != nil {
+		t.Fatalf("collect: %v", err)
+	}
+	if len(snapshot.Deployments) != 1 {
+		t.Fatalf("deployments = %d, want 1 despite ReplicaSet denial", len(snapshot.Deployments))
+	}
+	if snapshot.ReplicaSetsAvailableFor("payments") {
+		t.Fatal("ReplicaSetsAvailableFor(payments) = true after ReplicaSet denial, want false")
+	}
+}
+
 func TestListPagesRestartsOnceWhenContinueTokenExpires(t *testing.T) {
 	var continues []string
 	items, err := listPages(context.Background(), func(_ context.Context, opts metav1.ListOptions) ([]string, string, error) {

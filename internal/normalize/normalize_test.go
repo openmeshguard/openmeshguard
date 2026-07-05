@@ -150,6 +150,33 @@ func TestBuildWorkloadNormalization(t *testing.T) {
 			},
 		},
 		{
+			name: "marks Deployment unknown when ReplicaSet ownership evidence unavailable",
+			snapshot: collect.Snapshot{
+				Namespaces: []corev1.Namespace{namespace("payments", map[string]string{"istio-injection": "enabled"})},
+				Deployments: []appsv1.Deployment{
+					deployment("payments", "api", map[string]string{"app": "api"}, corev1.PodSpec{}),
+				},
+				Pods: []corev1.Pod{
+					podForReplicaSet("payments", "api-1", "api-abc123", map[string]string{"app": "api"}, corev1.PodSpec{
+						Containers: []corev1.Container{{Name: "api"}, {Name: "istio-proxy"}},
+					}),
+				},
+				PodAvailability:        collect.PeerAuthenticationAvailability{Namespaces: map[string]bool{"payments": true}},
+				ReplicaSetAvailability: collect.PeerAuthenticationAvailability{Namespaces: map[string]bool{"payments": false}},
+				PermissionSummary:      peerAuthenticationGrantedPermissions(),
+			},
+			assert: func(t *testing.T, result Result) {
+				workloads := workloadsByKindName(result)
+				deployment := workloads["Deployment/api"]
+				if deployment.Ref.Name == "" {
+					t.Fatalf("missing Deployment/api in %#v", result.Workloads)
+				}
+				if deployment.DataPlaneMode != resolver.ModeUnknown {
+					t.Fatalf("deployment mode = %q, want unknown when ReplicaSet evidence is unavailable", deployment.DataPlaneMode)
+				}
+			},
+		},
+		{
 			name: "marks mixed observed proxy evidence",
 			snapshot: collect.Snapshot{
 				Namespaces:  []corev1.Namespace{namespace("payments", nil)},
@@ -403,6 +430,14 @@ func workloadsByNamespace(result Result) map[string]resolver.WorkloadInput {
 	out := map[string]resolver.WorkloadInput{}
 	for _, workload := range result.Workloads {
 		out[workload.Ref.Namespace] = workload
+	}
+	return out
+}
+
+func workloadsByKindName(result Result) map[string]resolver.WorkloadInput {
+	out := map[string]resolver.WorkloadInput{}
+	for _, workload := range result.Workloads {
+		out[workload.Ref.Kind+"/"+workload.Ref.Name] = workload
 	}
 	return out
 }

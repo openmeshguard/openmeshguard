@@ -29,18 +29,19 @@ type Permission struct {
 
 // Snapshot is the raw typed-resource bundle returned by collectors.
 type Snapshot struct {
-	RootNamespace        string
-	Namespaces           []corev1.Namespace
-	Pods                 []corev1.Pod
-	PodAvailability      PeerAuthenticationAvailability
-	Deployments          []appsv1.Deployment
-	ReplicaSets          []appsv1.ReplicaSet
-	StatefulSets         []appsv1.StatefulSet
-	DaemonSets           []appsv1.DaemonSet
-	Services             []corev1.Service
-	PeerAuthentications  []*istiosecurityv1beta1.PeerAuthentication
-	PeerAuthAvailability PeerAuthenticationAvailability
-	PermissionSummary    []Permission
+	RootNamespace          string
+	Namespaces             []corev1.Namespace
+	Pods                   []corev1.Pod
+	PodAvailability        PeerAuthenticationAvailability
+	Deployments            []appsv1.Deployment
+	ReplicaSets            []appsv1.ReplicaSet
+	ReplicaSetAvailability PeerAuthenticationAvailability
+	StatefulSets           []appsv1.StatefulSet
+	DaemonSets             []appsv1.DaemonSet
+	Services               []corev1.Service
+	PeerAuthentications    []*istiosecurityv1beta1.PeerAuthentication
+	PeerAuthAvailability   PeerAuthenticationAvailability
+	PermissionSummary      []Permission
 }
 
 // PeerAuthenticationAvailability records which PeerAuthentication list scopes
@@ -120,6 +121,19 @@ func (s Snapshot) PodsAvailableFor(namespace string) bool {
 		return scopedAvailableFor(s.PodAvailability, namespace)
 	}
 	available, seen := s.resourcePermissionAvailable("", "pods")
+	if !seen {
+		return true
+	}
+	return available
+}
+
+// ReplicaSetsAvailableFor reports whether ReplicaSet ownership evidence was
+// available for Deployment pod matching in the namespace.
+func (s Snapshot) ReplicaSetsAvailableFor(namespace string) bool {
+	if hasScopedAvailabilityDetails(s.ReplicaSetAvailability) {
+		return scopedAvailableFor(s.ReplicaSetAvailability, namespace)
+	}
+	available, seen := s.resourcePermissionAvailable("apps", "replicasets")
 	if !seen {
 		return true
 	}

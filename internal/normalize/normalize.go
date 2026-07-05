@@ -41,6 +41,9 @@ func Build(snapshot collect.Snapshot) Result {
 		podsAvailableFor: func(namespace string) bool {
 			return snapshot.PodsAvailableFor(namespace)
 		},
+		replicaSetsAvailableFor: func(namespace string) bool {
+			return snapshot.ReplicaSetsAvailableFor(namespace)
+		},
 		peerAuthenticationsAvailableFor: func(namespace string) bool {
 			return snapshot.PeerAuthenticationsAvailableFor(namespace, rootNamespace)
 		},
@@ -131,6 +134,7 @@ type workloadBuilder struct {
 	rootNamespace                   string
 	replicaSetOwners                map[string]string
 	podsAvailableFor                func(namespace string) bool
+	replicaSetsAvailableFor         func(namespace string) bool
 	peerAuthenticationsAvailableFor func(namespace string) bool
 
 	workloads []resolver.WorkloadInput
@@ -143,7 +147,7 @@ func (b *workloadBuilder) addController(kind, namespace, name string, template c
 	for _, pod := range pods {
 		b.coverPod(pod)
 	}
-	mode := detectDataPlaneMode(nsLabels, template.Labels, template.Annotations, template.Spec, pods, b.podsAvailable(namespace))
+	mode := detectDataPlaneMode(nsLabels, template.Labels, template.Annotations, template.Spec, pods, b.controllerPodEvidenceAvailable(kind, namespace))
 
 	b.workloads = append(b.workloads, resolver.WorkloadInput{
 		Ref: resolver.WorkloadRef{
@@ -209,6 +213,23 @@ func (b *workloadBuilder) podsAvailable(namespace string) bool {
 		return true
 	}
 	return b.podsAvailableFor(namespace)
+}
+
+func (b *workloadBuilder) replicaSetsAvailable(namespace string) bool {
+	if b.replicaSetsAvailableFor == nil {
+		return true
+	}
+	return b.replicaSetsAvailableFor(namespace)
+}
+
+func (b *workloadBuilder) controllerPodEvidenceAvailable(kind, namespace string) bool {
+	if !b.podsAvailable(namespace) {
+		return false
+	}
+	if kind == "Deployment" {
+		return b.replicaSetsAvailable(namespace)
+	}
+	return true
 }
 
 func (b *workloadBuilder) peerAuthenticationsKnown(namespace string) bool {
