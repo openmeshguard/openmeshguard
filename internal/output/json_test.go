@@ -74,6 +74,21 @@ func TestProvisionalFindings(t *testing.T) {
 			},
 			wantFindings: 0,
 		},
+		{
+			name: "strict mTLS with unknown data plane emits unknown finding",
+			workload: resolver.WorkloadResult{
+				Ref:  resolver.WorkloadRef{Namespace: "payments", Name: "api", Kind: "Deployment"},
+				Mode: resolver.ModeUnknown,
+				MTLS: resolver.MTLSResult{
+					Effective: resolver.MTLSStrict,
+					Chain:     []resolver.Step{{Order: 1, Kind: "PeerAuthentication", Effect: "sets STRICT"}},
+				},
+			},
+			wantFindings:      1,
+			wantStatus:        "unknown",
+			wantConfidence:    "unavailable",
+			wantUnknownReason: "data plane membership unavailable",
+		},
 	}
 
 	for _, tt := range tests {

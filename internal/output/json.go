@@ -139,6 +139,7 @@ func inventory(input normalize.Inventory) inventorySummary {
 func provisionalFindings(workloads []resolver.WorkloadResult) []finding {
 	findings := []finding{}
 	for _, workload := range workloads {
+		dataPlaneUnavailable := workload.Mode == resolver.ModeUnknown || workload.Mode == resolver.ModeNotApplicable
 		status := "open"
 		confidence := "resolved"
 		var unknownReasons []string
@@ -171,9 +172,19 @@ func provisionalFindings(workloads []resolver.WorkloadResult) []finding {
 				unknownReasons = append(unknownReasons, workload.MTLS.UnknownReason)
 			}
 		default:
-			continue
+			if !dataPlaneUnavailable {
+				continue
+			}
+			status = "unknown"
+			confidence = "unavailable"
+			title = "Effective mTLS is unknown"
+			reasoning = fmt.Sprintf(
+				"%s/%s mTLS posture could not be fully resolved.",
+				workload.Ref.Namespace,
+				workload.Ref.Name,
+			)
 		}
-		if workload.Mode == resolver.ModeUnknown || workload.Mode == resolver.ModeNotApplicable {
+		if dataPlaneUnavailable {
 			status = "unknown"
 			confidence = "unavailable"
 			unknownReasons = append(unknownReasons, "data plane membership unavailable")
