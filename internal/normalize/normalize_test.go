@@ -257,6 +257,40 @@ func TestBuildIncludesRootNamespaceSelectorPeerAuthentication(t *testing.T) {
 	}
 }
 
+func TestBuildKeepsOwnedPodsWithoutNormalizedController(t *testing.T) {
+	result := Build(collect.Snapshot{
+		Namespaces: []corev1.Namespace{{
+			ObjectMeta: metav1.ObjectMeta{Name: "payments"},
+		}},
+		Pods: []corev1.Pod{{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "migrate-1",
+				Namespace: "payments",
+				Labels:    map[string]string{"job-name": "migrate"},
+				OwnerReferences: []metav1.OwnerReference{{
+					Kind: "Job",
+					Name: "migrate",
+				}},
+			},
+			Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "migrate"}, {Name: "istio-proxy"}}},
+		}},
+		PermissionSummary: []collect.Permission{{
+			APIGroup: "security.istio.io",
+			Resource: "peerauthentications",
+			Verbs:    []string{"list"},
+			Granted:  true,
+		}},
+	})
+
+	if len(result.Workloads) != 1 {
+		t.Fatalf("workloads = %d, want pod workload", len(result.Workloads))
+	}
+	workload := result.Workloads[0]
+	if workload.Ref.Kind != "Pod" || workload.Ref.Name != "migrate-1" {
+		t.Fatalf("workload ref = %#v, want Pod payments/migrate-1", workload.Ref)
+	}
+}
+
 func TestBuildAmbientStubReturnsUnknown(t *testing.T) {
 	result := Build(collect.Snapshot{
 		Namespaces: []corev1.Namespace{{

@@ -4,6 +4,7 @@ import "sort"
 
 const (
 	notImplementedM2Reason = "not yet implemented (M2)"
+	dataPlaneUnknownReason = "data plane membership unavailable"
 )
 
 const provisionalVersion = "resolver-m1-provisional"
@@ -27,6 +28,14 @@ func (ProvisionalResolver) Version() string {
 }
 
 func (ProvisionalResolver) ResolveMTLS(in WorkloadInput) MTLSResult {
+	if in.DataPlaneMode == ModeUnknown || in.DataPlaneMode == ModeNotApplicable {
+		return MTLSResult{
+			Effective:              MTLSUnknown,
+			ClientTLSContradiction: false,
+			Chain:                  []Step{},
+			UnknownReason:          dataPlaneUnknownReason,
+		}
+	}
 	if !in.MeshDefaults.Known {
 		return MTLSResult{
 			Effective:              MTLSUnknown,

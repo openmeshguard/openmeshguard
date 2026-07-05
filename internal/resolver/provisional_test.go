@@ -18,6 +18,7 @@ func TestProvisionalResolverResolveMTLS(t *testing.T) {
 					Name:      "api",
 					Kind:      "Deployment",
 				},
+				DataPlaneMode: ModeSidecar,
 				MeshDefaults: MeshDefaults{
 					RootNamespace: "istio-system",
 					Known:         true,
@@ -33,7 +34,8 @@ func TestProvisionalResolverResolveMTLS(t *testing.T) {
 		{
 			name: "defaults to permissive with chain",
 			in: WorkloadInput{
-				Ref: WorkloadRef{Namespace: "default", Name: "api", Kind: "Deployment"},
+				Ref:           WorkloadRef{Namespace: "default", Name: "api", Kind: "Deployment"},
+				DataPlaneMode: ModeSidecar,
 				MeshDefaults: MeshDefaults{
 					RootNamespace: "istio-system",
 					Known:         true,
@@ -43,10 +45,22 @@ func TestProvisionalResolverResolveMTLS(t *testing.T) {
 			wantChainKinds: []string{"MeshConfigDefault"},
 		},
 		{
+			name: "unknown data plane makes mTLS unknown",
+			in: WorkloadInput{
+				Ref:           WorkloadRef{Namespace: "payments", Name: "api", Kind: "Deployment"},
+				DataPlaneMode: ModeUnknown,
+				MeshDefaults:  MeshDefaults{RootNamespace: "istio-system", Known: true},
+				PeerAuthN:     []PeerAuthenticationView{{Name: "default", Namespace: "istio-system", Mode: "STRICT"}},
+			},
+			wantEffective:     MTLSUnknown,
+			wantUnknownReason: dataPlaneUnknownReason,
+		},
+		{
 			name: "selector PeerAuthentication is M2",
 			in: WorkloadInput{
-				MeshDefaults: MeshDefaults{Known: true},
-				PeerAuthN:    []PeerAuthenticationView{{Name: "api", Namespace: "payments", Mode: "STRICT", SelectorMatch: true}},
+				DataPlaneMode: ModeSidecar,
+				MeshDefaults:  MeshDefaults{Known: true},
+				PeerAuthN:     []PeerAuthenticationView{{Name: "api", Namespace: "payments", Mode: "STRICT", SelectorMatch: true}},
 			},
 			wantEffective:     MTLSUnknown,
 			wantUnknownReason: notImplementedM2Reason,
@@ -54,8 +68,9 @@ func TestProvisionalResolverResolveMTLS(t *testing.T) {
 		{
 			name: "port level PeerAuthentication is M2",
 			in: WorkloadInput{
-				MeshDefaults: MeshDefaults{Known: true},
-				PeerAuthN:    []PeerAuthenticationView{{Name: "api", Namespace: "payments", Mode: "STRICT", PortLevelModes: map[int32]string{8080: "DISABLE"}}},
+				DataPlaneMode: ModeSidecar,
+				MeshDefaults:  MeshDefaults{Known: true},
+				PeerAuthN:     []PeerAuthenticationView{{Name: "api", Namespace: "payments", Mode: "STRICT", PortLevelModes: map[int32]string{8080: "DISABLE"}}},
 			},
 			wantEffective:     MTLSUnknown,
 			wantUnknownReason: notImplementedM2Reason,
@@ -63,8 +78,9 @@ func TestProvisionalResolverResolveMTLS(t *testing.T) {
 		{
 			name: "DestinationRule interplay is M2",
 			in: WorkloadInput{
-				MeshDefaults: MeshDefaults{Known: true},
-				DestRules:    []DestinationRuleView{{Name: "api", Namespace: "payments", Host: "api.payments.svc.cluster.local"}},
+				DataPlaneMode: ModeSidecar,
+				MeshDefaults:  MeshDefaults{Known: true},
+				DestRules:     []DestinationRuleView{{Name: "api", Namespace: "payments", Host: "api.payments.svc.cluster.local"}},
 			},
 			wantEffective:     MTLSUnknown,
 			wantUnknownReason: notImplementedM2Reason,
@@ -72,7 +88,8 @@ func TestProvisionalResolverResolveMTLS(t *testing.T) {
 		{
 			name: "multiple mesh-wide PeerAuthentications are M2",
 			in: WorkloadInput{
-				Ref: WorkloadRef{Namespace: "payments", Name: "api", Kind: "Deployment"},
+				Ref:           WorkloadRef{Namespace: "payments", Name: "api", Kind: "Deployment"},
+				DataPlaneMode: ModeSidecar,
 				MeshDefaults: MeshDefaults{
 					RootNamespace: "istio-system",
 					Known:         true,
@@ -88,8 +105,9 @@ func TestProvisionalResolverResolveMTLS(t *testing.T) {
 		{
 			name: "multiple namespace PeerAuthentications are M2",
 			in: WorkloadInput{
-				Ref:          WorkloadRef{Namespace: "payments", Name: "api", Kind: "Deployment"},
-				MeshDefaults: MeshDefaults{RootNamespace: "istio-system", Known: true},
+				Ref:           WorkloadRef{Namespace: "payments", Name: "api", Kind: "Deployment"},
+				DataPlaneMode: ModeSidecar,
+				MeshDefaults:  MeshDefaults{RootNamespace: "istio-system", Known: true},
 				PeerAuthN: []PeerAuthenticationView{
 					{Name: "a", Namespace: "payments", Mode: "STRICT"},
 					{Name: "b", Namespace: "payments", Mode: "PERMISSIVE"},

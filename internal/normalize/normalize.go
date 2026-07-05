@@ -30,6 +30,7 @@ func Build(snapshot collect.Snapshot) Result {
 		namespaces:          namespaceLabels,
 		pods:                snapshot.Pods,
 		peerAuthentications: peerAuthentications,
+		coveredPods:         map[string]struct{}{},
 		peerAuthenticationsAvailableFor: func(namespace string) bool {
 			return snapshot.PeerAuthenticationsAvailableFor(namespace, defaultRootNamespace)
 		},
@@ -75,7 +76,7 @@ func Build(snapshot collect.Snapshot) Result {
 		)
 	}
 	for _, pod := range snapshot.Pods {
-		if len(pod.OwnerReferences) > 0 {
+		if builder.podCovered(pod) {
 			continue
 		}
 		builder.addPod(pod)
@@ -116,6 +117,7 @@ type workloadBuilder struct {
 	namespaces                      map[string]map[string]string
 	pods                            []corev1.Pod
 	peerAuthentications             []peerAuthenticationProjection
+	coveredPods                     map[string]struct{}
 	peerAuthenticationsAvailableFor func(namespace string) bool
 
 	workloads []resolver.WorkloadInput
@@ -125,6 +127,9 @@ func (b *workloadBuilder) addController(kind, namespace, name string, template c
 	labels := copyStringMap(template.Labels)
 	nsLabels := b.namespaces[namespace]
 	pods := podsMatching(b.pods, namespace, selector)
+	for _, pod := range pods {
+		b.coverPod(pod)
+	}
 	mode := detectDataPlaneMode(nsLabels, template.Labels, template.Annotations, template.Spec, pods)
 
 	b.workloads = append(b.workloads, resolver.WorkloadInput{
@@ -172,6 +177,18 @@ func (b *workloadBuilder) addPod(pod corev1.Pod) {
 		},
 		PeerAuthN: b.peerAuthenticationsFor(pod.Namespace, labels),
 	})
+}
+
+func (b *workloadBuilder) coverPod(pod corev1.Pod) {
+	if b.coveredPods == nil {
+		b.coveredPods = map[string]struct{}{}
+	}
+	b.coveredPods[podKey(pod)] = struct{}{}
+}
+
+func (b *workloadBuilder) podCovered(pod corev1.Pod) bool {
+	_, ok := b.coveredPods[podKey(pod)]
+	return ok
 }
 
 func (b *workloadBuilder) peerAuthenticationsKnown(namespace string) bool {
@@ -255,6 +272,10 @@ func podsMatching(pods []corev1.Pod, namespace string, selector *metav1.LabelSel
 		}
 	}
 	return matches
+}
+
+func podKey(pod corev1.Pod) string {
+	return pod.Namespace + "/" + pod.Name
 }
 
 func detectDataPlaneMode(
