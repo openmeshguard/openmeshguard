@@ -56,7 +56,7 @@ func (c *Collector) Collect(ctx context.Context, scope Scope) (Snapshot, error) 
 	scope = normalizeScope(scope)
 
 	var (
-		snapshot Snapshot
+		snapshot = Snapshot{RootNamespace: scope.RootNamespace}
 		mu       sync.Mutex
 	)
 

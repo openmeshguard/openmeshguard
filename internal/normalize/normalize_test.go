@@ -303,6 +303,46 @@ func TestBuildIncludesRootNamespaceSelectorPeerAuthentication(t *testing.T) {
 	}
 }
 
+func TestBuildUsesConfiguredRootNamespace(t *testing.T) {
+	result := Build(collect.Snapshot{
+		RootNamespace: "istio-config",
+		Namespaces: []corev1.Namespace{
+			{ObjectMeta: metav1.ObjectMeta{Name: "payments"}},
+			{ObjectMeta: metav1.ObjectMeta{Name: "istio-config"}},
+		},
+		Deployments: []appsv1.Deployment{{
+			ObjectMeta: metav1.ObjectMeta{Name: "api", Namespace: "payments"},
+			Spec: appsv1.DeploymentSpec{
+				Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "api"}},
+				Template: corev1.PodTemplateSpec{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "api"}}},
+			},
+		}},
+		PeerAuthentications: []*istiosecurityv1beta1.PeerAuthentication{{
+			ObjectMeta: metav1.ObjectMeta{Name: "default", Namespace: "istio-config"},
+			Spec: securityapi.PeerAuthentication{
+				Mtls: &securityapi.PeerAuthentication_MutualTLS{Mode: securityapi.PeerAuthentication_MutualTLS_STRICT},
+			},
+		}},
+		PeerAuthAvailability: collect.PeerAuthenticationAvailability{
+			Namespaces: map[string]bool{
+				"istio-config": true,
+				"payments":     true,
+			},
+		},
+	})
+
+	if len(result.Workloads) != 1 {
+		t.Fatalf("workloads = %d, want 1", len(result.Workloads))
+	}
+	workload := result.Workloads[0]
+	if workload.MeshDefaults.RootNamespace != "istio-config" {
+		t.Fatalf("root namespace = %q, want istio-config", workload.MeshDefaults.RootNamespace)
+	}
+	if len(workload.PeerAuthN) != 1 || workload.PeerAuthN[0].Namespace != "istio-config" {
+		t.Fatalf("peer authentications = %#v, want configured root policy", workload.PeerAuthN)
+	}
+}
+
 func TestBuildKeepsOwnedPodsWithoutNormalizedController(t *testing.T) {
 	result := Build(collect.Snapshot{
 		Namespaces: []corev1.Namespace{{

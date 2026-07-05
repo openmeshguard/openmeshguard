@@ -28,6 +28,7 @@ type Permission struct {
 
 // Snapshot is the raw typed-resource bundle returned by collectors.
 type Snapshot struct {
+	RootNamespace        string
 	Namespaces           []corev1.Namespace
 	Pods                 []corev1.Pod
 	Deployments          []appsv1.Deployment

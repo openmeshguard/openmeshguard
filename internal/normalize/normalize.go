@@ -19,6 +19,10 @@ const defaultRootNamespace = "istio-system"
 // resolver inputs. M1 intentionally omits ports, DestinationRules, authz, and
 // ambient resolution.
 func Build(snapshot collect.Snapshot) Result {
+	rootNamespace := snapshot.RootNamespace
+	if rootNamespace == "" {
+		rootNamespace = defaultRootNamespace
+	}
 	namespaceLabels := map[string]map[string]string{}
 	for _, namespace := range snapshot.Namespaces {
 		namespaceLabels[namespace.Name] = copyStringMap(namespace.Labels)
@@ -31,8 +35,9 @@ func Build(snapshot collect.Snapshot) Result {
 		pods:                snapshot.Pods,
 		peerAuthentications: peerAuthentications,
 		coveredPods:         map[string]struct{}{},
+		rootNamespace:       rootNamespace,
 		peerAuthenticationsAvailableFor: func(namespace string) bool {
-			return snapshot.PeerAuthenticationsAvailableFor(namespace, defaultRootNamespace)
+			return snapshot.PeerAuthenticationsAvailableFor(namespace, rootNamespace)
 		},
 	}
 
@@ -118,6 +123,7 @@ type workloadBuilder struct {
 	pods                            []corev1.Pod
 	peerAuthentications             []peerAuthenticationProjection
 	coveredPods                     map[string]struct{}
+	rootNamespace                   string
 	peerAuthenticationsAvailableFor func(namespace string) bool
 
 	workloads []resolver.WorkloadInput
@@ -146,7 +152,7 @@ func (b *workloadBuilder) addController(kind, namespace, name string, template c
 			AmbientEnrolled: resolver.Unobserved,
 		},
 		MeshDefaults: resolver.MeshDefaults{
-			RootNamespace: defaultRootNamespace,
+			RootNamespace: b.rootNamespace,
 			Known:         b.peerAuthenticationsKnown(namespace),
 		},
 		PeerAuthN: b.peerAuthenticationsFor(namespace, labels),
@@ -172,7 +178,7 @@ func (b *workloadBuilder) addPod(pod corev1.Pod) {
 			AmbientEnrolled: resolver.Unobserved,
 		},
 		MeshDefaults: resolver.MeshDefaults{
-			RootNamespace: defaultRootNamespace,
+			RootNamespace: b.rootNamespace,
 			Known:         b.peerAuthenticationsKnown(pod.Namespace),
 		},
 		PeerAuthN: b.peerAuthenticationsFor(pod.Namespace, labels),
@@ -202,7 +208,7 @@ func (b *workloadBuilder) peerAuthenticationsFor(namespace string, workloadLabel
 	var selected []resolver.PeerAuthenticationView
 	for _, peerAuthentication := range b.peerAuthentications {
 		if !peerAuthentication.hasSelector {
-			if peerAuthentication.Namespace == defaultRootNamespace || peerAuthentication.Namespace == namespace {
+			if peerAuthentication.Namespace == b.rootNamespace || peerAuthentication.Namespace == namespace {
 				selected = append(selected, peerAuthentication.PeerAuthenticationView)
 			}
 			continue
@@ -210,7 +216,7 @@ func (b *workloadBuilder) peerAuthenticationsFor(namespace string, workloadLabel
 		// Istio root-namespace selectors additionally match workloads in every
 		// namespace; M1 passes them through so the provisional resolver returns
 		// explicit M2 unknown instead of ignoring them.
-		if peerAuthentication.Namespace != namespace && peerAuthentication.Namespace != defaultRootNamespace {
+		if peerAuthentication.Namespace != namespace && peerAuthentication.Namespace != b.rootNamespace {
 			continue
 		}
 		if matchLabels(peerAuthentication.selectorLabels, workloadLabels) {

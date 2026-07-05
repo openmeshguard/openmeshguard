@@ -109,29 +109,33 @@ func TestCollectorDegradesForbiddenAndNotFound(t *testing.T) {
 }
 
 func TestCollectorScopedScanIncludesRootNamespacePeerAuthentications(t *testing.T) {
+	rootNamespace := "istio-config"
 	kube := kubefake.NewSimpleClientset(
 		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "payments"}},
-		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: DefaultRootNamespace}},
+		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: rootNamespace}},
 		&appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "api", Namespace: "payments"}},
 	)
 	istio := istiofake.NewSimpleClientset(
 		&istiosecurityv1beta1.PeerAuthentication{
-			ObjectMeta: metav1.ObjectMeta{Name: "default", Namespace: DefaultRootNamespace},
+			ObjectMeta: metav1.ObjectMeta{Name: "default", Namespace: rootNamespace},
 			Spec: securityapi.PeerAuthentication{
 				Mtls: &securityapi.PeerAuthentication_MutualTLS{Mode: securityapi.PeerAuthentication_MutualTLS_STRICT},
 			},
 		},
 	)
 
-	snapshot, err := New(kube, istio).Collect(context.Background(), Scope{Namespaces: []string{"payments"}})
+	snapshot, err := New(kube, istio).Collect(context.Background(), Scope{Namespaces: []string{"payments"}, RootNamespace: rootNamespace})
 	if err != nil {
 		t.Fatalf("collect: %v", err)
+	}
+	if snapshot.RootNamespace != rootNamespace {
+		t.Fatalf("snapshot root namespace = %q, want %q", snapshot.RootNamespace, rootNamespace)
 	}
 	if len(snapshot.PeerAuthentications) != 1 {
 		t.Fatalf("peer authentications = %d, want root namespace policy", len(snapshot.PeerAuthentications))
 	}
-	if got := snapshot.PeerAuthentications[0].Namespace; got != DefaultRootNamespace {
-		t.Fatalf("peer authentication namespace = %q, want %q", got, DefaultRootNamespace)
+	if got := snapshot.PeerAuthentications[0].Namespace; got != rootNamespace {
+		t.Fatalf("peer authentication namespace = %q, want %q", got, rootNamespace)
 	}
 
 	paNamespaces := map[string]bool{}
@@ -140,7 +144,7 @@ func TestCollectorScopedScanIncludesRootNamespacePeerAuthentications(t *testing.
 			paNamespaces[action.GetNamespace()] = true
 		}
 	}
-	for _, namespace := range []string{"payments", DefaultRootNamespace} {
+	for _, namespace := range []string{"payments", rootNamespace} {
 		if !paNamespaces[namespace] {
 			t.Fatalf("missing peerauthentication list for namespace %q; saw %#v", namespace, paNamespaces)
 		}
