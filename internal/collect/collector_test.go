@@ -103,6 +103,9 @@ func TestCollectorDegradesForbiddenAndNotFound(t *testing.T) {
 
 	assertPermission(t, snapshot.PermissionSummary, "", "pods", false)
 	assertPermission(t, snapshot.PermissionSummary, "security.istio.io", "peerauthentications", false)
+	if snapshot.PodsAvailableFor("foo") {
+		t.Fatal("PodsAvailableFor(foo) = true after pod list denial")
+	}
 	if snapshot.PeerAuthenticationsAvailable() {
 		t.Fatal("PeerAuthenticationsAvailable = true after peerauthentications not found")
 	}

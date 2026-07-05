@@ -28,7 +28,7 @@ func (ProvisionalResolver) Version() string {
 }
 
 func (ProvisionalResolver) ResolveMTLS(in WorkloadInput) MTLSResult {
-	if in.DataPlaneMode == ModeUnknown || in.DataPlaneMode == ModeNotApplicable {
+	if in.DataPlaneMode == ModeUnknown || in.DataPlaneMode == ModeMixed || in.DataPlaneMode == ModeNotApplicable {
 		return MTLSResult{
 			Effective:              MTLSUnknown,
 			ClientTLSContradiction: false,

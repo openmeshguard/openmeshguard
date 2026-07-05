@@ -139,7 +139,9 @@ func inventory(input normalize.Inventory) inventorySummary {
 func provisionalFindings(workloads []resolver.WorkloadResult) []finding {
 	findings := []finding{}
 	for _, workload := range workloads {
-		dataPlaneUnavailable := workload.Mode == resolver.ModeUnknown || workload.Mode == resolver.ModeNotApplicable
+		dataPlaneUnavailable := workload.Mode == resolver.ModeUnknown ||
+			workload.Mode == resolver.ModeMixed ||
+			workload.Mode == resolver.ModeNotApplicable
 		status := "open"
 		confidence := "resolved"
 		var unknownReasons []string

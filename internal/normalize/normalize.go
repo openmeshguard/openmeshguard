@@ -36,6 +36,9 @@ func Build(snapshot collect.Snapshot) Result {
 		peerAuthentications: peerAuthentications,
 		coveredPods:         map[string]struct{}{},
 		rootNamespace:       rootNamespace,
+		podsAvailableFor: func(namespace string) bool {
+			return snapshot.PodsAvailableFor(namespace)
+		},
 		peerAuthenticationsAvailableFor: func(namespace string) bool {
 			return snapshot.PeerAuthenticationsAvailableFor(namespace, rootNamespace)
 		},
@@ -124,6 +127,7 @@ type workloadBuilder struct {
 	peerAuthentications             []peerAuthenticationProjection
 	coveredPods                     map[string]struct{}
 	rootNamespace                   string
+	podsAvailableFor                func(namespace string) bool
 	peerAuthenticationsAvailableFor func(namespace string) bool
 
 	workloads []resolver.WorkloadInput
@@ -136,7 +140,7 @@ func (b *workloadBuilder) addController(kind, namespace, name string, template c
 	for _, pod := range pods {
 		b.coverPod(pod)
 	}
-	mode := detectDataPlaneMode(nsLabels, template.Labels, template.Annotations, template.Spec, pods)
+	mode := detectDataPlaneMode(nsLabels, template.Labels, template.Annotations, template.Spec, pods, b.podsAvailable(namespace))
 
 	b.workloads = append(b.workloads, resolver.WorkloadInput{
 		Ref: resolver.WorkloadRef{
@@ -162,7 +166,7 @@ func (b *workloadBuilder) addController(kind, namespace, name string, template c
 func (b *workloadBuilder) addPod(pod corev1.Pod) {
 	labels := copyStringMap(pod.Labels)
 	nsLabels := b.namespaces[pod.Namespace]
-	mode := detectDataPlaneMode(nsLabels, pod.Labels, pod.Annotations, pod.Spec, []corev1.Pod{pod})
+	mode := detectDataPlaneMode(nsLabels, pod.Labels, pod.Annotations, pod.Spec, []corev1.Pod{pod}, b.podsAvailable(pod.Namespace))
 
 	b.workloads = append(b.workloads, resolver.WorkloadInput{
 		Ref: resolver.WorkloadRef{
@@ -195,6 +199,13 @@ func (b *workloadBuilder) coverPod(pod corev1.Pod) {
 func (b *workloadBuilder) podCovered(pod corev1.Pod) bool {
 	_, ok := b.coveredPods[podKey(pod)]
 	return ok
+}
+
+func (b *workloadBuilder) podsAvailable(namespace string) bool {
+	if b.podsAvailableFor == nil {
+		return true
+	}
+	return b.podsAvailableFor(namespace)
 }
 
 func (b *workloadBuilder) peerAuthenticationsKnown(namespace string) bool {
@@ -290,17 +301,32 @@ func detectDataPlaneMode(
 	workloadAnnotations map[string]string,
 	templateSpec corev1.PodSpec,
 	pods []corev1.Pod,
+	podEvidenceAvailable bool,
 ) resolver.DataPlaneMode {
-	if hasIstioProxy(templateSpec) {
-		return resolver.ModeSidecar
-	}
-	for _, pod := range pods {
-		if hasIstioProxy(pod.Spec) {
-			return resolver.ModeSidecar
-		}
+	if !podEvidenceAvailable {
+		return resolver.ModeUnknown
 	}
 	if len(pods) > 0 {
-		return resolver.ModeUnknown
+		withProxy := 0
+		withoutProxy := 0
+		for _, pod := range pods {
+			if hasIstioProxy(pod.Spec) {
+				withProxy++
+				continue
+			}
+			withoutProxy++
+		}
+		switch {
+		case withProxy > 0 && withoutProxy == 0:
+			return resolver.ModeSidecar
+		case withProxy > 0 && withoutProxy > 0:
+			return resolver.ModeMixed
+		default:
+			return resolver.ModeUnknown
+		}
+	}
+	if hasIstioProxy(templateSpec) {
+		return resolver.ModeSidecar
 	}
 	if sidecarInjectionDisabled(workloadLabels, workloadAnnotations) {
 		return resolver.ModeUnknown

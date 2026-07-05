@@ -210,6 +210,79 @@ func TestBuildMarksObservedPodsWithoutProxyUnknownDespiteInjectionLabels(t *test
 	}
 }
 
+func TestBuildMarksWorkloadUnknownWhenPodEvidenceUnavailable(t *testing.T) {
+	result := Build(collect.Snapshot{
+		Namespaces: []corev1.Namespace{{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:   "payments",
+				Labels: map[string]string{"istio-injection": "enabled"},
+			},
+		}},
+		Deployments: []appsv1.Deployment{{
+			ObjectMeta: metav1.ObjectMeta{Name: "api", Namespace: "payments"},
+			Spec: appsv1.DeploymentSpec{
+				Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "api"}},
+				Template: corev1.PodTemplateSpec{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "api"}}},
+			},
+		}},
+		PodAvailability: collect.PeerAuthenticationAvailability{
+			Namespaces: map[string]bool{"payments": false},
+		},
+		PermissionSummary: []collect.Permission{
+			{Resource: "pods", Verbs: []string{"list"}, Granted: false},
+			{APIGroup: "security.istio.io", Resource: "peerauthentications", Verbs: []string{"list"}, Granted: true},
+		},
+	})
+
+	if len(result.Workloads) != 1 {
+		t.Fatalf("workloads = %d, want 1", len(result.Workloads))
+	}
+	if result.Workloads[0].DataPlaneMode != resolver.ModeUnknown {
+		t.Fatalf("mode = %q, want unknown when pod evidence is unavailable", result.Workloads[0].DataPlaneMode)
+	}
+}
+
+func TestBuildMarksMixedObservedProxyEvidence(t *testing.T) {
+	result := Build(collect.Snapshot{
+		Namespaces: []corev1.Namespace{{
+			ObjectMeta: metav1.ObjectMeta{Name: "payments"},
+		}},
+		Deployments: []appsv1.Deployment{{
+			ObjectMeta: metav1.ObjectMeta{Name: "api", Namespace: "payments"},
+			Spec: appsv1.DeploymentSpec{
+				Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "api"}},
+				Template: corev1.PodTemplateSpec{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "api"}}},
+			},
+		}},
+		Pods: []corev1.Pod{
+			{
+				ObjectMeta: metav1.ObjectMeta{Name: "api-1", Namespace: "payments", Labels: map[string]string{"app": "api"}},
+				Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "api"}, {Name: "istio-proxy"}}},
+			},
+			{
+				ObjectMeta: metav1.ObjectMeta{Name: "api-2", Namespace: "payments", Labels: map[string]string{"app": "api"}},
+				Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "api"}}},
+			},
+		},
+		PodAvailability: collect.PeerAuthenticationAvailability{
+			Namespaces: map[string]bool{"payments": true},
+		},
+		PermissionSummary: []collect.Permission{{
+			APIGroup: "security.istio.io",
+			Resource: "peerauthentications",
+			Verbs:    []string{"list"},
+			Granted:  true,
+		}},
+	})
+
+	if len(result.Workloads) != 1 {
+		t.Fatalf("workloads = %d, want 1", len(result.Workloads))
+	}
+	if result.Workloads[0].DataPlaneMode != resolver.ModeMixed {
+		t.Fatalf("mode = %q, want mixed for injected and uninjected observed pods", result.Workloads[0].DataPlaneMode)
+	}
+}
+
 func TestBuildScopesPeerAuthenticationAvailabilityToWorkloadNamespace(t *testing.T) {
 	result := Build(collect.Snapshot{
 		Namespaces: []corev1.Namespace{

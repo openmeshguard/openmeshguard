@@ -65,17 +65,25 @@ func (c *Collector) Collect(ctx context.Context, scope Scope) (Snapshot, error) 
 		defer mu.Unlock()
 		snapshot.PermissionSummary = append(snapshot.PermissionSummary, permission)
 	}
+	markScopedAvailability := func(availability *PeerAuthenticationAvailability, namespace string, available bool) {
+		if namespace == metav1.NamespaceAll {
+			availability.AllNamespaces = available
+			return
+		}
+		if availability.Namespaces == nil {
+			availability.Namespaces = map[string]bool{}
+		}
+		availability.Namespaces[namespace] = available
+	}
+	markPodsAvailable := func(namespace string, available bool) {
+		mu.Lock()
+		defer mu.Unlock()
+		markScopedAvailability(&snapshot.PodAvailability, namespace, available)
+	}
 	markPeerAuthenticationsAvailable := func(namespace string, available bool) {
 		mu.Lock()
 		defer mu.Unlock()
-		if namespace == metav1.NamespaceAll {
-			snapshot.PeerAuthAvailability.AllNamespaces = available
-			return
-		}
-		if snapshot.PeerAuthAvailability.Namespaces == nil {
-			snapshot.PeerAuthAvailability.Namespaces = map[string]bool{}
-		}
-		snapshot.PeerAuthAvailability.Namespaces[namespace] = available
+		markScopedAvailability(&snapshot.PeerAuthAvailability, namespace, available)
 	}
 	appendDegraded := func(meta resourceMeta, err error) error {
 		if !isDegradedListError(err) {
@@ -101,7 +109,7 @@ func (c *Collector) Collect(ctx context.Context, scope Scope) (Snapshot, error) 
 	for _, namespace := range workloadNamespaces(scope) {
 		ns := namespace
 		tasks = append(tasks,
-			c.listTask(podMeta, func(ctx context.Context) error {
+			func(ctx context.Context) error {
 				items, err := listPages(ctx, func(ctx context.Context, opts metav1.ListOptions) ([]corev1.Pod, string, error) {
 					list, err := c.kube.CoreV1().Pods(ns).List(ctx, opts)
 					if err != nil {
@@ -109,13 +117,17 @@ func (c *Collector) Collect(ctx context.Context, scope Scope) (Snapshot, error) 
 					}
 					return list.Items, list.Continue, nil
 				})
-				if err == nil {
-					mu.Lock()
-					snapshot.Pods = append(snapshot.Pods, items...)
-					mu.Unlock()
+				if err != nil {
+					markPodsAvailable(ns, false)
+					return appendDegraded(podMeta, err)
 				}
-				return err
-			}, appendPermission, appendDegraded),
+				mu.Lock()
+				snapshot.Pods = append(snapshot.Pods, items...)
+				mu.Unlock()
+				markPodsAvailable(ns, true)
+				appendPermission(podMeta.permission(true))
+				return nil
+			},
 			c.listTask(serviceMeta, func(ctx context.Context) error {
 				items, err := listPages(ctx, func(ctx context.Context, opts metav1.ListOptions) ([]corev1.Service, string, error) {
 					list, err := c.kube.CoreV1().Services(ns).List(ctx, opts)

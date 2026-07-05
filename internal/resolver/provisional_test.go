@@ -56,6 +56,17 @@ func TestProvisionalResolverResolveMTLS(t *testing.T) {
 			wantUnknownReason: dataPlaneUnknownReason,
 		},
 		{
+			name: "mixed data plane makes mTLS unknown",
+			in: WorkloadInput{
+				Ref:           WorkloadRef{Namespace: "payments", Name: "api", Kind: "Deployment"},
+				DataPlaneMode: ModeMixed,
+				MeshDefaults:  MeshDefaults{RootNamespace: "istio-system", Known: true},
+				PeerAuthN:     []PeerAuthenticationView{{Name: "default", Namespace: "istio-system", Mode: "STRICT"}},
+			},
+			wantEffective:     MTLSUnknown,
+			wantUnknownReason: dataPlaneUnknownReason,
+		},
+		{
 			name: "selector PeerAuthentication is M2",
 			in: WorkloadInput{
 				DataPlaneMode: ModeSidecar,

@@ -31,6 +31,7 @@ type Snapshot struct {
 	RootNamespace        string
 	Namespaces           []corev1.Namespace
 	Pods                 []corev1.Pod
+	PodAvailability      PeerAuthenticationAvailability
 	Deployments          []appsv1.Deployment
 	ReplicaSets          []appsv1.ReplicaSet
 	StatefulSets         []appsv1.StatefulSet
@@ -108,4 +109,43 @@ func (s Snapshot) PeerAuthenticationsAvailableFor(namespace, rootNamespace strin
 
 func (s Snapshot) hasPeerAuthenticationAvailabilityDetails() bool {
 	return s.PeerAuthAvailability.AllNamespaces || len(s.PeerAuthAvailability.Namespaces) > 0
+}
+
+// PodsAvailableFor reports whether pod evidence was available for the namespace.
+// Hand-built snapshots without permission metadata default to available so unit
+// tests can provide explicit pods without recreating collector bookkeeping.
+func (s Snapshot) PodsAvailableFor(namespace string) bool {
+	if hasScopedAvailabilityDetails(s.PodAvailability) {
+		return scopedAvailableFor(s.PodAvailability, namespace)
+	}
+	available, seen := s.resourcePermissionAvailable("", "pods")
+	if !seen {
+		return true
+	}
+	return available
+}
+
+func hasScopedAvailabilityDetails(availability PeerAuthenticationAvailability) bool {
+	return availability.AllNamespaces || len(availability.Namespaces) > 0
+}
+
+func scopedAvailableFor(availability PeerAuthenticationAvailability, namespace string) bool {
+	if availability.AllNamespaces {
+		return true
+	}
+	return availability.Namespaces[namespace]
+}
+
+func (s Snapshot) resourcePermissionAvailable(apiGroup, resource string) (bool, bool) {
+	seen := false
+	for _, permission := range s.PermissionSummary {
+		if permission.APIGroup != apiGroup || permission.Resource != resource {
+			continue
+		}
+		seen = true
+		if !permission.Granted {
+			return false, true
+		}
+	}
+	return seen, seen
 }
