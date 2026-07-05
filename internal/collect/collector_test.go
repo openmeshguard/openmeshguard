@@ -297,6 +297,55 @@ func TestCollectorTracksPeerAuthenticationAvailabilityPerNamespace(t *testing.T)
 	}
 }
 
+func TestListPagesRestartsOnceWhenContinueTokenExpires(t *testing.T) {
+	var continues []string
+	items, err := listPages(context.Background(), func(_ context.Context, opts metav1.ListOptions) ([]string, string, error) {
+		continues = append(continues, opts.Continue)
+		switch len(continues) {
+		case 1:
+			return []string{"stale"}, "expired-token", nil
+		case 2:
+			return nil, "", apierrors.NewResourceExpired("continue token expired")
+		case 3:
+			return []string{"fresh"}, "fresh-token", nil
+		case 4:
+			return []string{"done"}, "", nil
+		default:
+			t.Fatalf("unexpected list call %d", len(continues))
+			return nil, "", nil
+		}
+	})
+	if err != nil {
+		t.Fatalf("listPages: %v", err)
+	}
+	if got, want := strings.Join(items, ","), "fresh,done"; got != want {
+		t.Fatalf("items = %q, want %q", got, want)
+	}
+	if got, want := strings.Join(continues, ","), ",expired-token,,fresh-token"; got != want {
+		t.Fatalf("continue tokens = %q, want %q", got, want)
+	}
+}
+
+func TestListPagesReturnsRepeatedExpiredContinueToken(t *testing.T) {
+	calls := 0
+	_, err := listPages(context.Background(), func(_ context.Context, opts metav1.ListOptions) ([]string, string, error) {
+		calls++
+		if opts.Continue == "" {
+			return []string{"page"}, "expired-token", nil
+		}
+		return nil, "", apierrors.NewResourceExpired("continue token expired")
+	})
+	if err == nil {
+		t.Fatal("listPages returned nil error after repeated expired continue token")
+	}
+	if !apierrors.IsResourceExpired(err) {
+		t.Fatalf("listPages error = %v, want resource expired", err)
+	}
+	if calls != 4 {
+		t.Fatalf("list calls = %d, want 4", calls)
+	}
+}
+
 func assertPermission(t *testing.T, permissions []Permission, apiGroup, resource string, granted bool) {
 	t.Helper()
 

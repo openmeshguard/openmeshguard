@@ -299,9 +299,16 @@ func (c *Collector) listTask(
 func listPages[T any](ctx context.Context, list func(context.Context, metav1.ListOptions) ([]T, string, error)) ([]T, error) {
 	var out []T
 	opts := metav1.ListOptions{Limit: defaultListLimit}
+	restartedAfterExpiredContinue := false
 	for {
 		items, next, err := list(ctx, opts)
 		if err != nil {
+			if apierrors.IsResourceExpired(err) && opts.Continue != "" && !restartedAfterExpiredContinue {
+				restartedAfterExpiredContinue = true
+				out = nil
+				opts = metav1.ListOptions{Limit: defaultListLimit}
+				continue
+			}
 			return nil, err
 		}
 		out = append(out, items...)
