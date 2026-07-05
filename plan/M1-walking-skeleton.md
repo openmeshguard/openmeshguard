@@ -134,6 +134,7 @@ Full resolver semantics (M2), CEL (M3), HTML/SARIF (M6), Prometheus (M7).
 
 ## Deferred
 - Optimize `internal/normalize` pod-to-workload matching; the current M1 path is correct but still scans pods per workload.
+- Implement Istio duplicate PeerAuthentication tie-breaks in M2 using the policy-ordering semantics documented at https://istio.io/latest/docs/concepts/security/#peer-authentication. M2 will need a reviewed `CreationTimestamp`/oldest-policy contract in the normalized resolver inputs; that touches the frozen exported resolver shape and requires human approval before changing it.
 - Avoid redundant resolver sorting once M2 introduces richer PeerAuthentication precedence tables.
 - Compile the canonical JSON schema once per schema-test run if validation cost becomes material.
 - Move per-namespace existence/list preparation behind the bounded collector runner if larger scoped scans show startup latency.

@@ -149,6 +149,11 @@ func hasM2PeerAuthenticationInputs(peerAuthentications []PeerAuthenticationView)
 }
 
 func hasSameScopePeerAuthenticationConflict(in WorkloadInput) bool {
+	// M1 defers duplicate same-scope PeerAuthentications instead of inventing
+	// tie-break semantics. Istio documents that newer mesh/namespace peer
+	// authentication policies are ignored and that overlapping workload-specific
+	// policies pick the oldest policy:
+	// https://istio.io/latest/docs/concepts/security/#peer-authentication
 	rootNamespace := in.MeshDefaults.RootNamespace
 	if rootNamespace == "" {
 		rootNamespace = "istio-system"
