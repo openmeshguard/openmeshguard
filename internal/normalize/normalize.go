@@ -162,7 +162,7 @@ func (b *workloadBuilder) addController(kind, namespace, name string, template c
 			RootNamespace: b.rootNamespace,
 			Known:         b.peerAuthenticationsKnown(namespace),
 		},
-		PeerAuthN: b.peerAuthenticationsFor(namespace, labels),
+		PeerAuthN: b.peerAuthenticationsFor(namespace, workloadLabelSets(labels, pods)),
 	})
 }
 
@@ -188,7 +188,7 @@ func (b *workloadBuilder) addPod(pod corev1.Pod) {
 			RootNamespace: b.rootNamespace,
 			Known:         b.peerAuthenticationsKnown(pod.Namespace),
 		},
-		PeerAuthN: b.peerAuthenticationsFor(pod.Namespace, labels),
+		PeerAuthN: b.peerAuthenticationsFor(pod.Namespace, []map[string]string{labels}),
 	})
 }
 
@@ -218,7 +218,7 @@ func (b *workloadBuilder) peerAuthenticationsKnown(namespace string) bool {
 	return b.peerAuthenticationsAvailableFor(namespace)
 }
 
-func (b *workloadBuilder) peerAuthenticationsFor(namespace string, workloadLabels map[string]string) []resolver.PeerAuthenticationView {
+func (b *workloadBuilder) peerAuthenticationsFor(namespace string, workloadLabelSets []map[string]string) []resolver.PeerAuthenticationView {
 	var selected []resolver.PeerAuthenticationView
 	for _, peerAuthentication := range b.peerAuthentications {
 		if !peerAuthentication.hasSelector {
@@ -233,13 +233,22 @@ func (b *workloadBuilder) peerAuthenticationsFor(namespace string, workloadLabel
 		if peerAuthentication.Namespace != namespace && peerAuthentication.Namespace != b.rootNamespace {
 			continue
 		}
-		if matchLabels(peerAuthentication.selectorLabels, workloadLabels) {
+		if matchAnyLabels(peerAuthentication.selectorLabels, workloadLabelSets) {
 			view := peerAuthentication.PeerAuthenticationView
 			view.SelectorMatch = true
 			selected = append(selected, view)
 		}
 	}
 	return selected
+}
+
+func workloadLabelSets(templateLabels map[string]string, pods []corev1.Pod) []map[string]string {
+	labelSets := make([]map[string]string, 0, len(pods)+1)
+	labelSets = append(labelSets, templateLabels)
+	for _, pod := range pods {
+		labelSets = append(labelSets, pod.Labels)
+	}
+	return labelSets
 }
 
 type peerAuthenticationProjection struct {
@@ -460,6 +469,15 @@ func matchLabels(selector, labels map[string]string) bool {
 		}
 	}
 	return true
+}
+
+func matchAnyLabels(selector map[string]string, labelSets []map[string]string) bool {
+	for _, labels := range labelSets {
+		if matchLabels(selector, labels) {
+			return true
+		}
+	}
+	return false
 }
 
 func copyStringMap(in map[string]string) map[string]string {

@@ -404,6 +404,73 @@ func TestBuildIncludesRootNamespaceSelectorPeerAuthentication(t *testing.T) {
 	}
 }
 
+func TestBuildIncludesSelectorPeerAuthenticationMatchedByObservedControllerPod(t *testing.T) {
+	result := Build(collect.Snapshot{
+		Namespaces: []corev1.Namespace{
+			{ObjectMeta: metav1.ObjectMeta{Name: "payments"}},
+		},
+		Deployments: []appsv1.Deployment{{
+			ObjectMeta: metav1.ObjectMeta{Name: "api", Namespace: "payments"},
+			Spec: appsv1.DeploymentSpec{
+				Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "api"}},
+				Template: corev1.PodTemplateSpec{
+					ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "api"}},
+				},
+			},
+		}},
+		ReplicaSets: []appsv1.ReplicaSet{
+			deploymentReplicaSet("payments", "api-abc123", "api"),
+		},
+		Pods: []corev1.Pod{{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "api-1",
+				Namespace: "payments",
+				Labels: map[string]string{
+					"app":               "api",
+					"pod-template-hash": "abc123",
+				},
+				OwnerReferences: []metav1.OwnerReference{{
+					Kind: "ReplicaSet",
+					Name: "api-abc123",
+				}},
+			},
+			Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "api"}, {Name: "istio-proxy"}}},
+		}},
+		PeerAuthentications: []*istiosecurityv1beta1.PeerAuthentication{{
+			ObjectMeta: metav1.ObjectMeta{Name: "pod-selected", Namespace: "payments"},
+			Spec: securityapi.PeerAuthentication{
+				Selector: &typeapi.WorkloadSelector{MatchLabels: map[string]string{"pod-template-hash": "abc123"}},
+				Mtls:     &securityapi.PeerAuthentication_MutualTLS{Mode: securityapi.PeerAuthentication_MutualTLS_STRICT},
+			},
+		}},
+		PeerAuthAvailability: collect.PeerAuthenticationAvailability{
+			Namespaces: map[string]bool{
+				"istio-system": true,
+				"payments":     true,
+			},
+		},
+	})
+
+	if len(result.Workloads) != 1 {
+		t.Fatalf("workloads = %d, want 1", len(result.Workloads))
+	}
+	peerAuthentications := result.Workloads[0].PeerAuthN
+	if len(peerAuthentications) != 1 {
+		t.Fatalf("peer authentications = %#v, want observed pod selector policy", peerAuthentications)
+	}
+	if !peerAuthentications[0].SelectorMatch {
+		t.Fatal("observed pod selector PeerAuthentication was included without SelectorMatch")
+	}
+
+	mtls := resolver.NewProvisional().ResolveMTLS(result.Workloads[0])
+	if mtls.Effective != resolver.MTLSUnknown {
+		t.Fatalf("effective mTLS = %q, want unknown for selector PeerAuthentication", mtls.Effective)
+	}
+	if mtls.UnknownReason != "not yet implemented (M2)" {
+		t.Fatalf("unknown reason = %q, want M2 reason", mtls.UnknownReason)
+	}
+}
+
 func TestBuildUsesConfiguredRootNamespace(t *testing.T) {
 	result := Build(collect.Snapshot{
 		RootNamespace: "istio-config",
