@@ -24,6 +24,7 @@ type Permission struct {
 	Optional         bool
 	Impact           string
 	AffectedControls []string
+	DeniedScopes     []string `json:"-"`
 }
 
 // Snapshot is the raw typed-resource bundle returned by collectors.

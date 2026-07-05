@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 
 	istiosecurityv1beta1 "istio.io/client-go/pkg/apis/security/v1beta1"
@@ -53,7 +54,11 @@ func (c *Collector) Collect(ctx context.Context, scope Scope) (Snapshot, error) 
 		return Snapshot{}, errors.New("collector requires Kubernetes and Istio clients")
 	}
 
-	scope = normalizeScope(scope)
+	var err error
+	scope, err = normalizeScope(scope)
+	if err != nil {
+		return Snapshot{}, err
+	}
 
 	var (
 		snapshot = Snapshot{RootNamespace: scope.RootNamespace}
@@ -85,24 +90,24 @@ func (c *Collector) Collect(ctx context.Context, scope Scope) (Snapshot, error) 
 		defer mu.Unlock()
 		markScopedAvailability(&snapshot.PeerAuthAvailability, namespace, available)
 	}
-	appendDegraded := func(meta resourceMeta, err error) error {
+	appendDegraded := func(meta resourceMeta, scopeName string, err error) error {
 		if !isDegradedListError(err) {
 			return fmt.Errorf("list %s: %w", meta.resource, err)
 		}
-		appendPermission(meta.permission(false))
+		appendPermission(meta.permissionForScope(false, scopeName))
 		return nil
 	}
 
 	namespaces, err := c.collectNamespaces(ctx, scope)
 	if err != nil {
-		if err := appendDegraded(namespaceMeta, err); err != nil {
+		if err := appendDegraded(namespaceMeta, clusterScopeName, err); err != nil {
 			return Snapshot{}, err
 		}
 	} else {
 		mu.Lock()
 		snapshot.Namespaces = append(snapshot.Namespaces, namespaces...)
 		mu.Unlock()
-		appendPermission(namespaceMeta.permission(true))
+		appendPermission(namespaceMeta.permissionForScope(true, clusterScopeName))
 	}
 
 	var tasks []func(context.Context) error
@@ -119,16 +124,16 @@ func (c *Collector) Collect(ctx context.Context, scope Scope) (Snapshot, error) 
 				})
 				if err != nil {
 					markPodsAvailable(ns, false)
-					return appendDegraded(podMeta, err)
+					return appendDegraded(podMeta, permissionScopeName(ns), err)
 				}
 				mu.Lock()
 				snapshot.Pods = append(snapshot.Pods, items...)
 				mu.Unlock()
 				markPodsAvailable(ns, true)
-				appendPermission(podMeta.permission(true))
+				appendPermission(podMeta.permissionForScope(true, permissionScopeName(ns)))
 				return nil
 			},
-			c.listTask(serviceMeta, func(ctx context.Context) error {
+			c.listTask(serviceMeta, permissionScopeName(ns), func(ctx context.Context) error {
 				items, err := listPages(ctx, func(ctx context.Context, opts metav1.ListOptions) ([]corev1.Service, string, error) {
 					list, err := c.kube.CoreV1().Services(ns).List(ctx, opts)
 					if err != nil {
@@ -143,7 +148,7 @@ func (c *Collector) Collect(ctx context.Context, scope Scope) (Snapshot, error) 
 				}
 				return err
 			}, appendPermission, appendDegraded),
-			c.listTask(deploymentMeta, func(ctx context.Context) error {
+			c.listTask(deploymentMeta, permissionScopeName(ns), func(ctx context.Context) error {
 				items, err := listPages(ctx, func(ctx context.Context, opts metav1.ListOptions) ([]appsv1.Deployment, string, error) {
 					list, err := c.kube.AppsV1().Deployments(ns).List(ctx, opts)
 					if err != nil {
@@ -158,7 +163,7 @@ func (c *Collector) Collect(ctx context.Context, scope Scope) (Snapshot, error) 
 				}
 				return err
 			}, appendPermission, appendDegraded),
-			c.listTask(replicaSetMeta, func(ctx context.Context) error {
+			c.listTask(replicaSetMeta, permissionScopeName(ns), func(ctx context.Context) error {
 				items, err := listPages(ctx, func(ctx context.Context, opts metav1.ListOptions) ([]appsv1.ReplicaSet, string, error) {
 					list, err := c.kube.AppsV1().ReplicaSets(ns).List(ctx, opts)
 					if err != nil {
@@ -173,7 +178,7 @@ func (c *Collector) Collect(ctx context.Context, scope Scope) (Snapshot, error) 
 				}
 				return err
 			}, appendPermission, appendDegraded),
-			c.listTask(statefulSetMeta, func(ctx context.Context) error {
+			c.listTask(statefulSetMeta, permissionScopeName(ns), func(ctx context.Context) error {
 				items, err := listPages(ctx, func(ctx context.Context, opts metav1.ListOptions) ([]appsv1.StatefulSet, string, error) {
 					list, err := c.kube.AppsV1().StatefulSets(ns).List(ctx, opts)
 					if err != nil {
@@ -188,7 +193,7 @@ func (c *Collector) Collect(ctx context.Context, scope Scope) (Snapshot, error) 
 				}
 				return err
 			}, appendPermission, appendDegraded),
-			c.listTask(daemonSetMeta, func(ctx context.Context) error {
+			c.listTask(daemonSetMeta, permissionScopeName(ns), func(ctx context.Context) error {
 				items, err := listPages(ctx, func(ctx context.Context, opts metav1.ListOptions) ([]appsv1.DaemonSet, string, error) {
 					list, err := c.kube.AppsV1().DaemonSets(ns).List(ctx, opts)
 					if err != nil {
@@ -217,13 +222,13 @@ func (c *Collector) Collect(ctx context.Context, scope Scope) (Snapshot, error) 
 			})
 			if err != nil {
 				markPeerAuthenticationsAvailable(ns, false)
-				return appendDegraded(peerAuthenticationMeta, err)
+				return appendDegraded(peerAuthenticationMeta, permissionScopeName(ns), err)
 			}
 			mu.Lock()
 			snapshot.PeerAuthentications = append(snapshot.PeerAuthentications, items...)
 			mu.Unlock()
 			markPeerAuthenticationsAvailable(ns, true)
-			appendPermission(peerAuthenticationMeta.permission(true))
+			appendPermission(peerAuthenticationMeta.permissionForScope(true, permissionScopeName(ns)))
 			return nil
 		})
 	}
@@ -260,22 +265,33 @@ func (c *Collector) collectNamespaces(ctx context.Context, scope Scope) ([]corev
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, items...)
+		found := false
+		for _, item := range items {
+			if item.Name != name {
+				continue
+			}
+			out = append(out, item)
+			found = true
+		}
+		if !found {
+			return nil, fmt.Errorf("requested namespace %q not found", name)
+		}
 	}
 	return out, nil
 }
 
 func (c *Collector) listTask(
 	meta resourceMeta,
+	scopeName string,
 	list func(context.Context) error,
 	appendPermission func(Permission),
-	appendDegraded func(resourceMeta, error) error,
+	appendDegraded func(resourceMeta, string, error) error,
 ) func(context.Context) error {
 	return func(ctx context.Context) error {
 		if err := list(ctx); err != nil {
-			return appendDegraded(meta, err)
+			return appendDegraded(meta, scopeName, err)
 		}
-		appendPermission(meta.permission(true))
+		appendPermission(meta.permissionForScope(true, scopeName))
 		return nil
 	}
 }
@@ -334,15 +350,26 @@ func (c *Collector) runBounded(ctx context.Context, tasks []func(context.Context
 	return joined
 }
 
-func normalizeScope(scope Scope) Scope {
-	if scope.AllNamespaces || len(scope.Namespaces) == 0 {
-		return Scope{AllNamespaces: true, RootNamespace: rootNamespace(scope)}
+func normalizeScope(scope Scope) (Scope, error) {
+	root := strings.TrimSpace(rootNamespace(scope))
+	if root == "" {
+		return Scope{}, errors.New("root namespace must not be empty")
+	}
+	if scope.AllNamespaces {
+		if len(scope.Namespaces) > 0 {
+			return Scope{}, errors.New("choose either all namespaces or explicit namespaces")
+		}
+		return Scope{AllNamespaces: true, RootNamespace: root}, nil
+	}
+	if len(scope.Namespaces) == 0 {
+		return Scope{}, errors.New("collector scope required: set all namespaces or at least one namespace")
 	}
 	seen := map[string]struct{}{}
 	namespaces := make([]string, 0, len(scope.Namespaces))
 	for _, namespace := range scope.Namespaces {
+		namespace = strings.TrimSpace(namespace)
 		if namespace == "" {
-			continue
+			return Scope{}, errors.New("namespace must not be empty")
 		}
 		if _, ok := seen[namespace]; ok {
 			continue
@@ -350,10 +377,7 @@ func normalizeScope(scope Scope) Scope {
 		seen[namespace] = struct{}{}
 		namespaces = append(namespaces, namespace)
 	}
-	if len(namespaces) == 0 {
-		return Scope{AllNamespaces: true, RootNamespace: rootNamespace(scope)}
-	}
-	return Scope{Namespaces: namespaces, RootNamespace: rootNamespace(scope)}
+	return Scope{Namespaces: namespaces, RootNamespace: root}, nil
 }
 
 func workloadNamespaces(scope Scope) []string {
@@ -387,6 +411,15 @@ func appendIfMissing(values []string, value string) []string {
 	return append(out, value)
 }
 
+const clusterScopeName = "cluster"
+
+func permissionScopeName(namespace string) string {
+	if namespace == "" || namespace == metav1.NamespaceAll {
+		return "all namespaces"
+	}
+	return "namespace/" + namespace
+}
+
 func isDegradedListError(err error) bool {
 	return apierrors.IsForbidden(err) || apierrors.IsNotFound(err)
 }
@@ -403,6 +436,7 @@ func mergePermissions(permissions []Permission) []Permission {
 		existing.Granted = existing.Granted && permission.Granted
 		existing.Verbs = mergeStrings(existing.Verbs, permission.Verbs)
 		existing.AffectedControls = mergeStrings(existing.AffectedControls, permission.AffectedControls)
+		existing.DeniedScopes = mergeStrings(existing.DeniedScopes, permission.DeniedScopes)
 		if existing.Impact == "" {
 			existing.Impact = permission.Impact
 		}
@@ -412,6 +446,9 @@ func mergePermissions(permissions []Permission) []Permission {
 
 	out := make([]Permission, 0, len(merged))
 	for _, permission := range merged {
+		if !permission.Granted && len(permission.DeniedScopes) > 0 {
+			permission.Impact = appendImpact(permission.Impact, "denied scope(s): "+strings.Join(permission.DeniedScopes, ", "))
+		}
 		out = append(out, permission)
 	}
 	sort.Slice(out, func(i, j int) bool {
@@ -421,6 +458,16 @@ func mergePermissions(permissions []Permission) []Permission {
 		return out[i].Resource < out[j].Resource
 	})
 	return out
+}
+
+func appendImpact(base, detail string) string {
+	if base == "" {
+		return detail
+	}
+	if strings.Contains(base, detail) {
+		return base
+	}
+	return base + "; " + detail
 }
 
 func mergeStrings(left, right []string) []string {
@@ -447,8 +494,8 @@ type resourceMeta struct {
 	controls []string
 }
 
-func (m resourceMeta) permission(granted bool) Permission {
-	return Permission{
+func (m resourceMeta) permissionForScope(granted bool, scopeName string) Permission {
+	permission := Permission{
 		APIGroup:         m.apiGroup,
 		Resource:         m.resource,
 		Verbs:            []string{"list"},
@@ -457,6 +504,10 @@ func (m resourceMeta) permission(granted bool) Permission {
 		Impact:           m.impact,
 		AffectedControls: append([]string(nil), m.controls...),
 	}
+	if !granted && scopeName != "" {
+		permission.DeniedScopes = []string{scopeName}
+	}
+	return permission
 }
 
 var (

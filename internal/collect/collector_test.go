@@ -3,6 +3,7 @@ package collect
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	securityapi "istio.io/api/security/v1beta1"
@@ -108,6 +109,60 @@ func TestCollectorDegradesForbiddenAndNotFound(t *testing.T) {
 	}
 	if snapshot.PeerAuthenticationsAvailable() {
 		t.Fatal("PeerAuthenticationsAvailable = true after peerauthentications not found")
+	}
+}
+
+func TestCollectorRejectsInvalidScopes(t *testing.T) {
+	tests := []struct {
+		name    string
+		scope   Scope
+		wantErr string
+	}{
+		{
+			name:    "empty scope",
+			scope:   Scope{},
+			wantErr: "collector scope required",
+		},
+		{
+			name:    "blank namespace",
+			scope:   Scope{Namespaces: []string{"payments", " "}},
+			wantErr: "namespace must not be empty",
+		},
+		{
+			name:    "mixed all namespaces and scoped namespaces",
+			scope:   Scope{AllNamespaces: true, Namespaces: []string{"payments"}},
+			wantErr: "choose either all namespaces or explicit namespaces",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := New(kubefake.NewSimpleClientset(), istiofake.NewSimpleClientset()).Collect(context.Background(), tt.scope)
+			if err == nil {
+				t.Fatal("Collect returned nil error")
+			}
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("Collect error = %v, want to contain %q", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestCollectorErrorsWhenScopedNamespaceIsMissing(t *testing.T) {
+	kube := kubefake.NewSimpleClientset(&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "payments"}})
+	istio := istiofake.NewSimpleClientset()
+
+	_, err := New(kube, istio).Collect(context.Background(), Scope{Namespaces: []string{"paymets"}})
+	if err == nil {
+		t.Fatal("Collect returned nil error for missing namespace")
+	}
+	if !strings.Contains(err.Error(), `requested namespace "paymets" not found`) {
+		t.Fatalf("Collect error = %v, want missing namespace error", err)
+	}
+	for _, action := range append(kube.Actions(), istio.Actions()...) {
+		if action.GetResource().Resource != "namespaces" {
+			t.Fatalf("unexpected action after missing namespace: %#v", action)
+		}
 	}
 }
 
@@ -235,6 +290,11 @@ func TestCollectorTracksPeerAuthenticationAvailabilityPerNamespace(t *testing.T)
 	if snapshot.PeerAuthenticationsAvailable() {
 		t.Fatal("PeerAuthenticationsAvailable = true after partial namespace denial, want false")
 	}
+
+	permission := findPermission(t, snapshot.PermissionSummary, "security.istio.io", "peerauthentications")
+	if !strings.Contains(permission.Impact, "namespace/orders") {
+		t.Fatalf("peerauthentications impact = %q, want denied namespace scope", permission.Impact)
+	}
 }
 
 func assertPermission(t *testing.T, permissions []Permission, apiGroup, resource string, granted bool) {
@@ -246,4 +306,16 @@ func assertPermission(t *testing.T, permissions []Permission, apiGroup, resource
 		}
 	}
 	t.Fatalf("missing permission entry apiGroup=%q resource=%q granted=%t in %#v", apiGroup, resource, granted, permissions)
+}
+
+func findPermission(t *testing.T, permissions []Permission, apiGroup, resource string) Permission {
+	t.Helper()
+
+	for _, permission := range permissions {
+		if permission.APIGroup == apiGroup && permission.Resource == resource {
+			return permission
+		}
+	}
+	t.Fatalf("missing permission entry apiGroup=%q resource=%q in %#v", apiGroup, resource, permissions)
+	return Permission{}
 }
