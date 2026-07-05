@@ -133,4 +133,7 @@ kind delete cluster --name openmeshguard-m1
 Full resolver semantics (M2), CEL (M3), HTML/SARIF (M6), Prometheus (M7).
 
 ## Deferred
-- None added for M1; remaining work stays in the existing M2/M3/M6/M7 milestone scope.
+- Optimize `internal/normalize` pod-to-workload matching; the current M1 path is correct but still scans pods per workload.
+- Avoid redundant resolver sorting once M2 introduces richer PeerAuthentication precedence tables.
+- Compile the canonical JSON schema once per schema-test run if validation cost becomes material.
+- Move per-namespace existence/list preparation behind the bounded collector runner if larger scoped scans show startup latency.
