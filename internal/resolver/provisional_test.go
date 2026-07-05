@@ -45,6 +45,26 @@ func TestProvisionalResolverResolveMTLS(t *testing.T) {
 			wantChainKinds: []string{"MeshConfigDefault"},
 		},
 		{
+			name: "root namespace workload applies root PeerAuthentication once",
+			in: WorkloadInput{
+				Ref: WorkloadRef{
+					Namespace: "istio-system",
+					Name:      "istiod",
+					Kind:      "Deployment",
+				},
+				DataPlaneMode: ModeSidecar,
+				MeshDefaults: MeshDefaults{
+					RootNamespace: "istio-system",
+					Known:         true,
+				},
+				PeerAuthN: []PeerAuthenticationView{
+					{Name: "default", Namespace: "istio-system", Mode: "STRICT"},
+				},
+			},
+			wantEffective:  MTLSStrict,
+			wantChainKinds: []string{"MeshConfigDefault", "PeerAuthentication"},
+		},
+		{
 			name: "unknown data plane makes mTLS unknown",
 			in: WorkloadInput{
 				Ref:           WorkloadRef{Namespace: "payments", Name: "api", Kind: "Deployment"},

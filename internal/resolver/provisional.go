@@ -95,31 +95,33 @@ func (ProvisionalResolver) ResolveMTLS(in WorkloadInput) MTLSResult {
 		})
 	}
 
-	for _, peerAuthentication := range sortedPeerAuthentications(in.PeerAuthN) {
-		if peerAuthentication.Namespace != in.Ref.Namespace || peerAuthentication.SelectorMatch {
-			continue
-		}
-		next, ok := mtlsModeToEffective(peerAuthentication.Mode)
-		if !ok {
-			return MTLSResult{
-				Effective:              MTLSUnknown,
-				ClientTLSContradiction: false,
-				Chain:                  []Step{},
-				UnknownReason:          notImplementedM2Reason,
+	if in.Ref.Namespace != rootNamespace {
+		for _, peerAuthentication := range sortedPeerAuthentications(in.PeerAuthN) {
+			if peerAuthentication.Namespace != in.Ref.Namespace || peerAuthentication.SelectorMatch {
+				continue
 			}
+			next, ok := mtlsModeToEffective(peerAuthentication.Mode)
+			if !ok {
+				return MTLSResult{
+					Effective:              MTLSUnknown,
+					ClientTLSContradiction: false,
+					Chain:                  []Step{},
+					UnknownReason:          notImplementedM2Reason,
+				}
+			}
+			if next == "" {
+				continue
+			}
+			effective = next
+			chain = append(chain, Step{
+				Order:     len(chain) + 1,
+				Kind:      "PeerAuthentication",
+				Name:      peerAuthentication.Name,
+				Namespace: peerAuthentication.Namespace,
+				Field:     "spec.mtls.mode",
+				Effect:    "sets namespace mTLS mode to " + peerAuthentication.Mode,
+			})
 		}
-		if next == "" {
-			continue
-		}
-		effective = next
-		chain = append(chain, Step{
-			Order:     len(chain) + 1,
-			Kind:      "PeerAuthentication",
-			Name:      peerAuthentication.Name,
-			Namespace: peerAuthentication.Namespace,
-			Field:     "spec.mtls.mode",
-			Effect:    "sets namespace mTLS mode to " + peerAuthentication.Mode,
-		})
 	}
 
 	return MTLSResult{
