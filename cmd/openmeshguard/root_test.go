@@ -5,6 +5,8 @@ import (
 	"errors"
 	"strings"
 	"testing"
+
+	"github.com/openmeshguard/openmeshguard/internal/collect"
 )
 
 func TestVersionCommandPrintsScannerAndResolverVersions(t *testing.T) {
@@ -59,6 +61,22 @@ func TestScanRejectsEmptyNamespace(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "namespace must not be empty") {
 		t.Fatalf("scan error = %v, want empty namespace validation", err)
+	}
+}
+
+func TestScanRootNamespaceFlag(t *testing.T) {
+	cmd := newScanCommand(defaultVersionInfo())
+	flag := cmd.Flags().Lookup("root-namespace")
+	if flag == nil {
+		t.Fatal("scan command missing root-namespace flag")
+	}
+	if flag.DefValue != collect.DefaultRootNamespace {
+		t.Fatalf("root-namespace default = %q, want %q", flag.DefValue, collect.DefaultRootNamespace)
+	}
+
+	opts := scanOptions{AllNamespaces: true, RootNamespace: "  "}
+	if err := opts.normalizeAndValidate(); err == nil || !strings.Contains(err.Error(), "root namespace must not be empty") {
+		t.Fatalf("empty root namespace validation error = %v, want root namespace error", err)
 	}
 }
 

@@ -22,6 +22,7 @@ type scanOptions struct {
 	Context       string
 	AllNamespaces bool
 	Namespaces    []string
+	RootNamespace string
 }
 
 func newScanCommand(info versionInfo) *cobra.Command {
@@ -40,6 +41,7 @@ func newScanCommand(info versionInfo) *cobra.Command {
 	cmd.Flags().StringVar(&opts.Context, "context", "", "kubeconfig context to use")
 	cmd.Flags().BoolVar(&opts.AllNamespaces, "all-namespaces", false, "scan all namespaces")
 	cmd.Flags().StringArrayVar(&opts.Namespaces, "namespace", nil, "namespace to scan; may be repeated")
+	cmd.Flags().StringVar(&opts.RootNamespace, "root-namespace", collect.DefaultRootNamespace, "Istio mesh root namespace")
 	return cmd
 }
 
@@ -61,6 +63,10 @@ func (o *scanOptions) normalizeAndValidate() error {
 		namespaces = append(namespaces, namespace)
 	}
 	o.Namespaces = namespaces
+	o.RootNamespace = strings.TrimSpace(o.RootNamespace)
+	if o.RootNamespace == "" {
+		return fmt.Errorf("root namespace must not be empty")
+	}
 	if !o.AllNamespaces && len(o.Namespaces) == 0 {
 		return fmt.Errorf("scan scope required: pass --all-namespaces or at least one --namespace")
 	}
@@ -84,7 +90,7 @@ func runScan(ctx context.Context, info versionInfo, opts scanOptions, stdout io.
 	snapshot, err := collect.New(kubeClient, istioClient).Collect(ctx, collect.Scope{
 		AllNamespaces: opts.AllNamespaces,
 		Namespaces:    opts.Namespaces,
-		RootNamespace: collect.DefaultRootNamespace,
+		RootNamespace: opts.RootNamespace,
 	})
 	if err != nil {
 		return fmt.Errorf("collect cluster resources: %w", err)

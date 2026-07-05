@@ -8,6 +8,7 @@ import (
 	"github.com/openmeshguard/openmeshguard/internal/resolver"
 	securityapi "istio.io/api/security/v1beta1"
 	istiosecurityv1beta1 "istio.io/client-go/pkg/apis/security/v1beta1"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
@@ -36,6 +37,7 @@ func Build(snapshot collect.Snapshot) Result {
 		peerAuthentications: peerAuthentications,
 		coveredPods:         map[string]struct{}{},
 		rootNamespace:       rootNamespace,
+		replicaSetOwners:    replicaSetDeploymentOwners(snapshot.ReplicaSets),
 		podsAvailableFor: func(namespace string) bool {
 			return snapshot.PodsAvailableFor(namespace)
 		},
@@ -127,6 +129,7 @@ type workloadBuilder struct {
 	peerAuthentications             []peerAuthenticationProjection
 	coveredPods                     map[string]struct{}
 	rootNamespace                   string
+	replicaSetOwners                map[string]string
 	podsAvailableFor                func(namespace string) bool
 	peerAuthenticationsAvailableFor func(namespace string) bool
 
@@ -136,7 +139,7 @@ type workloadBuilder struct {
 func (b *workloadBuilder) addController(kind, namespace, name string, template corev1.PodTemplateSpec, selector *metav1.LabelSelector) {
 	labels := copyStringMap(template.Labels)
 	nsLabels := b.namespaces[namespace]
-	pods := podsMatching(b.pods, namespace, selector)
+	pods := podsMatching(b.pods, namespace, kind, name, selector, b.replicaSetOwners)
 	for _, pod := range pods {
 		b.coverPod(pod)
 	}
@@ -277,18 +280,39 @@ func projectPeerAuthentications(peerAuthentications []*istiosecurityv1beta1.Peer
 	return out
 }
 
-func podsMatching(pods []corev1.Pod, namespace string, selector *metav1.LabelSelector) []corev1.Pod {
+func podsMatching(
+	pods []corev1.Pod,
+	namespace string,
+	kind string,
+	name string,
+	selector *metav1.LabelSelector,
+	replicaSetOwners map[string]string,
+) []corev1.Pod {
 	compiled, err := metav1.LabelSelectorAsSelector(selector)
 	if err != nil || compiled.Empty() {
 		return nil
 	}
 	var matches []corev1.Pod
 	for _, pod := range pods {
-		if pod.Namespace == namespace && compiled.Matches(labels.Set(pod.Labels)) {
+		if pod.Namespace == namespace &&
+			compiled.Matches(labels.Set(pod.Labels)) &&
+			podOwnedByController(pod, kind, name, replicaSetOwners) {
 			matches = append(matches, pod)
 		}
 	}
 	return matches
+}
+
+func podOwnedByController(pod corev1.Pod, kind, name string, replicaSetOwners map[string]string) bool {
+	for _, owner := range pod.OwnerReferences {
+		if owner.Kind == kind && owner.Name == name {
+			return true
+		}
+		if kind == "Deployment" && owner.Kind == "ReplicaSet" && replicaSetOwners[pod.Namespace+"/"+owner.Name] == name {
+			return true
+		}
+	}
+	return false
 }
 
 func podKey(pod corev1.Pod) string {
@@ -411,6 +435,19 @@ func hasOwnerKind(ownerReferences []metav1.OwnerReference, kind string) bool {
 		}
 	}
 	return false
+}
+
+func replicaSetDeploymentOwners(replicaSets []appsv1.ReplicaSet) map[string]string {
+	owners := map[string]string{}
+	for _, replicaSet := range replicaSets {
+		for _, ownerReference := range replicaSet.OwnerReferences {
+			if ownerReference.Kind == "Deployment" {
+				owners[replicaSet.Namespace+"/"+replicaSet.Name] = ownerReference.Name
+				break
+			}
+		}
+	}
+	return owners
 }
 
 func matchLabels(selector, labels map[string]string) bool {

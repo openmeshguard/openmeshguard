@@ -30,6 +30,9 @@ func TestBuildNormalizesWorkloadsPeerAuthenticationsAndSidecarMode(t *testing.T)
 				},
 			},
 		}},
+		ReplicaSets: []appsv1.ReplicaSet{
+			deploymentReplicaSet("payments", "api-abc123", "api"),
+		},
 		Pods: []corev1.Pod{{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "api-1",
@@ -102,6 +105,9 @@ func TestBuildMatchesControllerPodsWithMatchExpressions(t *testing.T) {
 				},
 			},
 		}},
+		ReplicaSets: []appsv1.ReplicaSet{
+			deploymentReplicaSet("payments", "api-abc123", "api"),
+		},
 		Pods: []corev1.Pod{{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "api-1",
@@ -182,6 +188,9 @@ func TestBuildMarksObservedPodsWithoutProxyUnknownDespiteInjectionLabels(t *test
 				},
 			},
 		}},
+		ReplicaSets: []appsv1.ReplicaSet{
+			deploymentReplicaSet("payments", "api-abc123", "api"),
+		},
 		Pods: []corev1.Pod{{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "api-1",
@@ -254,14 +263,33 @@ func TestBuildMarksMixedObservedProxyEvidence(t *testing.T) {
 				Template: corev1.PodTemplateSpec{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "api"}}},
 			},
 		}},
+		ReplicaSets: []appsv1.ReplicaSet{
+			deploymentReplicaSet("payments", "api-abc123", "api"),
+		},
 		Pods: []corev1.Pod{
 			{
-				ObjectMeta: metav1.ObjectMeta{Name: "api-1", Namespace: "payments", Labels: map[string]string{"app": "api"}},
-				Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "api"}, {Name: "istio-proxy"}}},
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "api-1",
+					Namespace: "payments",
+					Labels:    map[string]string{"app": "api"},
+					OwnerReferences: []metav1.OwnerReference{{
+						Kind: "ReplicaSet",
+						Name: "api-abc123",
+					}},
+				},
+				Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "api"}, {Name: "istio-proxy"}}},
 			},
 			{
-				ObjectMeta: metav1.ObjectMeta{Name: "api-2", Namespace: "payments", Labels: map[string]string{"app": "api"}},
-				Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "api"}}},
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "api-2",
+					Namespace: "payments",
+					Labels:    map[string]string{"app": "api"},
+					OwnerReferences: []metav1.OwnerReference{{
+						Kind: "ReplicaSet",
+						Name: "api-abc123",
+					}},
+				},
+				Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "api"}}},
 			},
 		},
 		PodAvailability: collect.PeerAuthenticationAvailability{
@@ -450,6 +478,52 @@ func TestBuildKeepsOwnedPodsWithoutNormalizedController(t *testing.T) {
 	}
 }
 
+func TestBuildDoesNotCoverUnrelatedPodsBySelectorOnly(t *testing.T) {
+	result := Build(collect.Snapshot{
+		Namespaces: []corev1.Namespace{{
+			ObjectMeta: metav1.ObjectMeta{Name: "payments"},
+		}},
+		Deployments: []appsv1.Deployment{{
+			ObjectMeta: metav1.ObjectMeta{Name: "api", Namespace: "payments"},
+			Spec: appsv1.DeploymentSpec{
+				Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "api"}},
+				Template: corev1.PodTemplateSpec{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "api"}}},
+			},
+		}},
+		Pods: []corev1.Pod{{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "api-migrate-1",
+				Namespace: "payments",
+				Labels:    map[string]string{"app": "api"},
+				OwnerReferences: []metav1.OwnerReference{{
+					Kind: "Job",
+					Name: "api-migrate",
+				}},
+			},
+			Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "migrate"}, {Name: "istio-proxy"}}},
+		}},
+		PodAvailability: collect.PeerAuthenticationAvailability{
+			Namespaces: map[string]bool{"payments": true},
+		},
+		PermissionSummary: []collect.Permission{{
+			APIGroup: "security.istio.io",
+			Resource: "peerauthentications",
+			Verbs:    []string{"list"},
+			Granted:  true,
+		}},
+	})
+
+	seen := map[string]bool{}
+	for _, workload := range result.Workloads {
+		seen[workload.Ref.Kind+"/"+workload.Ref.Name] = true
+	}
+	for _, key := range []string{"Deployment/api", "Pod/api-migrate-1"} {
+		if !seen[key] {
+			t.Fatalf("missing workload %s in %#v", key, result.Workloads)
+		}
+	}
+}
+
 func TestBuildAmbientStubReturnsUnknown(t *testing.T) {
 	result := Build(collect.Snapshot{
 		Namespaces: []corev1.Namespace{{
@@ -475,5 +549,21 @@ func TestBuildAmbientStubReturnsUnknown(t *testing.T) {
 	}
 	if result.Workloads[0].DataPlaneMode != resolver.ModeUnknown {
 		t.Fatalf("ambient stub mode = %q, want unknown", result.Workloads[0].DataPlaneMode)
+	}
+}
+
+func deploymentReplicaSet(namespace, name, deployment string) appsv1.ReplicaSet {
+	return appsv1.ReplicaSet{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: namespace,
+			OwnerReferences: []metav1.OwnerReference{{
+				Kind: "Deployment",
+				Name: deployment,
+			}},
+		},
+		Spec: appsv1.ReplicaSetSpec{
+			Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": deployment}},
+		},
 	}
 }
