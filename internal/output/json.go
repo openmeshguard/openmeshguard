@@ -139,25 +139,39 @@ func inventory(input normalize.Inventory) inventorySummary {
 func provisionalFindings(workloads []resolver.WorkloadResult) []finding {
 	findings := []finding{}
 	for _, workload := range workloads {
-		if workload.MTLS.Effective != resolver.MTLSPermissive && workload.MTLS.Effective != resolver.MTLSUnknown {
-			continue
-		}
 		status := "open"
 		confidence := "resolved"
 		var unknownReasons []string
-		title := "Effective mTLS is permissive"
-		reasoning := fmt.Sprintf(
-			"%s/%s resolves to PERMISSIVE mTLS, so plaintext may be accepted by the workload.",
-			workload.Ref.Namespace,
-			workload.Ref.Name,
-		)
-		if workload.MTLS.Effective == resolver.MTLSUnknown {
+		var title, reasoning string
+		switch workload.MTLS.Effective {
+		case resolver.MTLSPermissive:
+			title = "Effective mTLS is permissive"
+			reasoning = fmt.Sprintf(
+				"%s/%s resolves to PERMISSIVE mTLS, so plaintext may be accepted by the workload.",
+				workload.Ref.Namespace,
+				workload.Ref.Name,
+			)
+		case resolver.MTLSDisabled:
+			title = "Effective mTLS is disabled"
+			reasoning = fmt.Sprintf(
+				"%s/%s resolves to DISABLED mTLS, so plaintext is accepted by the workload.",
+				workload.Ref.Namespace,
+				workload.Ref.Name,
+			)
+		case resolver.MTLSUnknown:
 			status = "unknown"
 			confidence = "unavailable"
 			title = "Effective mTLS is unknown"
+			reasoning = fmt.Sprintf(
+				"%s/%s mTLS posture could not be fully resolved.",
+				workload.Ref.Namespace,
+				workload.Ref.Name,
+			)
 			if workload.MTLS.UnknownReason != "" {
 				unknownReasons = append(unknownReasons, workload.MTLS.UnknownReason)
 			}
+		default:
+			continue
 		}
 		if workload.Mode == resolver.ModeUnknown || workload.Mode == resolver.ModeNotApplicable {
 			status = "unknown"
@@ -166,11 +180,7 @@ func provisionalFindings(workloads []resolver.WorkloadResult) []finding {
 		}
 		unknownReason := strings.Join(uniqueStrings(unknownReasons), "; ")
 		if status == "unknown" {
-			reasoning = fmt.Sprintf(
-				"%s/%s mTLS posture could not be fully resolved.",
-				workload.Ref.Namespace,
-				workload.Ref.Name,
-			)
+			reasoning = fmt.Sprintf("%s/%s mTLS posture could not be fully resolved.", workload.Ref.Namespace, workload.Ref.Name)
 		}
 		findings = append(findings, finding{
 			ID:            findingID("MG-MTLS-001", workload.Ref),

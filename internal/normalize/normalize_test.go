@@ -6,6 +6,7 @@ import (
 	"github.com/openmeshguard/openmeshguard/internal/collect"
 	"github.com/openmeshguard/openmeshguard/internal/resolver"
 	securityapi "istio.io/api/security/v1beta1"
+	typeapi "istio.io/api/type/v1beta1"
 	istiosecurityv1beta1 "istio.io/client-go/pkg/apis/security/v1beta1"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -210,6 +211,49 @@ func TestBuildScopesPeerAuthenticationAvailabilityToWorkloadNamespace(t *testing
 	}
 	if workloads["orders"].MeshDefaults.Known {
 		t.Fatal("orders MeshDefaults.Known = true after orders PeerAuthentication denial")
+	}
+}
+
+func TestBuildIncludesRootNamespaceSelectorPeerAuthentication(t *testing.T) {
+	result := Build(collect.Snapshot{
+		Namespaces: []corev1.Namespace{
+			{ObjectMeta: metav1.ObjectMeta{Name: "payments"}},
+			{ObjectMeta: metav1.ObjectMeta{Name: "istio-system"}},
+		},
+		Deployments: []appsv1.Deployment{{
+			ObjectMeta: metav1.ObjectMeta{Name: "api", Namespace: "payments"},
+			Spec: appsv1.DeploymentSpec{
+				Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "api"}},
+				Template: corev1.PodTemplateSpec{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "api"}}},
+			},
+		}},
+		PeerAuthentications: []*istiosecurityv1beta1.PeerAuthentication{{
+			ObjectMeta: metav1.ObjectMeta{Name: "api-override", Namespace: "istio-system"},
+			Spec: securityapi.PeerAuthentication{
+				Selector: &typeapi.WorkloadSelector{MatchLabels: map[string]string{"app": "api"}},
+				Mtls:     &securityapi.PeerAuthentication_MutualTLS{Mode: securityapi.PeerAuthentication_MutualTLS_DISABLE},
+			},
+		}},
+		PeerAuthAvailability: collect.PeerAuthenticationAvailability{
+			Namespaces: map[string]bool{
+				"istio-system": true,
+				"payments":     true,
+			},
+		},
+	})
+
+	if len(result.Workloads) != 1 {
+		t.Fatalf("workloads = %d, want 1", len(result.Workloads))
+	}
+	peerAuthentications := result.Workloads[0].PeerAuthN
+	if len(peerAuthentications) != 1 {
+		t.Fatalf("peer authentications = %#v, want root selector policy", peerAuthentications)
+	}
+	if !peerAuthentications[0].SelectorMatch {
+		t.Fatal("root namespace selector PeerAuthentication was included without SelectorMatch")
+	}
+	if peerAuthentications[0].Namespace != "istio-system" {
+		t.Fatalf("peer authentication namespace = %q, want istio-system", peerAuthentications[0].Namespace)
 	}
 }
 

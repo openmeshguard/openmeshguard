@@ -190,7 +190,10 @@ func (b *workloadBuilder) peerAuthenticationsFor(namespace string, workloadLabel
 			}
 			continue
 		}
-		if peerAuthentication.Namespace != namespace {
+		// Istio root-namespace selectors additionally match workloads in every
+		// namespace; M1 passes them through so the provisional resolver returns
+		// explicit M2 unknown instead of ignoring them.
+		if peerAuthentication.Namespace != namespace && peerAuthentication.Namespace != defaultRootNamespace {
 			continue
 		}
 		if matchLabels(peerAuthentication.selectorLabels, workloadLabels) {

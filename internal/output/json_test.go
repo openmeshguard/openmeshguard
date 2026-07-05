@@ -49,6 +49,20 @@ func TestProvisionalFindings(t *testing.T) {
 			wantUnknownReason: "PeerAuthentication resources unavailable",
 		},
 		{
+			name: "disabled mTLS emits open finding",
+			workload: resolver.WorkloadResult{
+				Ref:  resolver.WorkloadRef{Namespace: "payments", Name: "api", Kind: "Deployment"},
+				Mode: resolver.ModeSidecar,
+				MTLS: resolver.MTLSResult{
+					Effective: resolver.MTLSDisabled,
+					Chain:     []resolver.Step{{Order: 1, Kind: "PeerAuthentication", Effect: "sets DISABLE"}},
+				},
+			},
+			wantFindings:   1,
+			wantStatus:     "open",
+			wantConfidence: "resolved",
+		},
+		{
 			name: "strict mTLS emits no provisional permissive finding",
 			workload: resolver.WorkloadResult{
 				Ref:  resolver.WorkloadRef{Namespace: "payments", Name: "api", Kind: "Deployment"},
@@ -90,6 +104,12 @@ func TestProvisionalFindings(t *testing.T) {
 			}
 			if finding.Confidence != tt.wantConfidence {
 				t.Fatalf("confidence = %q, want %q", finding.Confidence, tt.wantConfidence)
+			}
+			if tt.wantUnknownReason == "" {
+				if finding.UnknownReason != "" {
+					t.Fatalf("unknownReason = %q, want empty", finding.UnknownReason)
+				}
+				return
 			}
 			if !strings.Contains(finding.UnknownReason, tt.wantUnknownReason) {
 				t.Fatalf("unknownReason = %q, want to contain %q", finding.UnknownReason, tt.wantUnknownReason)
