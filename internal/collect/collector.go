@@ -65,6 +65,18 @@ func (c *Collector) Collect(ctx context.Context, scope Scope) (Snapshot, error) 
 		defer mu.Unlock()
 		snapshot.PermissionSummary = append(snapshot.PermissionSummary, permission)
 	}
+	markPeerAuthenticationsAvailable := func(namespace string, available bool) {
+		mu.Lock()
+		defer mu.Unlock()
+		if namespace == metav1.NamespaceAll {
+			snapshot.PeerAuthAvailability.AllNamespaces = available
+			return
+		}
+		if snapshot.PeerAuthAvailability.Namespaces == nil {
+			snapshot.PeerAuthAvailability.Namespaces = map[string]bool{}
+		}
+		snapshot.PeerAuthAvailability.Namespaces[namespace] = available
+	}
 	appendDegraded := func(meta resourceMeta, err error) error {
 		if !isDegradedListError(err) {
 			return fmt.Errorf("list %s: %w", meta.resource, err)
@@ -183,7 +195,7 @@ func (c *Collector) Collect(ctx context.Context, scope Scope) (Snapshot, error) 
 	}
 	for _, namespace := range peerAuthenticationNamespaces(scope) {
 		ns := namespace
-		tasks = append(tasks, c.listTask(peerAuthenticationMeta, func(ctx context.Context) error {
+		tasks = append(tasks, func(ctx context.Context) error {
 			items, err := listPages(ctx, func(ctx context.Context, opts metav1.ListOptions) ([]*istiosecurityv1beta1.PeerAuthentication, string, error) {
 				list, err := c.istio.SecurityV1beta1().PeerAuthentications(ns).List(ctx, opts)
 				if err != nil {
@@ -191,13 +203,17 @@ func (c *Collector) Collect(ctx context.Context, scope Scope) (Snapshot, error) 
 				}
 				return list.Items, list.Continue, nil
 			})
-			if err == nil {
-				mu.Lock()
-				snapshot.PeerAuthentications = append(snapshot.PeerAuthentications, items...)
-				mu.Unlock()
+			if err != nil {
+				markPeerAuthenticationsAvailable(ns, false)
+				return appendDegraded(peerAuthenticationMeta, err)
 			}
-			return err
-		}, appendPermission, appendDegraded))
+			mu.Lock()
+			snapshot.PeerAuthentications = append(snapshot.PeerAuthentications, items...)
+			mu.Unlock()
+			markPeerAuthenticationsAvailable(ns, true)
+			appendPermission(peerAuthenticationMeta.permission(true))
+			return nil
+		})
 	}
 
 	if err := c.runBounded(ctx, tasks); err != nil {

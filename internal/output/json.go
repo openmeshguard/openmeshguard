@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"strings"
 	"time"
 
 	"github.com/openmeshguard/openmeshguard/internal/collect"
@@ -138,21 +139,43 @@ func inventory(input normalize.Inventory) inventorySummary {
 func provisionalFindings(workloads []resolver.WorkloadResult) []finding {
 	findings := []finding{}
 	for _, workload := range workloads {
-		if workload.MTLS.Effective != resolver.MTLSPermissive {
+		if workload.MTLS.Effective != resolver.MTLSPermissive && workload.MTLS.Effective != resolver.MTLSUnknown {
 			continue
 		}
 		status := "open"
 		confidence := "resolved"
-		unknownReason := ""
+		var unknownReasons []string
+		title := "Effective mTLS is permissive"
+		reasoning := fmt.Sprintf(
+			"%s/%s resolves to PERMISSIVE mTLS, so plaintext may be accepted by the workload.",
+			workload.Ref.Namespace,
+			workload.Ref.Name,
+		)
+		if workload.MTLS.Effective == resolver.MTLSUnknown {
+			status = "unknown"
+			confidence = "unavailable"
+			title = "Effective mTLS is unknown"
+			if workload.MTLS.UnknownReason != "" {
+				unknownReasons = append(unknownReasons, workload.MTLS.UnknownReason)
+			}
+		}
 		if workload.Mode == resolver.ModeUnknown || workload.Mode == resolver.ModeNotApplicable {
 			status = "unknown"
 			confidence = "unavailable"
-			unknownReason = "data plane membership unavailable"
+			unknownReasons = append(unknownReasons, "data plane membership unavailable")
+		}
+		unknownReason := strings.Join(uniqueStrings(unknownReasons), "; ")
+		if status == "unknown" {
+			reasoning = fmt.Sprintf(
+				"%s/%s mTLS posture could not be fully resolved.",
+				workload.Ref.Namespace,
+				workload.Ref.Name,
+			)
 		}
 		findings = append(findings, finding{
 			ID:            findingID("MG-MTLS-001", workload.Ref),
 			ControlID:     "MG-MTLS-001",
-			Title:         "Effective mTLS is permissive",
+			Title:         title,
 			Severity:      "medium",
 			EvidenceType:  "config",
 			Status:        status,
@@ -168,15 +191,27 @@ func provisionalFindings(workloads []resolver.WorkloadResult) []finding {
 				Name:      workload.Ref.Name,
 			}},
 			ResolutionChain: workload.MTLS.Chain,
-			Reasoning: fmt.Sprintf(
-				"%s/%s resolves to PERMISSIVE mTLS, so plaintext may be accepted by the workload.",
-				workload.Ref.Namespace,
-				workload.Ref.Name,
-			),
-			UnknownReason: unknownReason,
+			Reasoning:       reasoning,
+			UnknownReason:   unknownReason,
 		})
 	}
 	return findings
+}
+
+func uniqueStrings(values []string) []string {
+	seen := map[string]struct{}{}
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	return out
 }
 
 func findingID(controlID string, workload resolver.WorkloadRef) string {

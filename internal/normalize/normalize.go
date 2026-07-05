@@ -24,14 +24,15 @@ func Build(snapshot collect.Snapshot) Result {
 		namespaceLabels[namespace.Name] = copyStringMap(namespace.Labels)
 	}
 
-	peerAuthenticationsAvailable := snapshot.PeerAuthenticationsAvailable()
 	peerAuthentications := projectPeerAuthentications(snapshot.PeerAuthentications)
 
 	builder := workloadBuilder{
-		namespaces:                   namespaceLabels,
-		pods:                         snapshot.Pods,
-		peerAuthentications:          peerAuthentications,
-		peerAuthenticationsAvailable: peerAuthenticationsAvailable,
+		namespaces:          namespaceLabels,
+		pods:                snapshot.Pods,
+		peerAuthentications: peerAuthentications,
+		peerAuthenticationsAvailableFor: func(namespace string) bool {
+			return snapshot.PeerAuthenticationsAvailableFor(namespace, defaultRootNamespace)
+		},
 	}
 
 	for _, deployment := range snapshot.Deployments {
@@ -112,10 +113,10 @@ func Build(snapshot collect.Snapshot) Result {
 }
 
 type workloadBuilder struct {
-	namespaces                   map[string]map[string]string
-	pods                         []corev1.Pod
-	peerAuthentications          []peerAuthenticationProjection
-	peerAuthenticationsAvailable bool
+	namespaces                      map[string]map[string]string
+	pods                            []corev1.Pod
+	peerAuthentications             []peerAuthenticationProjection
+	peerAuthenticationsAvailableFor func(namespace string) bool
 
 	workloads []resolver.WorkloadInput
 }
@@ -141,7 +142,7 @@ func (b *workloadBuilder) addController(kind, namespace, name string, template c
 		},
 		MeshDefaults: resolver.MeshDefaults{
 			RootNamespace: defaultRootNamespace,
-			Known:         b.peerAuthenticationsAvailable,
+			Known:         b.peerAuthenticationsKnown(namespace),
 		},
 		PeerAuthN: b.peerAuthenticationsFor(namespace, labels),
 	})
@@ -167,10 +168,17 @@ func (b *workloadBuilder) addPod(pod corev1.Pod) {
 		},
 		MeshDefaults: resolver.MeshDefaults{
 			RootNamespace: defaultRootNamespace,
-			Known:         b.peerAuthenticationsAvailable,
+			Known:         b.peerAuthenticationsKnown(pod.Namespace),
 		},
 		PeerAuthN: b.peerAuthenticationsFor(pod.Namespace, labels),
 	})
+}
+
+func (b *workloadBuilder) peerAuthenticationsKnown(namespace string) bool {
+	if b.peerAuthenticationsAvailableFor == nil {
+		return false
+	}
+	return b.peerAuthenticationsAvailableFor(namespace)
 }
 
 func (b *workloadBuilder) peerAuthenticationsFor(namespace string, workloadLabels map[string]string) []resolver.PeerAuthenticationView {

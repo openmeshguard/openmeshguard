@@ -163,6 +163,56 @@ func TestBuildDetectsIstioProxyNativeSidecarInitContainer(t *testing.T) {
 	}
 }
 
+func TestBuildScopesPeerAuthenticationAvailabilityToWorkloadNamespace(t *testing.T) {
+	result := Build(collect.Snapshot{
+		Namespaces: []corev1.Namespace{
+			{ObjectMeta: metav1.ObjectMeta{Name: "payments"}},
+			{ObjectMeta: metav1.ObjectMeta{Name: "orders"}},
+			{ObjectMeta: metav1.ObjectMeta{Name: "istio-system"}},
+		},
+		Deployments: []appsv1.Deployment{
+			{
+				ObjectMeta: metav1.ObjectMeta{Name: "api", Namespace: "payments"},
+				Spec: appsv1.DeploymentSpec{
+					Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "api"}},
+					Template: corev1.PodTemplateSpec{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "api"}}},
+				},
+			},
+			{
+				ObjectMeta: metav1.ObjectMeta{Name: "api", Namespace: "orders"},
+				Spec: appsv1.DeploymentSpec{
+					Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "api"}},
+					Template: corev1.PodTemplateSpec{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "api"}}},
+				},
+			},
+		},
+		PeerAuthAvailability: collect.PeerAuthenticationAvailability{
+			Namespaces: map[string]bool{
+				"istio-system": true,
+				"payments":     true,
+				"orders":       false,
+			},
+		},
+		PermissionSummary: []collect.Permission{{
+			APIGroup: "security.istio.io",
+			Resource: "peerauthentications",
+			Verbs:    []string{"list"},
+			Granted:  false,
+		}},
+	})
+
+	workloads := map[string]resolver.WorkloadInput{}
+	for _, workload := range result.Workloads {
+		workloads[workload.Ref.Namespace] = workload
+	}
+	if !workloads["payments"].MeshDefaults.Known {
+		t.Fatal("payments MeshDefaults.Known = false after payments/root evidence succeeded")
+	}
+	if workloads["orders"].MeshDefaults.Known {
+		t.Fatal("orders MeshDefaults.Known = true after orders PeerAuthentication denial")
+	}
+}
+
 func TestBuildAmbientStubReturnsUnknown(t *testing.T) {
 	result := Build(collect.Snapshot{
 		Namespaces: []corev1.Namespace{{

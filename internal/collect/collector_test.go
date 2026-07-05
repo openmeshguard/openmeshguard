@@ -192,6 +192,44 @@ func TestCollectorMergesPermissionSummaryAcrossNamespaces(t *testing.T) {
 	}
 }
 
+func TestCollectorTracksPeerAuthenticationAvailabilityPerNamespace(t *testing.T) {
+	kube := kubefake.NewSimpleClientset(
+		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "payments"}},
+		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "orders"}},
+	)
+	istio := istiofake.NewSimpleClientset(&istiosecurityv1beta1.PeerAuthentication{
+		ObjectMeta: metav1.ObjectMeta{Name: "default", Namespace: DefaultRootNamespace},
+		Spec: securityapi.PeerAuthentication{
+			Mtls: &securityapi.PeerAuthentication_MutualTLS{Mode: securityapi.PeerAuthentication_MutualTLS_STRICT},
+		},
+	})
+	istio.PrependReactor("list", "peerauthentications", func(action ktesting.Action) (bool, runtime.Object, error) {
+		if action.GetNamespace() != "orders" {
+			return false, nil, nil
+		}
+		return true, nil, apierrors.NewForbidden(
+			schema.GroupResource{Group: "security.istio.io", Resource: "peerauthentications"},
+			"",
+			errors.New("denied"),
+		)
+	})
+
+	snapshot, err := New(kube, istio).Collect(context.Background(), Scope{Namespaces: []string{"payments", "orders"}})
+	if err != nil {
+		t.Fatalf("collect: %v", err)
+	}
+
+	if !snapshot.PeerAuthenticationsAvailableFor("payments", DefaultRootNamespace) {
+		t.Fatal("PeerAuthenticationsAvailableFor(payments) = false, want true")
+	}
+	if snapshot.PeerAuthenticationsAvailableFor("orders", DefaultRootNamespace) {
+		t.Fatal("PeerAuthenticationsAvailableFor(orders) = true after namespace denial, want false")
+	}
+	if snapshot.PeerAuthenticationsAvailable() {
+		t.Fatal("PeerAuthenticationsAvailable = true after partial namespace denial, want false")
+	}
+}
+
 func assertPermission(t *testing.T, permissions []Permission, apiGroup, resource string, granted bool) {
 	t.Helper()
 

@@ -1,44 +1,99 @@
 package output
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/openmeshguard/openmeshguard/internal/resolver"
 )
 
-func TestProvisionalFindingIsUnknownWhenDataPlaneModeUnknown(t *testing.T) {
-	report := buildReport(ScanInput{
-		ScannerVersion:  "dev",
-		ResolverVersion: resolver.ProvisionalVersion(),
-		ClusterContext:  "fixture",
-		Scope:           ScanScope{AllNamespaces: true},
-		WorkloadPostures: []resolver.WorkloadResult{{
-			Ref:  resolver.WorkloadRef{Namespace: "payments", Name: "api", Kind: "Deployment"},
-			Mode: resolver.ModeUnknown,
-			MTLS: resolver.MTLSResult{
-				Effective:              resolver.MTLSPermissive,
-				ClientTLSContradiction: false,
-				Chain:                  []resolver.Step{{Order: 1, Kind: "MeshConfigDefault", Effect: "default"}},
+func TestProvisionalFindings(t *testing.T) {
+	tests := []struct {
+		name              string
+		workload          resolver.WorkloadResult
+		wantFindings      int
+		wantStatus        string
+		wantConfidence    string
+		wantUnknownReason string
+	}{
+		{
+			name: "permissive mTLS with unknown data plane emits unknown finding",
+			workload: resolver.WorkloadResult{
+				Ref:  resolver.WorkloadRef{Namespace: "payments", Name: "api", Kind: "Deployment"},
+				Mode: resolver.ModeUnknown,
+				MTLS: resolver.MTLSResult{
+					Effective:              resolver.MTLSPermissive,
+					ClientTLSContradiction: false,
+					Chain:                  []resolver.Step{{Order: 1, Kind: "MeshConfigDefault", Effect: "default"}},
+				},
 			},
-			Authz: resolver.AuthzResult{
-				Effective:     resolver.AuthzUnknown,
-				Chain:         []resolver.Step{},
-				UnknownReason: "not yet implemented (M2)",
+			wantFindings:      1,
+			wantStatus:        "unknown",
+			wantConfidence:    "unavailable",
+			wantUnknownReason: "data plane membership unavailable",
+		},
+		{
+			name: "unknown mTLS emits unknown finding",
+			workload: resolver.WorkloadResult{
+				Ref:  resolver.WorkloadRef{Namespace: "payments", Name: "api", Kind: "Deployment"},
+				Mode: resolver.ModeSidecar,
+				MTLS: resolver.MTLSResult{
+					Effective:     resolver.MTLSUnknown,
+					UnknownReason: "PeerAuthentication resources unavailable",
+					Chain:         []resolver.Step{},
+				},
 			},
-		}},
-	})
+			wantFindings:      1,
+			wantStatus:        "unknown",
+			wantConfidence:    "unavailable",
+			wantUnknownReason: "PeerAuthentication resources unavailable",
+		},
+		{
+			name: "strict mTLS emits no provisional permissive finding",
+			workload: resolver.WorkloadResult{
+				Ref:  resolver.WorkloadRef{Namespace: "payments", Name: "api", Kind: "Deployment"},
+				Mode: resolver.ModeSidecar,
+				MTLS: resolver.MTLSResult{
+					Effective: resolver.MTLSStrict,
+					Chain:     []resolver.Step{{Order: 1, Kind: "PeerAuthentication", Effect: "sets STRICT"}},
+				},
+			},
+			wantFindings: 0,
+		},
+	}
 
-	if len(report.Findings) != 1 {
-		t.Fatalf("findings = %d, want 1", len(report.Findings))
-	}
-	finding := report.Findings[0]
-	if finding.Status != "unknown" {
-		t.Fatalf("status = %q, want unknown", finding.Status)
-	}
-	if finding.Confidence != "unavailable" {
-		t.Fatalf("confidence = %q, want unavailable", finding.Confidence)
-	}
-	if finding.UnknownReason == "" {
-		t.Fatal("unknown finding missing unknownReason")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			report := buildReport(ScanInput{
+				ScannerVersion:  "dev",
+				ResolverVersion: resolver.ProvisionalVersion(),
+				ClusterContext:  "fixture",
+				Scope:           ScanScope{AllNamespaces: true},
+				WorkloadPostures: []resolver.WorkloadResult{{
+					Ref:   tt.workload.Ref,
+					Mode:  tt.workload.Mode,
+					MTLS:  tt.workload.MTLS,
+					Authz: resolver.AuthzResult{Effective: resolver.AuthzUnknown, UnknownReason: "not yet implemented (M2)"},
+				}},
+			})
+
+			if len(report.Findings) != tt.wantFindings {
+				t.Fatalf("findings = %d, want %d", len(report.Findings), tt.wantFindings)
+			}
+			if tt.wantFindings == 0 {
+				return
+			}
+
+			finding := report.Findings[0]
+			if finding.Status != tt.wantStatus {
+				t.Fatalf("status = %q, want %q", finding.Status, tt.wantStatus)
+			}
+			if finding.Confidence != tt.wantConfidence {
+				t.Fatalf("confidence = %q, want %q", finding.Confidence, tt.wantConfidence)
+			}
+			if !strings.Contains(finding.UnknownReason, tt.wantUnknownReason) {
+				t.Fatalf("unknownReason = %q, want to contain %q", finding.UnknownReason, tt.wantUnknownReason)
+			}
+		})
 	}
 }
