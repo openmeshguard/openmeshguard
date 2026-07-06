@@ -1,6 +1,7 @@
 .DS_Store
 .codex/
 .claude/
+.agent-native/
 node_modules/
 dist/
 coverage/

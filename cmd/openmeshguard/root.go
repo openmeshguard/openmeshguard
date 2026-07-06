@@ -4,12 +4,12 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/openmeshguard/openmeshguard/internal/resolver"
 	"github.com/spf13/cobra"
 )
 
 const (
-	versionPlaceholder         = "dev"
-	resolverVersionPlaceholder = "resolver-v0-placeholder"
+	versionPlaceholder = "dev"
 )
 
 var errNotImplemented = errors.New("not implemented")
@@ -22,7 +22,7 @@ type versionInfo struct {
 func defaultVersionInfo() versionInfo {
 	return versionInfo{
 		Version:         versionPlaceholder,
-		ResolverVersion: resolverVersionPlaceholder,
+		ResolverVersion: resolver.ProvisionalVersion(),
 	}
 }
 
@@ -35,7 +35,8 @@ func newRootCommand(info versionInfo) *cobra.Command {
 	}
 
 	cmd.AddCommand(newVersionCommand(info))
-	for _, name := range []string{"scan", "report", "export", "score"} {
+	cmd.AddCommand(newScanCommand(info))
+	for _, name := range []string{"report", "export", "score"} {
 		cmd.AddCommand(newStubCommand(name))
 	}
 
