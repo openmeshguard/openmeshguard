@@ -309,12 +309,9 @@ func TestBuildPeerAuthenticationNormalization(t *testing.T) {
 					t.Fatal("observed pod selector PeerAuthentication was included without SelectorMatch")
 				}
 
-				mtls := resolver.NewProvisional().ResolveMTLS(workload)
-				if mtls.Effective != resolver.MTLSUnknown {
-					t.Fatalf("effective mTLS = %q, want unknown for selector PeerAuthentication", mtls.Effective)
-				}
-				if mtls.UnknownReason != "not yet implemented (M2)" {
-					t.Fatalf("unknown reason = %q, want M2 reason", mtls.UnknownReason)
+				mtls := resolver.New().ResolveMTLS(workload)
+				if mtls.Effective != resolver.MTLSStrict {
+					t.Fatalf("effective mTLS = %q, want strict for selector PeerAuthentication", mtls.Effective)
 				}
 			},
 		},
