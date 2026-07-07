@@ -249,8 +249,7 @@ func (b *workloadBuilder) peerAuthenticationsFor(namespace string, workloadLabel
 			continue
 		}
 		// Istio root-namespace selectors additionally match workloads in every
-		// namespace; M1 passes them through so the provisional resolver returns
-		// explicit M2 unknown instead of ignoring them.
+		// namespace; the resolver applies workload precedence after normalization.
 		if peerAuthentication.Namespace != namespace && peerAuthentication.Namespace != b.rootNamespace {
 			continue
 		}
@@ -291,11 +290,12 @@ func projectPeerAuthentications(peerAuthentications []*istiosecurityv1beta1.Peer
 		}
 		out = append(out, peerAuthenticationProjection{
 			PeerAuthenticationView: resolver.PeerAuthenticationView{
-				Name:           peerAuthentication.Name,
-				Namespace:      peerAuthentication.Namespace,
-				SelectorMatch:  false,
-				Mode:           mtlsMode(peerAuthentication.Spec.GetMtls()),
-				PortLevelModes: portModes(peerAuthentication.Spec.GetPortLevelMtls()),
+				Name:              peerAuthentication.Name,
+				Namespace:         peerAuthentication.Namespace,
+				SelectorMatch:     false,
+				CreationTimestamp: peerAuthentication.CreationTimestamp.Time,
+				Mode:              mtlsMode(peerAuthentication.Spec.GetMtls()),
+				PortLevelModes:    portModes(peerAuthentication.Spec.GetPortLevelMtls()),
 			},
 			hasSelector:    len(selectorLabels) > 0,
 			selectorLabels: copyStringMap(selectorLabels),
