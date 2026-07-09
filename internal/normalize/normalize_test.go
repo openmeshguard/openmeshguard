@@ -1,6 +1,7 @@
 package normalize
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/openmeshguard/openmeshguard/internal/collect"
@@ -263,14 +264,17 @@ func TestBuildPeerAuthenticationNormalization(t *testing.T) {
 					namespace("payments", nil),
 					namespace("istio-system", nil),
 				},
-				Deployments: []appsv1.Deployment{deployment("payments", "api", map[string]string{"app": "api"}, corev1.PodSpec{})},
+				Deployments: []appsv1.Deployment{deployment("payments", "api", map[string]string{"app": "api"}, corev1.PodSpec{
+					Containers: []corev1.Container{{Name: "api"}, {Name: "istio-proxy"}},
+				})},
 				PeerAuthentications: []*istiosecurityv1beta1.PeerAuthentication{
 					peerAuthentication("istio-system", "api-override", map[string]string{"app": "api"}, securityapi.PeerAuthentication_MutualTLS_DISABLE),
 				},
 				PeerAuthAvailability: rootAndNamespacePeerAuthenticationAvailability("payments", "istio-system"),
 			},
 			assert: func(t *testing.T, result Result) {
-				peerAuthentications := singleWorkload(t, result).PeerAuthN
+				workload := singleWorkload(t, result)
+				peerAuthentications := workload.PeerAuthN
 				if len(peerAuthentications) != 1 {
 					t.Fatalf("peer authentications = %#v, want root selector policy", peerAuthentications)
 				}
@@ -279,6 +283,13 @@ func TestBuildPeerAuthenticationNormalization(t *testing.T) {
 				}
 				if peerAuthentications[0].Namespace != "istio-system" {
 					t.Fatalf("peer authentication namespace = %q, want istio-system", peerAuthentications[0].Namespace)
+				}
+				mtls := resolver.New().ResolveMTLS(workload)
+				if mtls.Effective != resolver.MTLSUnknown {
+					t.Fatalf("effective mTLS = %q, want unknown for root namespace selector ambiguity", mtls.Effective)
+				}
+				if !strings.Contains(mtls.UnknownReason, "root-namespace selector PeerAuthentication") {
+					t.Fatalf("unknown reason = %q, want root namespace selector reason", mtls.UnknownReason)
 				}
 			},
 		},
@@ -312,6 +323,49 @@ func TestBuildPeerAuthenticationNormalization(t *testing.T) {
 				mtls := resolver.New().ResolveMTLS(workload)
 				if mtls.Effective != resolver.MTLSStrict {
 					t.Fatalf("effective mTLS = %q, want strict for selector PeerAuthentication", mtls.Effective)
+				}
+			},
+		},
+		{
+			name: "splits controller when PeerAuthentication selectors differ across pods",
+			snapshot: collect.Snapshot{
+				Namespaces:  []corev1.Namespace{namespace("payments", nil)},
+				Deployments: []appsv1.Deployment{deployment("payments", "api", map[string]string{"app": "api"}, corev1.PodSpec{})},
+				ReplicaSets: []appsv1.ReplicaSet{
+					deploymentReplicaSet("payments", "api-old", "api"),
+					deploymentReplicaSet("payments", "api-new", "api"),
+				},
+				Pods: []corev1.Pod{
+					podForReplicaSet("payments", "api-old-1", "api-old", map[string]string{
+						"app":               "api",
+						"pod-template-hash": "old",
+					}, corev1.PodSpec{Containers: []corev1.Container{{Name: "api"}, {Name: "istio-proxy"}}}),
+					podForReplicaSet("payments", "api-new-1", "api-new", map[string]string{
+						"app":               "api",
+						"pod-template-hash": "new",
+					}, corev1.PodSpec{Containers: []corev1.Container{{Name: "api"}, {Name: "istio-proxy"}}}),
+				},
+				PeerAuthentications: []*istiosecurityv1beta1.PeerAuthentication{
+					peerAuthentication("payments", "old-pods", map[string]string{"pod-template-hash": "old"}, securityapi.PeerAuthentication_MutualTLS_STRICT),
+				},
+				PeerAuthAvailability: rootAndNamespacePeerAuthenticationAvailability("payments", "istio-system"),
+			},
+			assert: func(t *testing.T, result Result) {
+				workloads := workloadsByKindName(result)
+				if len(workloads) != 2 {
+					t.Fatalf("workloads = %#v, want two pod-level workloads", result.Workloads)
+				}
+				if _, ok := workloads["Deployment/api"]; ok {
+					t.Fatalf("workloads = %#v, do not want aggregate Deployment/api", result.Workloads)
+				}
+
+				oldPod := workloads["Pod/api-old-1"]
+				if mtls := resolver.New().ResolveMTLS(oldPod); mtls.Effective != resolver.MTLSStrict {
+					t.Fatalf("old pod effective mTLS = %q, want strict", mtls.Effective)
+				}
+				newPod := workloads["Pod/api-new-1"]
+				if mtls := resolver.New().ResolveMTLS(newPod); mtls.Effective != resolver.MTLSPermissive {
+					t.Fatalf("new pod effective mTLS = %q, want permissive", mtls.Effective)
 				}
 			},
 		},

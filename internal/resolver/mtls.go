@@ -15,6 +15,8 @@ const (
 	peerAuthenticationUnavailableReason = "PeerAuthentication resources unavailable"
 	ztunnelUnavailableReason            = "ztunnel availability unavailable"
 	workloadPortsUnavailableReason      = "workload ports unavailable for port-level PeerAuthentication"
+	rootSelectorAmbiguousReason         = "root-namespace selector PeerAuthentication semantics vary by Istio version"
+	ambientDisableUnsupportedReason     = "ambient PeerAuthentication DISABLE mode is unsupported by Istio"
 )
 
 // ResolverV1 implements the mtls/v1 effective mTLS semantics.
@@ -86,6 +88,13 @@ func (ResolverV1) ResolveMTLS(in WorkloadInput) MTLSResult {
 		return unknownMTLS(err.Error())
 	}
 	chain = append(chain, portSteps...)
+	// Ambient uses HBONE mTLS and Istio does not support DISABLE there. Until
+	// ambient policy reporting is first-class in M6, do not report a sidecar-only
+	// DISABLE conclusion as effective ambient posture.
+	// https://istio.io/latest/docs/reference/config/security/peer_authentication/
+	if in.DataPlaneMode == ModeAmbient && containsDisabledMode(effective, byPort) {
+		return unknownMTLS(ambientDisableUnsupportedReason)
+	}
 
 	chain, contradiction, err := applyDestinationRules(chain, effective, byPort, in.DestRules)
 	if err != nil {
@@ -163,6 +172,19 @@ func selectPeerAuthentications(in WorkloadInput) (peerAuthenticationSelection, e
 	for _, peerAuthentication := range in.PeerAuthN {
 		switch {
 		case peerAuthentication.SelectorMatch:
+			// Current Istio root-namespace guidance says selector policies are
+			// ignored, while the generated selector field still says they match
+			// across namespaces. Return unknown until the supported minor version
+			// resolves that upstream conflict.
+			// https://istio.io/latest/docs/reference/config/security/peer_authentication/
+			if peerAuthentication.Namespace == rootNamespace {
+				return peerAuthenticationSelection{}, fmt.Errorf(
+					"%s for %s/%s",
+					rootSelectorAmbiguousReason,
+					peerAuthentication.Namespace,
+					peerAuthentication.Name,
+				)
+			}
 			workload = append(workload, peerAuthentication)
 		case peerAuthentication.Namespace == rootNamespace:
 			mesh = append(mesh, peerAuthentication)
@@ -316,6 +338,18 @@ func commonPortEffective(byPort map[int32]MTLSEffective) MTLSEffective {
 		}
 	}
 	return first
+}
+
+func containsDisabledMode(effective MTLSEffective, byPort map[int32]MTLSEffective) bool {
+	if effective == MTLSDisabled {
+		return true
+	}
+	for _, mode := range byPort {
+		if mode == MTLSDisabled {
+			return true
+		}
+	}
+	return false
 }
 
 func applyDestinationRules(

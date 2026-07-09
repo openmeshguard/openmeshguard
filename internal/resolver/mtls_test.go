@@ -186,6 +186,44 @@ func TestResolverV1ResolveMTLS(t *testing.T) {
 			wantChain:         []Step{},
 		},
 		{
+			name: "ambient workload with DISABLE policy is unknown",
+			in: WorkloadInput{
+				Ref:           workloadRef(),
+				DataPlaneMode: ModeAmbient,
+				MeshDefaults:  knownMeshDefaults(),
+				ZtunnelOnNode: True,
+				PeerAuthN:     []PeerAuthenticationView{peerAuthentication("payments", "default", "DISABLE", false)},
+			},
+			wantEffective:     MTLSUnknown,
+			wantUnknownReason: ambientDisableUnsupportedReason,
+			wantChain:         []Step{},
+		},
+		{
+			name: "ambient workload with port-level DISABLE policy is unknown",
+			in: WorkloadInput{
+				Ref:           workloadRef(),
+				Ports:         []int32{8080, 9090},
+				DataPlaneMode: ModeAmbient,
+				MeshDefaults:  knownMeshDefaults(),
+				ZtunnelOnNode: True,
+				PeerAuthN: []PeerAuthenticationView{
+					peerAuthenticationWithPorts("payments", "api", "STRICT", true, map[int32]string{8080: "DISABLE"}),
+				},
+			},
+			wantEffective:     MTLSUnknown,
+			wantUnknownReason: ambientDisableUnsupportedReason,
+			wantChain:         []Step{},
+		},
+		{
+			name: "root namespace selector PeerAuthentication is unknown across Istio versions",
+			in: sidecarWorkload(
+				peerAuthentication("istio-system", "api", "STRICT", true),
+			),
+			wantEffective:     MTLSUnknown,
+			wantUnknownReason: rootSelectorAmbiguousReason + " for istio-system/api",
+			wantChain:         []Step{},
+		},
+		{
 			name: "multiple selector PeerAuthentications pick the oldest match",
 			in: sidecarWorkload(
 				peerAuthentication("payments", "default", "STRICT", false),
