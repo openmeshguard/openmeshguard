@@ -25,3 +25,11 @@ SPEC.md §7 (mTLS effective posture). Contract: resolver_types.go. Upstream refe
 
 ## Out of scope
 Authorization resolution (M5), Sidecar-resource scoping (arrives with normalizer work in M5).
+
+## Review flags raised
+- Root-namespace PeerAuthentication selectors: Istio 1.30 guidance says these policies are ignored, while the generated selector field still says they match across namespaces. Flagged with https://istio.io/latest/docs/reference/config/security/peer_authentication/ before adding the regression table; approved resolution for `mtls/v1` is explicit unknown.
+- Ambient `DISABLE`: Istio documents the mode as unsupported when ztunnel provides HBONE mTLS. Flagged with https://istio.io/latest/docs/reference/config/security/peer_authentication/ before adding the regression tables; approved resolution for `mtls/v1` is explicit unknown whenever the final workload or port posture would be disabled.
+
+## Deferred
+- Replace the conservative root-namespace selector unknown with version-specific behavior after M4 pins the supported Istio minor matrix.
+- Refine ambient `DISABLE` reporting when M6 defines first-class ambient posture; M2 intentionally does not infer a supported ambient mode from an unsupported policy value.
