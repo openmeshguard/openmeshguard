@@ -10,13 +10,14 @@ import (
 const (
 	mtlsVersion = "mtls/v1"
 
-	authzNotImplementedReason           = "authorization resolver not yet implemented (M5)"
-	dataPlaneUnknownReason              = "data plane membership unavailable"
-	peerAuthenticationUnavailableReason = "PeerAuthentication resources unavailable"
-	ztunnelUnavailableReason            = "ztunnel availability unavailable"
-	workloadPortsUnavailableReason      = "workload ports unavailable for port-level PeerAuthentication"
-	rootSelectorAmbiguousReason         = "root-namespace selector PeerAuthentication semantics vary by Istio version"
-	ambientDisableUnsupportedReason     = "ambient PeerAuthentication DISABLE mode is unsupported by Istio"
+	authzNotImplementedReason             = "authorization resolver not yet implemented (M5)"
+	dataPlaneUnknownReason                = "data plane membership unavailable"
+	peerAuthenticationUnavailableReason   = "PeerAuthentication resources unavailable"
+	ztunnelUnavailableReason              = "ztunnel availability unavailable"
+	workloadPortsUnavailableReason        = "workload ports unavailable for port-level PeerAuthentication"
+	destinationRulePortsUnavailableReason = "workload ports unavailable for DestinationRule port-level TLS precedence"
+	rootSelectorAmbiguousReason           = "root-namespace selector PeerAuthentication semantics vary by Istio version"
+	ambientDisableUnsupportedReason       = "ambient PeerAuthentication DISABLE mode is unsupported by Istio"
 )
 
 // ResolverV1 implements the mtls/v1 effective mTLS semantics.
@@ -96,7 +97,7 @@ func (ResolverV1) ResolveMTLS(in WorkloadInput) MTLSResult {
 		return unknownMTLS(ambientDisableUnsupportedReason)
 	}
 
-	chain, contradiction, err := applyDestinationRules(chain, effective, byPort, in.DestRules)
+	chain, contradiction, err := applyDestinationRules(chain, effective, byPort, in.Ports, in.DestRules)
 	if err != nil {
 		return unknownMTLS(err.Error())
 	}
@@ -356,18 +357,42 @@ func applyDestinationRules(
 	chain []Step,
 	effective MTLSEffective,
 	byPort map[int32]MTLSEffective,
+	ports []int32,
 	destinationRules []DestinationRuleView,
 ) ([]Step, bool, error) {
 	// Auto mTLS only applies when DestinationRule TLS is not explicitly set;
 	// explicit DISABLE/SIMPLE modes can conflict with strict server mTLS:
 	// https://istio.io/latest/docs/ops/configuration/traffic-management/tls-configuration/#auto-mtls
 	// https://istio.io/latest/docs/ops/common-problems/network-issues/#503-errors-after-setting-destination-rule
+	// Port-level settings replace, rather than inherit, destination-level fields:
+	// https://istio.io/latest/docs/reference/config/networking/destination-rule/#TrafficPolicy
 	contradiction := false
 	for _, destinationRule := range sortedDestinationRules(destinationRules) {
 		if strings.TrimSpace(destinationRule.TLSMode) != "" {
-			conflicts, step, err := destinationRuleStep(destinationRule, "spec.trafficPolicy.tls.mode", 0, destinationRule.TLSMode, serverStrictForAnyPort(effective, byPort))
+			serverStrict, applies, err := destinationLevelServerStrict(
+				effective,
+				byPort,
+				ports,
+				destinationRule.PortTLSModes,
+			)
 			if err != nil {
 				return nil, false, err
+			}
+			conflicts, step, err := destinationRuleStep(
+				destinationRule,
+				"spec.trafficPolicy.tls.mode",
+				0,
+				destinationRule.TLSMode,
+				serverStrict,
+			)
+			if err != nil {
+				return nil, false, err
+			}
+			if !applies {
+				step.Effect = fmt.Sprintf(
+					"sets client TLS mode %s at destination level, overridden for all workload ports",
+					normalizedMode(destinationRule.TLSMode),
+				)
 			}
 			contradiction = contradiction || conflicts
 			chain = append(chain, step)
@@ -400,6 +425,7 @@ func destinationRuleStep(
 ) (bool, Step, error) {
 	normalized := normalizedMode(mode)
 	switch normalized {
+	case "":
 	case "DISABLE", "SIMPLE":
 	case "MUTUAL", "ISTIO_MUTUAL":
 	default:
@@ -407,9 +433,17 @@ func destinationRuleStep(
 	}
 
 	conflicts := serverStrict && (normalized == "DISABLE" || normalized == "SIMPLE")
-	effect := fmt.Sprintf("sets client TLS mode %s", normalized)
-	if port != 0 {
-		effect = fmt.Sprintf("sets client TLS mode %s for port %d", normalized, port)
+	var effect string
+	if normalized == "" {
+		effect = "leaves client TLS mode unset, so automatic mTLS applies"
+		if port != 0 {
+			effect = fmt.Sprintf("leaves client TLS mode unset for port %d, so automatic mTLS applies", port)
+		}
+	} else {
+		effect = fmt.Sprintf("sets client TLS mode %s", normalized)
+		if port != 0 {
+			effect = fmt.Sprintf("sets client TLS mode %s for port %d", normalized, port)
+		}
 	}
 	if conflicts {
 		effect += ", which conflicts with strict server mTLS"
@@ -424,6 +458,29 @@ func destinationRuleStep(
 		Field:     field,
 		Effect:    effect,
 	}, nil
+}
+
+func destinationLevelServerStrict(
+	effective MTLSEffective,
+	byPort map[int32]MTLSEffective,
+	ports []int32,
+	portTLSModes map[int32]string,
+) (serverStrict bool, applies bool, err error) {
+	if len(portTLSModes) == 0 {
+		return serverStrictForAnyPort(effective, byPort), true, nil
+	}
+	if len(ports) == 0 {
+		return false, false, fmt.Errorf("%s", destinationRulePortsUnavailableReason)
+	}
+
+	for _, port := range sortedInt32Keys(int32Set(ports)) {
+		if _, overridden := portTLSModes[port]; overridden {
+			continue
+		}
+		applies = true
+		serverStrict = serverStrict || serverStrictForPort(effective, byPort, port)
+	}
+	return serverStrict, applies, nil
 }
 
 func serverStrictForAnyPort(effective MTLSEffective, byPort map[int32]MTLSEffective) bool {

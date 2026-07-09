@@ -147,6 +147,87 @@ func TestResolverV1ResolveMTLS(t *testing.T) {
 			},
 		},
 		{
+			name: "DestinationRule port TLS overrides destination-level contradiction",
+			in: sidecarWorkloadWithPortsAndDestinationRules(
+				[]int32{8080},
+				[]PeerAuthenticationView{peerAuthentication("istio-system", "default", "STRICT", false)},
+				[]DestinationRuleView{{
+					Name:         "api",
+					Namespace:    "payments",
+					Host:         "api.payments.svc.cluster.local",
+					TLSMode:      "DISABLE",
+					PortTLSModes: map[int32]string{8080: "ISTIO_MUTUAL"},
+				}},
+			),
+			wantEffective: MTLSStrict,
+			wantChain: []Step{
+				defaultStep(1),
+				peerStep(2, "istio-system", "default", "spec.mtls.mode", "sets mesh-wide mTLS mode to STRICT"),
+				destinationRuleStepForTest(3, "payments", "api", "spec.trafficPolicy.tls.mode", "sets client TLS mode DISABLE at destination level, overridden for all workload ports"),
+				destinationRuleStepForTest(4, "payments", "api", `spec.trafficPolicy.portLevelSettings["8080"].tls.mode`, "sets client TLS mode ISTIO_MUTUAL for port 8080, compatible with strict server mTLS"),
+			},
+		},
+		{
+			name: "DestinationRule destination TLS still contradicts an unoverridden strict port",
+			in: sidecarWorkloadWithPortsAndDestinationRules(
+				[]int32{8080, 9090},
+				[]PeerAuthenticationView{peerAuthentication("istio-system", "default", "STRICT", false)},
+				[]DestinationRuleView{{
+					Name:         "api",
+					Namespace:    "payments",
+					Host:         "api.payments.svc.cluster.local",
+					TLSMode:      "DISABLE",
+					PortTLSModes: map[int32]string{8080: "ISTIO_MUTUAL"},
+				}},
+			),
+			wantEffective:           MTLSStrict,
+			wantClientContradiction: true,
+			wantChain: []Step{
+				defaultStep(1),
+				peerStep(2, "istio-system", "default", "spec.mtls.mode", "sets mesh-wide mTLS mode to STRICT"),
+				destinationRuleStepForTest(3, "payments", "api", "spec.trafficPolicy.tls.mode", "sets client TLS mode DISABLE, which conflicts with strict server mTLS"),
+				destinationRuleStepForTest(4, "payments", "api", `spec.trafficPolicy.portLevelSettings["8080"].tls.mode`, "sets client TLS mode ISTIO_MUTUAL for port 8080, compatible with strict server mTLS"),
+			},
+		},
+		{
+			name: "DestinationRule port policy without TLS does not inherit destination TLS",
+			in: sidecarWorkloadWithPortsAndDestinationRules(
+				[]int32{8080},
+				[]PeerAuthenticationView{peerAuthentication("istio-system", "default", "STRICT", false)},
+				[]DestinationRuleView{{
+					Name:         "api",
+					Namespace:    "payments",
+					Host:         "api.payments.svc.cluster.local",
+					TLSMode:      "DISABLE",
+					PortTLSModes: map[int32]string{8080: ""},
+				}},
+			),
+			wantEffective: MTLSStrict,
+			wantChain: []Step{
+				defaultStep(1),
+				peerStep(2, "istio-system", "default", "spec.mtls.mode", "sets mesh-wide mTLS mode to STRICT"),
+				destinationRuleStepForTest(3, "payments", "api", "spec.trafficPolicy.tls.mode", "sets client TLS mode DISABLE at destination level, overridden for all workload ports"),
+				destinationRuleStepForTest(4, "payments", "api", `spec.trafficPolicy.portLevelSettings["8080"].tls.mode`, "leaves client TLS mode unset for port 8080, so automatic mTLS applies, compatible with strict server mTLS"),
+			},
+		},
+		{
+			name: "DestinationRule port precedence without workload ports is unknown",
+			in: sidecarWorkloadWithPortsAndDestinationRules(
+				nil,
+				[]PeerAuthenticationView{peerAuthentication("istio-system", "default", "STRICT", false)},
+				[]DestinationRuleView{{
+					Name:         "api",
+					Namespace:    "payments",
+					Host:         "api.payments.svc.cluster.local",
+					TLSMode:      "DISABLE",
+					PortTLSModes: map[int32]string{8080: "ISTIO_MUTUAL"},
+				}},
+			),
+			wantEffective:     MTLSUnknown,
+			wantUnknownReason: destinationRulePortsUnavailableReason,
+			wantChain:         []Step{},
+		},
+		{
 			name: "not-in-mesh workload resolves not-in-mesh",
 			in: WorkloadInput{
 				Ref:           workloadRef(),
@@ -300,7 +381,20 @@ func sidecarWorkloadWithDestinationRules(
 	peerAuthentications []PeerAuthenticationView,
 	destinationRules []DestinationRuleView,
 ) WorkloadInput {
+	return sidecarWorkloadWithPortsAndDestinationRules(
+		[]int32{8080, 9090},
+		peerAuthentications,
+		destinationRules,
+	)
+}
+
+func sidecarWorkloadWithPortsAndDestinationRules(
+	ports []int32,
+	peerAuthentications []PeerAuthenticationView,
+	destinationRules []DestinationRuleView,
+) WorkloadInput {
 	in := sidecarWorkload(peerAuthentications...)
+	in.Ports = ports
 	in.DestRules = destinationRules
 	return in
 }
