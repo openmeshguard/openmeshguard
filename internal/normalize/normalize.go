@@ -144,6 +144,21 @@ func (b *workloadBuilder) addController(kind, namespace, name string, template c
 	labels := copyStringMap(template.Labels)
 	nsLabels := b.namespaces[namespace]
 	pods := podsMatching(b.pods, namespace, kind, name, selector, b.replicaSetOwners)
+	peerAuthentications := b.peerAuthenticationsFor(namespace, []map[string]string{labels})
+	if len(pods) > 0 {
+		podPeerAuthentications := make([][]resolver.PeerAuthenticationView, len(pods))
+		for i, pod := range pods {
+			podPeerAuthentications[i] = b.peerAuthenticationsFor(namespace, []map[string]string{pod.Labels})
+		}
+		if !uniformPeerAuthenticationSets(podPeerAuthentications) {
+			for _, pod := range pods {
+				b.coverPod(pod)
+				b.addPod(pod)
+			}
+			return
+		}
+		peerAuthentications = podPeerAuthentications[0]
+	}
 	for _, pod := range pods {
 		b.coverPod(pod)
 	}
@@ -166,7 +181,7 @@ func (b *workloadBuilder) addController(kind, namespace, name string, template c
 			RootNamespace: b.rootNamespace,
 			Known:         b.peerAuthenticationsKnown(namespace),
 		},
-		PeerAuthN: b.peerAuthenticationsFor(namespace, workloadLabelSets(labels, pods)),
+		PeerAuthN: peerAuthentications,
 	})
 }
 
@@ -248,9 +263,10 @@ func (b *workloadBuilder) peerAuthenticationsFor(namespace string, workloadLabel
 			}
 			continue
 		}
-		// Istio root-namespace selectors additionally match workloads in every
-		// namespace; M1 passes them through so the provisional resolver returns
-		// explicit M2 unknown instead of ignoring them.
+		// Istio's generated selector field and current root-namespace guidance
+		// conflict. Preserve matching policies so the resolver can degrade them to
+		// unknown instead of silently choosing one version's behavior.
+		// https://istio.io/latest/docs/reference/config/security/peer_authentication/
 		if peerAuthentication.Namespace != namespace && peerAuthentication.Namespace != b.rootNamespace {
 			continue
 		}
@@ -263,13 +279,27 @@ func (b *workloadBuilder) peerAuthenticationsFor(namespace string, workloadLabel
 	return selected
 }
 
-func workloadLabelSets(templateLabels map[string]string, pods []corev1.Pod) []map[string]string {
-	labelSets := make([]map[string]string, 0, len(pods)+1)
-	labelSets = append(labelSets, templateLabels)
-	for _, pod := range pods {
-		labelSets = append(labelSets, pod.Labels)
+func uniformPeerAuthenticationSets(sets [][]resolver.PeerAuthenticationView) bool {
+	for i := 1; i < len(sets); i++ {
+		if !samePeerAuthenticationSet(sets[0], sets[i]) {
+			return false
+		}
 	}
-	return labelSets
+	return true
+}
+
+func samePeerAuthenticationSet(left, right []resolver.PeerAuthenticationView) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for i := range left {
+		if left[i].Namespace != right[i].Namespace ||
+			left[i].Name != right[i].Name ||
+			left[i].SelectorMatch != right[i].SelectorMatch {
+			return false
+		}
+	}
+	return true
 }
 
 type peerAuthenticationProjection struct {
@@ -291,11 +321,12 @@ func projectPeerAuthentications(peerAuthentications []*istiosecurityv1beta1.Peer
 		}
 		out = append(out, peerAuthenticationProjection{
 			PeerAuthenticationView: resolver.PeerAuthenticationView{
-				Name:           peerAuthentication.Name,
-				Namespace:      peerAuthentication.Namespace,
-				SelectorMatch:  false,
-				Mode:           mtlsMode(peerAuthentication.Spec.GetMtls()),
-				PortLevelModes: portModes(peerAuthentication.Spec.GetPortLevelMtls()),
+				Name:              peerAuthentication.Name,
+				Namespace:         peerAuthentication.Namespace,
+				SelectorMatch:     false,
+				CreationTimestamp: peerAuthentication.CreationTimestamp.Time,
+				Mode:              mtlsMode(peerAuthentication.Spec.GetMtls()),
+				PortLevelModes:    portModes(peerAuthentication.Spec.GetPortLevelMtls()),
 			},
 			hasSelector:    len(selectorLabels) > 0,
 			selectorLabels: copyStringMap(selectorLabels),

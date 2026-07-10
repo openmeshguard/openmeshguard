@@ -4,12 +4,18 @@
 // resolver. Move it to internal/resolver/ during M0 scaffolding; from then on,
 // changes to exported types in this file require human approval.
 //
+// The current mTLS semantics tag is mtls/v1. Bump it whenever mTLS
+// precedence, inheritance, contradiction, or unknown propagation semantics
+// change, and add or update table coverage for the changed behavior.
+//
 // INVARIANTS (enforced by tests and lint):
 //  1. This package is PURE: no client-go imports, no I/O, no globals, no clock.
 //     Inputs arrive fully normalized; outputs are deterministic.
 //  2. Every non-unknown conclusion carries a non-empty resolution Chain.
 //  3. Unknown is an explicit value, never a zero-value fallthrough.
 package resolver
+
+import "time"
 
 // ---- Enumerations (string values are the canonical JSON values) ----
 
@@ -113,10 +119,11 @@ const (
 // containing only the fields the resolver consumes. Defined in M2/M5 alongside
 // the normalizer; they must remain client-go-free (plain structs).
 type PeerAuthenticationView struct {
-	Name, Namespace string
-	SelectorMatch   bool   // whether it selected this workload specifically
-	Mode            string // UNSET | DISABLE | PERMISSIVE | STRICT
-	PortLevelModes  map[int32]string
+	Name, Namespace   string
+	SelectorMatch     bool      // whether it selected this workload specifically
+	CreationTimestamp time.Time // Kubernetes metadata.creationTimestamp for oldest-policy tie-breaks
+	Mode              string    // UNSET | DISABLE | PERMISSIVE | STRICT
+	PortLevelModes    map[int32]string
 }
 
 type DestinationRuleView struct {

@@ -97,7 +97,7 @@ func runScan(ctx context.Context, info versionInfo, opts scanOptions, stdout io.
 	}
 
 	normalized := normalize.Build(snapshot)
-	resolved := resolver.NewProvisional()
+	resolved := resolver.New()
 	workloadPostures := make([]resolver.WorkloadResult, 0, len(normalized.Workloads))
 	for _, workload := range normalized.Workloads {
 		workloadPostures = append(workloadPostures, resolver.WorkloadResult{

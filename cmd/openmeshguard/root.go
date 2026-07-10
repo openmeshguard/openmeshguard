@@ -20,9 +20,10 @@ type versionInfo struct {
 }
 
 func defaultVersionInfo() versionInfo {
+	resolved := resolver.New()
 	return versionInfo{
 		Version:         versionPlaceholder,
-		ResolverVersion: resolver.ProvisionalVersion(),
+		ResolverVersion: resolved.Version(),
 	}
 }
 

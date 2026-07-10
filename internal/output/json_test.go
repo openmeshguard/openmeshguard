@@ -95,14 +95,14 @@ func TestProvisionalFindings(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			report := buildReport(ScanInput{
 				ScannerVersion:  "dev",
-				ResolverVersion: resolver.ProvisionalVersion(),
+				ResolverVersion: resolver.New().Version(),
 				ClusterContext:  "fixture",
 				Scope:           ScanScope{AllNamespaces: true},
 				WorkloadPostures: []resolver.WorkloadResult{{
 					Ref:   tt.workload.Ref,
 					Mode:  tt.workload.Mode,
 					MTLS:  tt.workload.MTLS,
-					Authz: resolver.AuthzResult{Effective: resolver.AuthzUnknown, UnknownReason: "not yet implemented (M2)"},
+					Authz: resolver.New().ResolveAuthz(resolver.WorkloadInput{}),
 				}},
 			})
 

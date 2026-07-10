@@ -77,7 +77,7 @@ func TestReportSchemaFixtures(t *testing.T) {
 
 func TestGeneratedScanOutputMatchesSchema(t *testing.T) {
 	schema := compileSchemaForTest(t)
-	resolved := resolver.NewProvisional()
+	resolved := resolver.New()
 	workload := resolver.WorkloadInput{
 		Ref: resolver.WorkloadRef{
 			Cluster:   "cluster-a",
