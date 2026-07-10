@@ -1,68 +1,217 @@
 package engine
 
 import (
-	"os"
+	"io/fs"
 	"path/filepath"
+	"reflect"
+	"sort"
+	"strings"
 	"testing"
 
-	"gopkg.in/yaml.v3"
+	builtincontrols "github.com/openmeshguard/openmeshguard/controls"
 )
 
-type controlPack struct {
-	APIVersion string           `yaml:"apiVersion"`
-	Kind       string           `yaml:"kind"`
-	Metadata   controlMetadata  `yaml:"metadata"`
-	Controls   []map[string]any `yaml:"controls"`
-}
+func TestBuiltinControlPackEmbedMatchesValidationGlob(t *testing.T) {
+	// This .yaml-only glob is intentionally identical to controls/embed.go.
+	diskPaths, err := filepath.Glob(filepath.Join("..", "..", "controls", "*.yaml"))
+	if err != nil {
+		t.Fatalf("glob built-in control packs: %v", err)
+	}
+	var diskNames []string
+	for _, path := range diskPaths {
+		diskNames = append(diskNames, filepath.Base(path))
+	}
+	sort.Strings(diskNames)
 
-type controlMetadata struct {
-	Name    string `yaml:"name"`
-	Version string `yaml:"version"`
-}
-
-func TestBuiltinControlPacksAreLoadable(t *testing.T) {
-	var paths []string
-	for _, pattern := range []string{"*.yaml", "*.yml"} {
-		matches, err := filepath.Glob(filepath.Join("..", "..", "controls", pattern))
-		if err != nil {
-			t.Fatalf("glob control packs: %v", err)
+	entries, err := fs.ReadDir(builtincontrols.BuiltinFS, ".")
+	if err != nil {
+		t.Fatalf("read embedded control packs: %v", err)
+	}
+	var embeddedNames []string
+	for _, entry := range entries {
+		if !entry.IsDir() && filepath.Ext(entry.Name()) == ".yaml" {
+			embeddedNames = append(embeddedNames, entry.Name())
 		}
-		paths = append(paths, matches...)
 	}
-	if len(paths) == 0 {
-		t.Fatal("expected at least one built-in control pack")
+	sort.Strings(embeddedNames)
+	if !reflect.DeepEqual(embeddedNames, diskNames) {
+		t.Fatalf("embedded packs = %v, disk packs validated by glob = %v", embeddedNames, diskNames)
 	}
 
-	for _, path := range paths {
-		t.Run(filepath.Base(path), func(t *testing.T) {
-			file, err := os.Open(path)
-			if err != nil {
-				t.Fatalf("open control pack: %v", err)
-			}
-			defer file.Close()
+	packs, err := LoadBuiltins()
+	if err != nil {
+		t.Fatalf("load built-in packs: %v", err)
+	}
+	if len(packs) != len(diskNames) {
+		t.Fatalf("loaded packs = %d, want %d", len(packs), len(diskNames))
+	}
+}
 
-			var pack controlPack
-			decoder := yaml.NewDecoder(file)
-			decoder.KnownFields(true)
-			if err := decoder.Decode(&pack); err != nil {
-				t.Fatalf("decode control pack: %v", err)
-			}
+func TestValidateFileRejections(t *testing.T) {
+	tests := []struct {
+		name     string
+		fixture  string
+		contains []string
+	}{
+		{
+			name:     "unknown fields",
+			fixture:  "unknown-field.yaml",
+			contains: []string{"unknown-field.yaml:", "control ACME-MTLS-001", `unknown field "typo"`},
+		},
+		{
+			name:     "missing required fields",
+			fixture:  "missing-required.yaml",
+			contains: []string{"missing-required.yaml:", "control ACME-MTLS-001", `missing required field "expression"`},
+		},
+		{
+			name:     "malformed identifier",
+			fixture:  "malformed-id.yaml",
+			contains: []string{"malformed-id.yaml:", "control bad-id", `id must match ^[A-Z]+-[A-Z]+-[0-9]{3}$`},
+		},
+		{
+			name:     "CEL syntax includes compile position",
+			fixture:  "cel-syntax.yaml",
+			contains: []string{"cel-syntax.yaml:", "control ACME-MTLS-001", "expression CEL compile error at 1:"},
+		},
+		{
+			name:     "out-of-scope variable",
+			fixture:  "out-of-scope.yaml",
+			contains: []string{"out-of-scope.yaml:", "control ACME-MTLS-001", "expression CEL compile error at 1:", "undeclared reference to 'resource'"},
+		},
+		{
+			name:     "runtime control requires verified evidence",
+			fixture:  "runtime-no-verified.yaml",
+			contains: []string{"runtime-no-verified.yaml:", "control ACME-MTLS-101", "runtime evidenceType must require a verified.* field"},
+		},
+		{
+			name:     "expression must return bool",
+			fixture:  "non-bool.yaml",
+			contains: []string{"non-bool.yaml:", "control ACME-MTLS-001", "expression CEL expression must return bool"},
+		},
+		{
+			name:     "expression cannot bypass requires",
+			fixture:  "requires-bypass.yaml",
+			contains: []string{"requires-bypass.yaml:", "control ACME-MTLS-001", `expression path "workload.mtls.clientTLSContradiction" must be declared in requires`},
+		},
+		{
+			name:     "duplicate within pack",
+			fixture:  "duplicate-in-pack.yaml",
+			contains: []string{"duplicate-in-pack.yaml:", "control ACME-MTLS-001", "duplicate control ID"},
+		},
+	}
 
-			if pack.APIVersion != "openmeshguard.io/v1alpha1" {
-				t.Fatalf("apiVersion = %q, want openmeshguard.io/v1alpha1", pack.APIVersion)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateFile(filepath.Join("testdata", tt.fixture))
+			if err == nil {
+				t.Fatal("ValidateFile returned nil error")
 			}
-			if pack.Kind != "ControlPack" {
-				t.Fatalf("kind = %q, want ControlPack", pack.Kind)
-			}
-			if pack.Metadata.Name == "" {
-				t.Fatal("metadata.name is required")
-			}
-			if pack.Metadata.Version == "" {
-				t.Fatal("metadata.version is required")
-			}
-			if pack.Controls == nil {
-				t.Fatal("controls must be present, even when empty")
+			for _, expected := range tt.contains {
+				if !strings.Contains(err.Error(), expected) {
+					t.Fatalf("error %q does not contain %q", err, expected)
+				}
 			}
 		})
+	}
+}
+
+func TestDeliberatelyMalformedPackReportsAllReviewGateDiagnostics(t *testing.T) {
+	err := ValidateFile(filepath.Join("testdata", "malformed.yaml"))
+	if err == nil {
+		t.Fatal("ValidateFile returned nil error")
+	}
+	for _, expected := range []string{
+		"malformed.yaml:",
+		"control ACME-MTLS-001",
+		`unknown field "unexpectedField"`,
+		`missing required field "title"`,
+		"runtime evidenceType must require a verified.* field",
+		"applicability CEL compile error at 1:",
+		"undeclared reference to 'resource'",
+		"expression CEL compile error at 1:",
+	} {
+		if !strings.Contains(err.Error(), expected) {
+			t.Fatalf("malformed-pack error %q does not contain %q", err, expected)
+		}
+	}
+}
+
+func TestDuplicateControlIDAcrossBuiltinAndUserPack(t *testing.T) {
+	_, err := LoadPacks([]string{filepath.Join("testdata", "duplicate-builtin.yaml")})
+	if err == nil {
+		t.Fatal("LoadPacks returned nil error")
+	}
+	for _, expected := range []string{"duplicate-builtin.yaml:", "control MG-MTLS-001", "duplicate control ID", "controls/builtin-mtls.yaml"} {
+		if !strings.Contains(err.Error(), expected) {
+			t.Fatalf("duplicate error %q does not contain %q", err, expected)
+		}
+	}
+}
+
+func TestValidUserPackUsesStringsExtension(t *testing.T) {
+	if err := ValidateFile(filepath.Join("testdata", "valid.yaml")); err != nil {
+		t.Fatalf("ValidateFile returned error: %v", err)
+	}
+}
+
+func TestCELVariablesAreScopedExactly(t *testing.T) {
+	tests := []struct {
+		name       string
+		scope      string
+		expression string
+		wantError  string
+	}{
+		{
+			name:       "workload exposes workload namespace inventory and params",
+			scope:      "workload",
+			expression: `workload.dataPlaneMode == "sidecar" && namespace.name == "payments" && inventory.ready == true && params.enabled == true`,
+		},
+		{
+			name:  "workload rejects resource",
+			scope: "workload", expression: `resource.kind == "Gateway"`, wantError: "undeclared reference to 'resource'",
+		},
+		{
+			name:  "namespace exposes namespace",
+			scope: "namespace", expression: `namespace.name == "payments"`,
+		},
+		{
+			name:  "namespace rejects workload",
+			scope: "namespace", expression: `workload.dataPlaneMode == "sidecar"`, wantError: "undeclared reference to 'workload'",
+		},
+		{
+			name:  "resource exposes resource",
+			scope: "resource", expression: `resource.kind == "Gateway"`,
+		},
+		{
+			name:  "resource rejects namespace",
+			scope: "resource", expression: `namespace.name == "payments"`, wantError: "undeclared reference to 'namespace'",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, issues := compileBoolean("scope-test.yaml", "ACME-TEST-001", "expression", nil, tt.scope, tt.expression)
+			if tt.wantError == "" {
+				if len(issues) > 0 {
+					t.Fatalf("compileBoolean returned errors: %v", issues)
+				}
+				return
+			}
+			if len(issues) == 0 || !strings.Contains(issues.Error(), tt.wantError) {
+				t.Fatalf("compileBoolean error = %v, want %q", issues, tt.wantError)
+			}
+		})
+	}
+}
+
+func TestNamespaceCELRewritePreservesContractTextAndPositions(t *testing.T) {
+	expression := `namespace.name == "namespace" && workload.workload.namespace == "payments"`
+	rewritten := rewriteNamespaceVariable(expression)
+	want := `omg_nsctx.name == "namespace" && workload.workload.namespace == "payments"`
+	if rewritten != want {
+		t.Fatalf("rewrite = %q, want %q", rewritten, want)
+	}
+	if len(rewritten) != len(expression) {
+		t.Fatalf("rewrite length = %d, original = %d; CEL positions would drift", len(rewritten), len(expression))
 	}
 }

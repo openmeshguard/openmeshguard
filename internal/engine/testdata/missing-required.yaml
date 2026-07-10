@@ -1,0 +1,17 @@
+apiVersion: openmeshguard.io/v1alpha1
+kind: ControlPack
+metadata:
+  name: missing-required
+  version: 1.0.0
+controls:
+  - id: ACME-MTLS-001
+    title: Missing expression
+    category: mtls
+    severity: high
+    evidenceType: config
+    scope: workload
+    requires: [mtls.effective]
+    applicability: 'true'
+    message: Missing an expression.
+    remediation:
+      guidance: Add the expression.

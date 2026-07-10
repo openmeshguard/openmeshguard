@@ -1,0 +1,77 @@
+apiVersion: openmeshguard.io/v1alpha1
+kind: ControlPack
+metadata:
+  name: builtin-mtls
+  version: 0.1.0
+controls:
+  - id: MG-MTLS-001
+    title: Mesh workloads must have effective strict mTLS
+    category: mtls
+    severity: high
+    evidenceType: config
+    scope: workload
+    environments: []
+    requires:
+      - mtls.effective
+    applicability: 'workload.dataPlaneMode != "not-applicable"'
+    expression: 'workload.mtls.effective == "strict"'
+    message: >-
+      Effective mTLS for {{ .Workload }} resolves to
+      {{ .Posture.Mtls.Effective }}, not strict.
+    remediation:
+      guidance: >-
+        Apply or correct PeerAuthentication so the workload resolves to STRICT,
+        then inspect the attached resolution chain.
+      suggestedYAMLTemplate: peerauthentication-strict.tmpl
+    frameworks:
+      - nist-csf-2.0/PR.DS
+      - owasp-k8s/K01
+
+  - id: MG-MTLS-002
+    title: Workload ports must not permit plaintext
+    category: mtls
+    severity: high
+    evidenceType: config
+    scope: workload
+    environments: []
+    requires:
+      - mtls.byPort
+    applicability: 'workload.dataPlaneMode != "not-applicable"'
+    expression: '!workload.mtls.byPort.exists(port, workload.mtls.byPort[port] == "permissive" || workload.mtls.byPort[port] == "disabled")'
+    message: >-
+      Effective mTLS for {{ .Workload }} permits plaintext on one or more
+      declared workload ports.
+    remediation:
+      guidance: >-
+        Correct workload-level port mTLS overrides so every declared port
+        resolves to STRICT.
+    frameworks:
+      - nist-csf-2.0/PR.DS
+      - owasp-k8s/K01
+
+  - id: MG-MTLS-003
+    title: Workloads must not have disabled or contradicted mTLS
+    category: mtls
+    severity: critical
+    evidenceType: config
+    scope: workload
+    environments: []
+    requires:
+      - mtls.effective
+      - mtls.byPort
+      - mtls.clientTLSContradiction
+    applicability: 'workload.dataPlaneMode != "not-applicable"'
+    expression: >-
+      workload.mtls.effective != "disabled" &&
+      !workload.mtls.byPort.exists(port, workload.mtls.byPort[port] == "disabled") &&
+      workload.mtls.clientTLSContradiction == false
+    message: >-
+      Effective mTLS for {{ .Workload }} is disabled on at least one path or
+      contradicts an explicit DestinationRule client TLS setting.
+    remediation:
+      guidance: >-
+        Remove DISABLE port overrides and correct DestinationRule TLS settings
+        so client and server posture agree.
+    frameworks:
+      - nist-csf-2.0/PR.DS
+      - owasp-k8s/K01
