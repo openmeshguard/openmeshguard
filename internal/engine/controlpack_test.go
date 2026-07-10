@@ -186,6 +186,10 @@ func TestCELVariablesAreScopedExactly(t *testing.T) {
 			name:  "resource rejects namespace",
 			scope: "resource", expression: `namespace.name == "payments"`, wantError: "undeclared reference to 'namespace'",
 		},
+		{
+			name:  "internal namespace alias is not part of the contract",
+			scope: "namespace", expression: `omg_nsctx.name == "payments"`, wantError: `undeclared reference to "omg_nsctx"`,
+		},
 	}
 
 	for _, tt := range tests {
@@ -213,5 +217,8 @@ func TestNamespaceCELRewritePreservesContractTextAndPositions(t *testing.T) {
 	}
 	if len(rewritten) != len(expression) {
 		t.Fatalf("rewrite length = %d, original = %d; CEL positions would drift", len(rewritten), len(expression))
+	}
+	if position := rootIdentifierPosition(`params.name == "omg_nsctx"`, namespaceCELVariable); position != -1 {
+		t.Fatalf("internal alias inside string reported at %d", position)
 	}
 }

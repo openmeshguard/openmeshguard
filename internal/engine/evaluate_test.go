@@ -279,6 +279,46 @@ controls:
 	}
 }
 
+func TestWorkloadControlHonorsNamespacePathAvailability(t *testing.T) {
+	packYAML := []byte(`
+apiVersion: openmeshguard.io/v1alpha1
+kind: ControlPack
+metadata:
+  name: namespace-availability
+  version: 1.0.0
+controls:
+  - id: ACME-ENV-001
+    title: Workload namespace must have a team label
+    category: governance
+    severity: medium
+    evidenceType: context
+    scope: workload
+    environments: []
+    requires: [namespace.labels.team]
+    applicability: 'true'
+    expression: 'namespace.labels.team == "platform"'
+    message: 'Workload {{ .Workload }} has no platform team label.'
+    remediation:
+      guidance: Add the team label.
+`)
+	pack, err := decodeAndValidate("namespace-availability.yaml", packYAML, SourceUser)
+	if err != nil {
+		t.Fatalf("decode pack: %v", err)
+	}
+	workload := workloadWithMTLS(resolver.MTLSStrict, nil)
+	workload.Namespace.Labels = map[string]string{"team": "platform"}
+	workload.Namespace.Availability = map[string]Availability{
+		"labels.team": {Reason: "namespace labels permission unavailable"},
+	}
+	result, err := Evaluate([]Pack{pack}, Input{Workloads: []WorkloadInput{workload}})
+	if err != nil {
+		t.Fatalf("Evaluate returned error: %v", err)
+	}
+	if len(result.Findings) != 1 || result.Findings[0].Status != statusUnknown || !strings.Contains(result.Findings[0].UnknownReason, "namespace labels permission unavailable") {
+		t.Fatalf("findings = %#v, want namespace availability unknown", result.Findings)
+	}
+}
+
 func packWithControl(t *testing.T, packs []Pack, controlID string) Pack {
 	t.Helper()
 	for _, pack := range packs {

@@ -238,14 +238,27 @@ func assembleFinding(control Control, target evaluationTarget, status, confidenc
 }
 
 func findingEvidence(control Control, targetEvidence []string) []string {
-	switch control.EvidenceType {
-	case "runtime":
-		return []string{"prometheus"}
-	case "context":
-		return []string{"scan-config"}
-	default:
-		return append([]string(nil), targetEvidence...)
+	evidence := append([]string(nil), targetEvidence...)
+	if control.EvidenceType == "runtime" {
+		evidence = append(evidence, "prometheus")
 	}
+	return uniqueStrings(evidence)
+}
+
+func uniqueStrings(values []string) []string {
+	seen := map[string]struct{}{}
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		if value == "" {
+			continue
+		}
+		if _, exists := seen[value]; exists {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	return out
 }
 
 func deterministicFindingID(controlID string, target evaluationTarget) string {
@@ -422,7 +435,10 @@ func resourceTargets(control Control, input Input, params map[string]any) []eval
 }
 
 func defaultWorkloadAvailability(workload WorkloadInput, namespace NamespaceInput) map[string]Availability {
-	availability := normalizeAvailability("workload", workload.Availability)
+	availability := normalizeAvailability("namespace", namespace.Availability)
+	for path, value := range normalizeAvailability("workload", workload.Availability) {
+		availability[path] = value
+	}
 	if workload.Posture.MTLS.Effective == resolver.MTLSUnknown {
 		reason := workload.Posture.MTLS.UnknownReason
 		if reason == "" {

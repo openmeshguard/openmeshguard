@@ -385,6 +385,14 @@ func compileBoolean(file, controlID, field string, node *yaml.Node, scope, expre
 	if strings.TrimSpace(expression) == "" {
 		return nil, nil
 	}
+	if position := rootIdentifierPosition(expression, namespaceCELVariable); position >= 0 {
+		return nil, validationErrors{issueAt(
+			file,
+			controlID,
+			node,
+			fmt.Sprintf("%s CEL compile error at 1:%d: undeclared reference to %q", field, position+1, namespaceCELVariable),
+		)}
+	}
 	environment, err := celEnvironment(scope)
 	if err != nil {
 		return nil, validationErrors{issueAt(file, controlID, node, fmt.Sprintf("create CEL environment: %v", err))}
@@ -496,6 +504,48 @@ func isIdentifierStart(value byte) bool {
 
 func isIdentifierPart(value byte) bool {
 	return isIdentifierStart(value) || value >= '0' && value <= '9'
+}
+
+func rootIdentifierPosition(expression, wanted string) int {
+	var quote byte
+	escaped := false
+	for index := 0; index < len(expression); {
+		current := expression[index]
+		if quote != 0 {
+			index++
+			if escaped {
+				escaped = false
+				continue
+			}
+			if current == '\\' {
+				escaped = true
+				continue
+			}
+			if current == quote {
+				quote = 0
+			}
+			continue
+		}
+		if current == '\'' || current == '"' {
+			quote = current
+			index++
+			continue
+		}
+		if isIdentifierStart(current) {
+			start := index
+			index++
+			for index < len(expression) && isIdentifierPart(expression[index]) {
+				index++
+			}
+			rootIdentifier := start == 0 || expression[start-1] != '.'
+			if rootIdentifier && expression[start:index] == wanted {
+				return start
+			}
+			continue
+		}
+		index++
+	}
+	return -1
 }
 
 func rejectDuplicateIDs(packs []Pack) error {
