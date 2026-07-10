@@ -1,0 +1,18 @@
+apiVersion: openmeshguard.io/v1alpha1
+kind: ControlPack
+metadata:
+  name: scope-invalid-requires
+  version: 1.0.0
+controls:
+  - id: ACME-GOV-001
+    title: Workload cannot require resource evidence
+    category: governance
+    severity: medium
+    evidenceType: context
+    scope: workload
+    requires: [resource.kind]
+    applicability: 'true'
+    expression: 'true'
+    message: Invalid scope.
+    remediation:
+      guidance: Use a workload path.

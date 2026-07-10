@@ -52,11 +52,15 @@ type Control struct {
 
 	applicabilityProgram cel.Program
 	expressionProgram    cel.Program
+	requiredPaths        []string
+	applicabilityPaths   []string
+	expressionPaths      []string
 }
 
 type Remediation struct {
 	Guidance              string `yaml:"guidance"`
 	SuggestedYAMLTemplate string `yaml:"suggestedYAMLTemplate,omitempty"`
+	SuggestedYAML         string `yaml:"-"`
 }
 
 type Match struct {

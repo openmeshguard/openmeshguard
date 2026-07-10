@@ -50,7 +50,7 @@ controls:
       - owasp-k8s/K01
 
   - id: MG-MTLS-003
-    title: Workloads must not have disabled or contradicted mTLS
+    title: Workloads must not have disabled mTLS
     category: mtls
     severity: critical
     evidenceType: config
@@ -58,20 +58,14 @@ controls:
     environments: []
     requires:
       - mtls.effective
-      - mtls.byPort
-      - mtls.clientTLSContradiction
     applicability: 'workload.dataPlaneMode != "not-applicable"'
-    expression: >-
-      workload.mtls.effective != "disabled" &&
-      !workload.mtls.byPort.exists(port, workload.mtls.byPort[port] == "disabled") &&
-      workload.mtls.clientTLSContradiction == false
+    expression: 'workload.mtls.effective != "disabled"'
     message: >-
-      Effective mTLS for {{ .Workload }} is disabled on at least one path or
-      contradicts an explicit DestinationRule client TLS setting.
+      Effective mTLS for {{ .Workload }} is disabled.
     remediation:
       guidance: >-
-        Remove DISABLE port overrides and correct DestinationRule TLS settings
-        so client and server posture agree.
+        Apply or correct PeerAuthentication so the workload no longer resolves
+        to DISABLE, then inspect the attached resolution chain.
     frameworks:
       - nist-csf-2.0/PR.DS
       - owasp-k8s/K01

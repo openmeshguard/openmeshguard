@@ -1,0 +1,18 @@
+apiVersion: openmeshguard.io/v1alpha1
+kind: ControlPack
+metadata:
+  name: dynamic-non-bool
+  version: 1.0.0
+controls:
+  - id: ACME-GOV-001
+    title: Owner expression must be boolean
+    category: governance
+    severity: medium
+    evidenceType: context
+    scope: workload
+    requires: [owner]
+    applicability: 'true'
+    expression: 'workload.owner'
+    message: Owner is invalid.
+    remediation:
+      guidance: Set a valid owner.

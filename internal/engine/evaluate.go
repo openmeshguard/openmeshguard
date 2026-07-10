@@ -37,6 +37,7 @@ type messageData struct {
 	Namespace string
 	Resource  string
 	Posture   postureData
+	Verified  verifiedData
 	Inventory map[string]any
 	Params    map[string]any
 }
@@ -56,16 +57,25 @@ type authorizationData struct {
 	Effective string
 }
 
+type verifiedData struct {
+	Status            any
+	Window            any
+	MTLSTrafficShare  any
+	PlaintextObserved any
+	PlaintextSources  any
+}
+
 type categoryAccumulator struct {
 	pass    int
 	fail    int
 	unknown int
 }
 
-// Evaluate applies every validated control to its scope targets. Applicability
-// is always evaluated before requires so out-of-mesh workloads become
-// not-applicable even when later posture evidence is unavailable. Expression
-// evaluation is reachable only after every declared required path is known.
+// Evaluate applies every validated control to its scope targets. Evidence read
+// by applicability is checked before applicability executes; declared evidence
+// for the expression is checked after a target is known to apply. This preserves
+// not-applicable as a resolved state without allowing unavailable evidence to
+// exempt a target or reach CEL evaluation.
 func Evaluate(packs []Pack, input Input) (Result, error) {
 	if err := rejectDuplicateIDs(packs); err != nil {
 		return Result{}, err
@@ -116,6 +126,16 @@ func Evaluate(packs []Pack, input Input) (Result, error) {
 }
 
 func evaluateControl(pack Pack, control Control, target evaluationTarget) (*Finding, string, error) {
+	if unknownReason := unavailableReasonForPaths(control, target, control.applicabilityPaths); unknownReason != "" {
+		finding, err := assembleFinding(control, target, statusUnknown, "unavailable")
+		if err != nil {
+			return nil, "", fmt.Errorf("%s: control %s: render remediation for %s: %w", pack.File, control.ID, target.key, err)
+		}
+		finding.UnknownReason = unknownReason
+		finding.Reasoning = fmt.Sprintf("Control %s could not determine applicability for %s: %s.", control.ID, target.key, unknownReason)
+		return &finding, statusUnknown, nil
+	}
+
 	applicable, err := evaluateBool(control.applicabilityProgram, target.activation)
 	if err != nil {
 		return nil, "", fmt.Errorf(
@@ -127,13 +147,19 @@ func evaluateControl(pack Pack, control Control, target evaluationTarget) (*Find
 		)
 	}
 	if !applicable {
-		finding := assembleFinding(control, target, statusNotApplicable, "resolved")
+		finding, renderErr := assembleFinding(control, target, statusNotApplicable, "resolved")
+		if renderErr != nil {
+			return nil, "", fmt.Errorf("%s: control %s: render remediation for %s: %w", pack.File, control.ID, target.key, renderErr)
+		}
 		finding.Reasoning = fmt.Sprintf("Control %s does not apply to %s.", control.ID, target.key)
 		return &finding, statusNotApplicable, nil
 	}
 
-	if unknownReason := unavailableReason(control, target); unknownReason != "" {
-		finding := assembleFinding(control, target, statusUnknown, "unavailable")
+	if unknownReason := unavailableReasonForPaths(control, target, requiredPaths(control)); unknownReason != "" {
+		finding, renderErr := assembleFinding(control, target, statusUnknown, "unavailable")
+		if renderErr != nil {
+			return nil, "", fmt.Errorf("%s: control %s: render remediation for %s: %w", pack.File, control.ID, target.key, renderErr)
+		}
 		finding.UnknownReason = unknownReason
 		finding.Reasoning = fmt.Sprintf("Control %s could not be evaluated for %s: %s.", control.ID, target.key, unknownReason)
 		return &finding, statusUnknown, nil
@@ -153,7 +179,10 @@ func evaluateControl(pack Pack, control Control, target evaluationTarget) (*Find
 		return nil, "pass", nil
 	}
 
-	finding := assembleFinding(control, target, statusOpen, "resolved")
+	finding, renderErr := assembleFinding(control, target, statusOpen, "resolved")
+	if renderErr != nil {
+		return nil, "", fmt.Errorf("%s: control %s: render remediation for %s: %w", pack.File, control.ID, target.key, renderErr)
+	}
 	reasoning, err := renderMessage(control, target.templateData)
 	if err != nil {
 		return nil, "", fmt.Errorf("%s: control %s: render message for %s: %w", pack.File, control.ID, target.key, err)
@@ -162,28 +191,45 @@ func evaluateControl(pack Pack, control Control, target evaluationTarget) (*Find
 	return &finding, statusOpen, nil
 }
 
-func unavailableReason(control Control, target evaluationTarget) string {
-	var reasons []string
+func requiredPaths(control Control) []string {
+	if len(control.requiredPaths) > 0 {
+		return control.requiredPaths
+	}
+	paths := make([]string, 0, len(control.Requires))
 	for _, required := range control.Requires {
-		path := absoluteRequiredPath(control.Scope, required)
+		paths = append(paths, absoluteRequiredPath(control.Scope, required))
+	}
+	return paths
+}
+
+func unavailableReasonForPaths(control Control, target evaluationTarget, paths []string) string {
+	var reasons []string
+	for _, path := range paths {
+		displayPath := requiredDisplayPath(control.Scope, path)
 		if override, ok := availabilityForPath(target.availability, path); ok {
-			if override.Available {
+			if !override.Available {
+				reason := override.Reason
+				if reason == "" {
+					reason = "evidence unavailable"
+				}
+				reasons = append(reasons, fmt.Sprintf("%s unavailable: %s", displayPath, reason))
 				continue
 			}
-			reason := override.Reason
-			if reason == "" {
-				reason = "evidence unavailable"
-			}
-			reasons = append(reasons, fmt.Sprintf("%s unavailable: %s", required, reason))
-			continue
 		}
 		value, available := lookupPath(target.activation, path)
 		if available && !unknownValue(value) {
 			continue
 		}
-		reasons = append(reasons, fmt.Sprintf("%s unavailable: required path has no known value", required))
+		reasons = append(reasons, fmt.Sprintf("%s unavailable: required path has no known value", displayPath))
 	}
 	return strings.Join(reasons, "; ")
+}
+
+func requiredDisplayPath(scope, path string) string {
+	if strings.HasPrefix(path, scope+".") {
+		return strings.TrimPrefix(path, scope+".")
+	}
+	return path
 }
 
 func absoluteRequiredPath(scope, path string) string {
@@ -220,7 +266,15 @@ func evaluateBool(program cel.Program, activation map[string]any) (bool, error) 
 	return boolean, nil
 }
 
-func assembleFinding(control Control, target evaluationTarget, status, confidence string) Finding {
+func assembleFinding(control Control, target evaluationTarget, status, confidence string) (Finding, error) {
+	remediation := control.Remediation
+	if remediation.SuggestedYAML != "" {
+		rendered, err := renderTemplate(control.ID+"-remediation", remediation.SuggestedYAML, target.templateData)
+		if err != nil {
+			return Finding{}, err
+		}
+		remediation.SuggestedYAML = rendered
+	}
 	return Finding{
 		ID:              deterministicFindingID(control.ID, target),
 		ControlID:       control.ID,
@@ -233,8 +287,8 @@ func assembleFinding(control Control, target evaluationTarget, status, confidenc
 		EvidenceSources: findingEvidence(control, target.evidence),
 		Resources:       []ResourceRef{target.resource},
 		ResolutionChain: resolutionChain(control, target.workload),
-		Remediation:     control.Remediation,
-	}
+		Remediation:     remediation,
+	}, nil
 }
 
 func findingEvidence(control Control, targetEvidence []string) []string {
@@ -278,11 +332,15 @@ func resolutionChain(control Control, workload *WorkloadInput) []resolver.Step {
 	if workload == nil {
 		return nil
 	}
-	usesMTLS := strings.Contains(control.Expression, "workload.mtls")
-	usesAuthz := strings.Contains(control.Expression, "workload.authorization")
-	for _, path := range control.Requires {
-		usesMTLS = usesMTLS || strings.HasPrefix(path, "mtls.") || strings.HasPrefix(path, "workload.mtls.")
-		usesAuthz = usesAuthz || strings.HasPrefix(path, "authorization.") || strings.HasPrefix(path, "workload.authorization.")
+	var paths []string
+	paths = append(paths, requiredPaths(control)...)
+	paths = append(paths, control.applicabilityPaths...)
+	paths = append(paths, control.expressionPaths...)
+	usesMTLS := false
+	usesAuthz := false
+	for _, path := range paths {
+		usesMTLS = usesMTLS || path == "workload.mtls" || strings.HasPrefix(path, "workload.mtls.")
+		usesAuthz = usesAuthz || path == "workload.authorization" || strings.HasPrefix(path, "workload.authorization.")
 	}
 	var chain []resolver.Step
 	if usesMTLS {
@@ -291,11 +349,19 @@ func resolutionChain(control Control, workload *WorkloadInput) []resolver.Step {
 	if usesAuthz {
 		chain = append(chain, workload.Posture.Authz.Chain...)
 	}
-	return append([]resolver.Step(nil), chain...)
+	out := append([]resolver.Step(nil), chain...)
+	for index := range out {
+		out[index].Order = index + 1
+	}
+	return out
 }
 
 func renderMessage(control Control, data messageData) (string, error) {
-	tmpl, err := template.New(control.ID).Option("missingkey=error").Parse(control.Message)
+	return renderTemplate(control.ID, control.Message, data)
+}
+
+func renderTemplate(name, source string, data messageData) (string, error) {
+	tmpl, err := template.New(name).Option("missingkey=error").Parse(source)
 	if err != nil {
 		return "", err
 	}
@@ -354,12 +420,22 @@ func workloadTargets(input Input, params map[string]any) []evaluationTarget {
 					Mtls:          mtlsData{Effective: string(workload.Posture.MTLS.Effective), ByPort: workload.Posture.MTLS.ByPort, ClientTLSContradiction: workload.Posture.MTLS.ClientTLSContradiction},
 					Authorization: authorizationData{Effective: string(workload.Posture.Authz.Effective)},
 				},
-				Inventory: nonNilMap(input.Inventory), Params: params,
+				Verified: verifiedTemplateData(workload.Verified), Inventory: nonNilMap(input.Inventory), Params: params,
 			},
 		})
 	}
 	sort.Slice(targets, func(i, j int) bool { return targets[i].key < targets[j].key })
 	return targets
+}
+
+func verifiedTemplateData(values map[string]any) verifiedData {
+	return verifiedData{
+		Status:            values["status"],
+		Window:            values["window"],
+		MTLSTrafficShare:  values["mtlsTrafficShare"],
+		PlaintextObserved: values["plaintextObserved"],
+		PlaintextSources:  values["plaintextSources"],
+	}
 }
 
 func namespaceTargets(input Input, params map[string]any) []evaluationTarget {
@@ -439,6 +515,9 @@ func defaultWorkloadAvailability(workload WorkloadInput, namespace NamespaceInpu
 	for path, value := range normalizeAvailability("workload", workload.Availability) {
 		availability[path] = value
 	}
+	if workload.Posture.Mode == resolver.ModeUnknown {
+		setDefaultAvailability(availability, "workload.dataPlaneMode", Availability{Reason: "data plane mode unavailable"})
+	}
 	if workload.Posture.MTLS.Effective == resolver.MTLSUnknown {
 		reason := workload.Posture.MTLS.UnknownReason
 		if reason == "" {
@@ -456,6 +535,8 @@ func defaultWorkloadAvailability(workload WorkloadInput, namespace NamespaceInpu
 			reason = "effective authorization posture unavailable"
 		}
 		setDefaultAvailability(availability, "workload.authorization.effective", Availability{Reason: reason})
+		setDefaultAvailability(availability, "workload.authorization.policiesInScope", Availability{Reason: reason})
+		setDefaultAvailability(availability, "workload.authorization.l7Unenforced", Availability{Reason: reason})
 	}
 	if workload.Verified == nil {
 		setDefaultAvailability(availability, "workload.verified", Availability{Reason: "runtime verification unavailable"})
@@ -482,6 +563,9 @@ func workloadValue(workload WorkloadInput, availability map[string]Availability)
 	mtls := map[string]any{
 		"chain": workload.Posture.MTLS.Chain,
 	}
+	if workload.Posture.MTLS.UnknownReason != "" {
+		mtls["unknownReason"] = workload.Posture.MTLS.UnknownReason
+	}
 	if available(availability, "workload.mtls.effective") {
 		mtls["effective"] = string(workload.Posture.MTLS.Effective)
 	}
@@ -497,7 +581,14 @@ func workloadValue(workload WorkloadInput, availability map[string]Availability)
 	}
 	value["mtls"] = mtls
 
-	authz := map[string]any{"chain": workload.Posture.Authz.Chain}
+	authz := map[string]any{
+		"policiesInScope": workload.Posture.Authz.PoliciesInScope,
+		"l7Unenforced":    workload.Posture.Authz.L7Unenforced,
+		"chain":           workload.Posture.Authz.Chain,
+	}
+	if workload.Posture.Authz.UnknownReason != "" {
+		authz["unknownReason"] = workload.Posture.Authz.UnknownReason
+	}
 	if available(availability, "workload.authorization.effective") {
 		authz["effective"] = string(workload.Posture.Authz.Effective)
 	}
@@ -603,12 +694,43 @@ func availabilityForPath(values map[string]Availability, path string) (Availabil
 		}
 		candidate = candidate[:separator]
 	}
+	var descendants []string
+	for candidate, value := range values {
+		if strings.HasPrefix(candidate, path+".") && !value.Available {
+			descendants = append(descendants, candidate)
+		}
+	}
+	if len(descendants) > 0 {
+		sort.Strings(descendants)
+		return values[descendants[0]], true
+	}
 	return Availability{}, false
 }
 
 func unknownValue(value any) bool {
-	text, ok := value.(string)
-	return ok && strings.EqualFold(text, "unknown")
+	switch typed := value.(type) {
+	case string:
+		return strings.EqualFold(typed, "unknown")
+	case map[string]any:
+		for _, child := range typed {
+			if unknownValue(child) {
+				return true
+			}
+		}
+	case map[string]string:
+		for _, child := range typed {
+			if unknownValue(child) {
+				return true
+			}
+		}
+	case []any:
+		for _, child := range typed {
+			if unknownValue(child) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func matchesEnvironment(environments []string, environment string) bool {

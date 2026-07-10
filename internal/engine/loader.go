@@ -6,6 +6,7 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -24,7 +25,6 @@ var (
 	builtinIDPattern = regexp.MustCompile(`^MG-[A-Z]+-[0-9]{3}$`)
 	userIDPattern    = regexp.MustCompile(`^[A-Z]+-[A-Z]+-[0-9]{3}$`)
 	requiresPattern  = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)+$`)
-	celPathPattern   = regexp.MustCompile(`\b(?:workload|namespace|resource|inventory|params)(?:\.[A-Za-z_][A-Za-z0-9_]*)+`)
 )
 
 type validationIssue struct {
@@ -106,11 +106,8 @@ func LoadBuiltins() ([]Pack, error) {
 
 // ValidateFile validates one user control pack without loading cluster state.
 func ValidateFile(path string) error {
-	pack, err := loadPath(path, SourceUser)
-	if err != nil {
-		return err
-	}
-	return rejectDuplicateIDs([]Pack{pack})
+	_, err := LoadPacks([]string{path})
+	return err
 }
 
 func loadPath(path string, source Source) (Pack, error) {
@@ -135,6 +132,7 @@ func decodeAndValidate(file string, data []byte, source Source) (Pack, error) {
 	pack.File = file
 	pack.Source = source
 	issues = append(issues, validatePack(file, root, &pack)...)
+	issues = append(issues, loadRemediationTemplates(file, root, &pack)...)
 	if len(issues) > 0 {
 		return Pack{}, issues
 	}
@@ -219,18 +217,18 @@ func unknownMappingFields(file, control string, node *yaml.Node, allowed map[str
 func validatePack(file string, root *yaml.Node, pack *Pack) validationErrors {
 	var issues validationErrors
 	issues = append(issues, requireFields(file, "<pack>", root, "apiVersion", "kind", "metadata", "controls")...)
-	if pack.APIVersion != "" && pack.APIVersion != APIVersion {
+	if mappingValue(root, "apiVersion") != nil && pack.APIVersion != APIVersion {
 		issues = append(issues, issueAt(file, "<pack>", mappingValue(root, "apiVersion"), fmt.Sprintf("apiVersion must be %q", APIVersion)))
 	}
-	if pack.Kind != "" && pack.Kind != Kind {
+	if mappingValue(root, "kind") != nil && pack.Kind != Kind {
 		issues = append(issues, issueAt(file, "<pack>", mappingValue(root, "kind"), fmt.Sprintf("kind must be %q", Kind)))
 	}
 	metadata := mappingValue(root, "metadata")
 	issues = append(issues, requireFields(file, "<pack>", metadata, "name", "version")...)
-	if strings.TrimSpace(pack.Metadata.Name) == "" && mappingValue(metadata, "name") != nil {
+	if mappingValue(metadata, "name") != nil && strings.TrimSpace(pack.Metadata.Name) == "" {
 		issues = append(issues, issueAt(file, "<pack>", mappingValue(metadata, "name"), "metadata.name must not be empty"))
 	}
-	if strings.TrimSpace(pack.Metadata.Version) == "" && mappingValue(metadata, "version") != nil {
+	if mappingValue(metadata, "version") != nil && strings.TrimSpace(pack.Metadata.Version) == "" {
 		issues = append(issues, issueAt(file, "<pack>", mappingValue(metadata, "version"), "metadata.version must not be empty"))
 	}
 
@@ -297,11 +295,15 @@ func validateControl(file string, node *yaml.Node, control *Control, source Sour
 		}
 		seenRequires[required] = struct{}{}
 		control.Requires[index] = required
+		absolute := absoluteRequiredPath(control.Scope, required)
+		control.requiredPaths = append(control.requiredPaths, absolute)
+		if validScope(control.Scope) && !pathAllowedForScope(control.Scope, absolute) {
+			issues = append(issues, issueAt(file, controlID, location, fmt.Sprintf("requires path %q is not available to %s scope", required, control.Scope)))
+		}
 	}
-	if control.EvidenceType == "runtime" && !requiresVerified(control.Requires) {
+	if control.EvidenceType == "runtime" && !requiresVerified(control.requiredPaths) {
 		issues = append(issues, issueAt(file, controlID, mappingValue(node, "requires"), "runtime evidenceType must require a verified.* field"))
 	}
-	issues = append(issues, validateExpressionRequires(file, controlID, node, *control)...)
 	if control.Scope == "resource" && len(control.Match.Kinds) == 0 {
 		issues = append(issues, issueAt(file, controlID, node, "resource scope requires match.kinds"))
 	}
@@ -321,72 +323,96 @@ func validateControl(file string, node *yaml.Node, control *Control, source Sour
 	}
 	if validScope(control.Scope) {
 		var compileIssues validationErrors
-		control.applicabilityProgram, compileIssues = compileBoolean(file, controlID, "applicability", mappingValue(node, "applicability"), control.Scope, control.Applicability)
+		control.applicabilityProgram, control.applicabilityPaths, compileIssues = compileBoolean(file, controlID, "applicability", mappingValue(node, "applicability"), control.Scope, control.Applicability)
 		issues = append(issues, compileIssues...)
-		control.expressionProgram, compileIssues = compileBoolean(file, controlID, "expression", mappingValue(node, "expression"), control.Scope, control.Expression)
+		control.expressionProgram, control.expressionPaths, compileIssues = compileBoolean(file, controlID, "expression", mappingValue(node, "expression"), control.Scope, control.Expression)
 		issues = append(issues, compileIssues...)
+		issues = append(issues, validateDependenciesRequire(file, controlID, node, "expression", control.expressionPaths, control.requiredPaths)...)
 	}
 	return issues
 }
 
-func validateExpressionRequires(file, controlID string, node *yaml.Node, control Control) validationErrors {
-	declared := make([]string, 0, len(control.Requires))
-	for _, required := range control.Requires {
-		declared = append(declared, absoluteRequiredPath(control.Scope, required))
+func loadRemediationTemplates(file string, root *yaml.Node, pack *Pack) validationErrors {
+	controlsNode := mappingValue(root, "controls")
+	if controlsNode == nil || controlsNode.Kind != yaml.SequenceNode {
+		return nil
 	}
-	seen := map[string]struct{}{}
 	var issues validationErrors
-	for _, path := range celPathPattern.FindAllString(control.Expression, -1) {
-		if structurallyAvailablePath(path) || coveredByRequiredPath(path, declared) {
+	for index := range pack.Controls {
+		control := &pack.Controls[index]
+		reference := strings.TrimSpace(control.Remediation.SuggestedYAMLTemplate)
+		if reference == "" {
 			continue
 		}
-		if _, exists := seen[path]; exists {
+		controlNode := sequenceValue(controlsNode, index)
+		location := mappingValue(mappingValue(controlNode, "remediation"), "suggestedYAMLTemplate")
+		clean := filepath.Clean(reference)
+		if filepath.IsAbs(reference) || clean == "." || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+			issues = append(issues, issueAt(file, control.ID, location, "suggestedYAMLTemplate must be a relative path within the control pack directory"))
 			continue
 		}
-		seen[path] = struct{}{}
+
+		var data []byte
+		var err error
+		if pack.Source == SourceBuiltin {
+			data, err = fs.ReadFile(builtincontrols.BuiltinFS, path.Join("templates", filepath.ToSlash(clean)))
+		} else {
+			data, err = os.ReadFile(filepath.Join(filepath.Dir(file), clean))
+		}
+		if err != nil {
+			issues = append(issues, issueAt(file, control.ID, location, fmt.Sprintf("read suggestedYAMLTemplate %q: %v", reference, err)))
+			continue
+		}
+		if _, err := template.New(control.ID + "-remediation").Option("missingkey=error").Parse(string(data)); err != nil {
+			issues = append(issues, issueAt(file, control.ID, location, fmt.Sprintf("suggestedYAMLTemplate %q is invalid: %v", reference, err)))
+			continue
+		}
+		control.Remediation.SuggestedYAML = string(data)
+	}
+	return issues
+}
+
+func validateDependenciesRequire(file, controlID string, node *yaml.Node, field string, paths, declared []string) validationErrors {
+	var issues validationErrors
+	for _, path := range paths {
+		if structurallyAvailablePath(path) || containsString(declared, path) {
+			continue
+		}
 		issues = append(issues, issueAt(
 			file,
 			controlID,
-			mappingValue(node, "expression"),
-			fmt.Sprintf("expression path %q must be declared in requires", path),
+			mappingValue(node, field),
+			fmt.Sprintf("%s path %q must be declared exactly in requires", field, path),
 		))
 	}
 	return issues
 }
 
-func coveredByRequiredPath(path string, required []string) bool {
-	for _, candidate := range required {
-		if path == candidate || strings.HasPrefix(path, candidate+".") {
-			return true
-		}
-	}
-	return false
-}
-
 func structurallyAvailablePath(path string) bool {
-	for _, prefix := range []string{
-		"workload.workload",
-		"workload.dataPlaneMode",
+	for _, candidate := range []string{
+		"workload.workload.cluster",
+		"workload.workload.namespace",
+		"workload.workload.name",
+		"workload.workload.kind",
 		"namespace.name",
-		"namespace.labels",
 		"resource.apiVersion",
 		"resource.kind",
 		"resource.namespace",
 		"resource.name",
 	} {
-		if path == prefix || strings.HasPrefix(path, prefix+".") {
+		if path == candidate {
 			return true
 		}
 	}
 	return false
 }
 
-func compileBoolean(file, controlID, field string, node *yaml.Node, scope, expression string) (cel.Program, validationErrors) {
+func compileBoolean(file, controlID, field string, node *yaml.Node, scope, expression string) (cel.Program, []string, validationErrors) {
 	if strings.TrimSpace(expression) == "" {
-		return nil, nil
+		return nil, nil, nil
 	}
 	if position := rootIdentifierPosition(expression, namespaceCELVariable); position >= 0 {
-		return nil, validationErrors{issueAt(
+		return nil, nil, validationErrors{issueAt(
 			file,
 			controlID,
 			node,
@@ -395,7 +421,7 @@ func compileBoolean(file, controlID, field string, node *yaml.Node, scope, expre
 	}
 	environment, err := celEnvironment(scope)
 	if err != nil {
-		return nil, validationErrors{issueAt(file, controlID, node, fmt.Sprintf("create CEL environment: %v", err))}
+		return nil, nil, validationErrors{issueAt(file, controlID, node, fmt.Sprintf("create CEL environment: %v", err))}
 	}
 	ast, compileIssues := environment.Compile(rewriteNamespaceVariable(expression))
 	if compileIssues != nil && compileIssues.Err() != nil {
@@ -414,16 +440,22 @@ func compileBoolean(file, controlID, field string, node *yaml.Node, scope, expre
 				),
 			))
 		}
-		return nil, issues
+		return nil, nil, issues
 	}
-	if ast.OutputType() != cel.BoolType && ast.OutputType() != cel.DynType {
-		return nil, validationErrors{issueAt(file, controlID, node, fmt.Sprintf("%s CEL expression must return bool, got %s", field, ast.OutputType()))}
+	paths, dependencyErr := analyzeDependencies(ast)
+	if dependencyErr != nil {
+		return nil, nil, validationErrors{issueAt(file, controlID, node, fmt.Sprintf("%s CEL dependency error: %v", field, dependencyErr))}
+	}
+	if ast.OutputType() != cel.BoolType {
+		if ast.OutputType() != cel.DynType || len(paths) != 1 || !knownBooleanDependency(paths[0]) {
+			return nil, nil, validationErrors{issueAt(file, controlID, node, fmt.Sprintf("%s CEL expression must return bool, got %s", field, ast.OutputType()))}
+		}
 	}
 	program, err := environment.Program(ast)
 	if err != nil {
-		return nil, validationErrors{issueAt(file, controlID, node, fmt.Sprintf("build %s CEL program: %v", field, err))}
+		return nil, nil, validationErrors{issueAt(file, controlID, node, fmt.Sprintf("build %s CEL program: %v", field, err))}
 	}
-	return program, nil
+	return program, paths, nil
 }
 
 func celEnvironment(scope string) (*cel.Env, error) {
@@ -447,12 +479,13 @@ func celEnvironment(scope string) (*cel.Env, error) {
 
 // CEL reserves the word "namespace", while the frozen control contract uses it
 // as a root variable. Rewrite only root identifier tokens to an equal-length
-// internal name so pack syntax and compile positions remain contract-accurate.
+// internal name so pack syntax and CEL error positions remain contract-accurate.
 func rewriteNamespaceVariable(expression string) string {
 	var rewritten strings.Builder
 	rewritten.Grow(len(expression))
 	var quote byte
 	escaped := false
+	var previousToken byte
 	for index := 0; index < len(expression); {
 		current := expression[index]
 		if quote != 0 {
@@ -468,6 +501,7 @@ func rewriteNamespaceVariable(expression string) string {
 			}
 			if current == quote {
 				quote = 0
+				previousToken = 's'
 			}
 			continue
 		}
@@ -484,15 +518,19 @@ func rewriteNamespaceVariable(expression string) string {
 				index++
 			}
 			token := expression[start:index]
-			rootIdentifier := start == 0 || expression[start-1] != '.'
+			rootIdentifier := previousToken != '.'
 			if token == "namespace" && rootIdentifier {
 				rewritten.WriteString(namespaceCELVariable)
 			} else {
 				rewritten.WriteString(token)
 			}
+			previousToken = 'i'
 			continue
 		}
 		rewritten.WriteByte(current)
+		if current != ' ' && current != '\t' && current != '\n' && current != '\r' {
+			previousToken = current
+		}
 		index++
 	}
 	return rewritten.String()
@@ -509,6 +547,7 @@ func isIdentifierPart(value byte) bool {
 func rootIdentifierPosition(expression, wanted string) int {
 	var quote byte
 	escaped := false
+	var previousToken byte
 	for index := 0; index < len(expression); {
 		current := expression[index]
 		if quote != 0 {
@@ -523,6 +562,7 @@ func rootIdentifierPosition(expression, wanted string) int {
 			}
 			if current == quote {
 				quote = 0
+				previousToken = 's'
 			}
 			continue
 		}
@@ -537,11 +577,15 @@ func rootIdentifierPosition(expression, wanted string) int {
 			for index < len(expression) && isIdentifierPart(expression[index]) {
 				index++
 			}
-			rootIdentifier := start == 0 || expression[start-1] != '.'
+			rootIdentifier := previousToken != '.'
 			if rootIdentifier && expression[start:index] == wanted {
 				return start
 			}
+			previousToken = 'i'
 			continue
+		}
+		if current != ' ' && current != '\t' && current != '\n' && current != '\r' {
+			previousToken = current
 		}
 		index++
 	}
@@ -608,7 +652,33 @@ func validateEnum(file, control string, node *yaml.Node, field, value string, al
 
 func requiresVerified(paths []string) bool {
 	for _, path := range paths {
-		if strings.HasPrefix(path, "verified.") || strings.HasPrefix(path, "workload.verified.") {
+		if strings.HasPrefix(path, "workload.verified.") {
+			return true
+		}
+	}
+	return false
+}
+
+func pathAllowedForScope(scope, path string) bool {
+	root, _, _ := strings.Cut(path, ".")
+	if root == "inventory" || root == "params" {
+		return true
+	}
+	switch scope {
+	case "workload":
+		return root == "workload" || root == "namespace"
+	case "namespace":
+		return root == "namespace"
+	case "resource":
+		return root == "resource"
+	default:
+		return false
+	}
+}
+
+func containsString(values []string, wanted string) bool {
+	for _, value := range values {
+		if value == wanted {
 			return true
 		}
 	}
