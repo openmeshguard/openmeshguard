@@ -33,11 +33,10 @@ func TestEngineFindingsReplaceProvisionalPathEndToEnd(t *testing.T) {
 					"mtls.clientTLSContradiction": {Available: true},
 				},
 			},
-			wantCount: 3,
+			wantCount: 2,
 			wantStatuses: map[string]string{
 				"MG-MTLS-001": "open",
 				"MG-MTLS-002": "open",
-				"MG-MTLS-003": "open",
 			},
 		},
 		{
@@ -51,6 +50,19 @@ func TestEngineFindingsReplaceProvisionalPathEndToEnd(t *testing.T) {
 				"MG-MTLS-001": "not-applicable",
 				"MG-MTLS-002": "not-applicable",
 				"MG-MTLS-003": "not-applicable",
+			},
+		},
+		{
+			name: "confirmed disabled posture retains critical finding without unwired producers",
+			workload: engine.WorkloadInput{
+				Posture:   workloadPosture(resolver.ModeSidecar, resolver.MTLSDisabled, nil),
+				Namespace: engine.NamespaceInput{Name: "payments"},
+			},
+			wantCount: 3,
+			wantStatuses: map[string]string{
+				"MG-MTLS-001": "open",
+				"MG-MTLS-002": "unknown",
+				"MG-MTLS-003": "open",
 			},
 		},
 	}
@@ -76,8 +88,16 @@ func TestEngineFindingsReplaceProvisionalPathEndToEnd(t *testing.T) {
 				if !strings.HasPrefix(finding.ID, finding.ControlID+"-") {
 					t.Fatalf("engine finding ID = %q, want control prefix", finding.ID)
 				}
-				if finding.Status == "unknown" {
+				if finding.Status == "unknown" && tt.wantStatuses[finding.ControlID] != "unknown" {
 					t.Fatalf("unexpected contradictory unknown finding: %#v", finding)
+				}
+				if finding.Status == "unknown" && finding.UnknownReason == "" {
+					t.Fatalf("unknown finding missing reason: %#v", finding)
+				}
+				if finding.ControlID == "MG-MTLS-001" && finding.Status == "open" {
+					if finding.Remediation == nil || !strings.Contains(finding.Remediation.SuggestedYAML, "namespace: payments") {
+						t.Fatalf("MG-MTLS-001 remediation = %#v, want rendered suggested YAML", finding.Remediation)
+					}
 				}
 			}
 		})
@@ -104,13 +124,11 @@ func TestDefaultOutputMakesUnwiredEvidenceUnknown(t *testing.T) {
 	if statuses["MG-MTLS-001"] != "open" {
 		t.Fatalf("MG-MTLS-001 status = %q, want open", statuses["MG-MTLS-001"])
 	}
-	for _, controlID := range []string{"MG-MTLS-002", "MG-MTLS-003"} {
-		if statuses[controlID] != "unknown" {
-			t.Fatalf("%s status = %q, want unknown", controlID, statuses[controlID])
-		}
-		if unknownReasons[controlID] == "" {
-			t.Fatalf("%s missing unknownReason", controlID)
-		}
+	if statuses["MG-MTLS-002"] != "unknown" || unknownReasons["MG-MTLS-002"] == "" {
+		t.Fatalf("MG-MTLS-002 status/reason = %q/%q, want unknown with reason", statuses["MG-MTLS-002"], unknownReasons["MG-MTLS-002"])
+	}
+	if _, exists := statuses["MG-MTLS-003"]; exists {
+		t.Fatalf("MG-MTLS-003 status = %q, want no finding for known non-disabled posture", statuses["MG-MTLS-003"])
 	}
 }
 

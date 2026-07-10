@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"sort"
 	"strings"
 
 	"github.com/openmeshguard/openmeshguard/internal/collect"
@@ -90,6 +91,9 @@ func runScan(ctx context.Context, info versionInfo, opts scanOptions, stdout io.
 	if err != nil {
 		return fmt.Errorf("load control packs: %w", err)
 	}
+	if err := validateScanControlScopes(packs); err != nil {
+		return err
+	}
 	restConfig, clusterContext, err := clientConfig(opts)
 	if err != nil {
 		return err
@@ -114,6 +118,11 @@ func runScan(ctx context.Context, info versionInfo, opts scanOptions, stdout io.
 
 	normalized := normalize.Build(snapshot)
 	resolved := resolver.New()
+	engineNamespaces := namespaceInputs(snapshot, normalized.Workloads, opts.Namespaces)
+	namespacesByName := make(map[string]engine.NamespaceInput, len(engineNamespaces))
+	for _, namespace := range engineNamespaces {
+		namespacesByName[namespace.Name] = namespace
+	}
 	workloadPostures := make([]resolver.WorkloadResult, 0, len(normalized.Workloads))
 	engineWorkloads := make([]engine.WorkloadInput, 0, len(normalized.Workloads))
 	for _, workload := range normalized.Workloads {
@@ -124,17 +133,15 @@ func runScan(ctx context.Context, info versionInfo, opts scanOptions, stdout io.
 			Authz: resolved.ResolveAuthz(workload),
 		}
 		workloadPostures = append(workloadPostures, posture)
-		engineWorkloads = append(engineWorkloads, engine.WorkloadInput{
-			Posture: posture,
-			Namespace: engine.NamespaceInput{
-				Name:           workload.Namespace.Name,
-				Labels:         workload.Namespace.Labels,
-				MeshEnrollment: meshEnrollmentState(workload.Namespace.AmbientEnrolled),
-			},
-		})
+		namespaceName := workload.Namespace.Name
+		if namespaceName == "" {
+			namespaceName = workload.Ref.Namespace
+		}
+		engineWorkloads = append(engineWorkloads, engine.WorkloadInput{Posture: posture, Namespace: namespacesByName[namespaceName]})
 	}
 	evaluated, err := engine.Evaluate(packs, engine.Input{
-		Workloads: engineWorkloads,
+		Workloads:  engineWorkloads,
+		Namespaces: engineNamespaces,
 		Inventory: map[string]any{
 			"counts": normalized.Inventory.Counts,
 			"dataPlane": map[string]any{
@@ -161,6 +168,86 @@ func runScan(ctx context.Context, info versionInfo, opts scanOptions, stdout io.
 		Inventory:         normalized.Inventory,
 		WorkloadPostures:  workloadPostures,
 	}, packs, evaluated)
+}
+
+func validateScanControlScopes(packs []engine.Pack) error {
+	for _, pack := range packs {
+		for _, control := range pack.Controls {
+			if control.Scope == "resource" {
+				return fmt.Errorf("%s: control %s: resource scope is unavailable in scan until normalized resource collection is implemented", pack.File, control.ID)
+			}
+		}
+	}
+	return nil
+}
+
+func namespaceInputs(snapshot collect.Snapshot, workloads []resolver.WorkloadInput, requested []string) []engine.NamespaceInput {
+	labelsAvailable := true
+	for _, permission := range snapshot.PermissionSummary {
+		if permission.APIGroup == "" && permission.Resource == "namespaces" && !permission.Granted {
+			labelsAvailable = false
+			break
+		}
+	}
+
+	byName := map[string]engine.NamespaceInput{}
+	for _, name := range requested {
+		input := engine.NamespaceInput{Name: name}
+		if !labelsAvailable {
+			input.Availability = map[string]engine.Availability{
+				"labels": {Reason: "namespace list permission unavailable"},
+			}
+		}
+		byName[name] = input
+	}
+	for _, namespace := range snapshot.Namespaces {
+		input := engine.NamespaceInput{
+			Name:           namespace.Name,
+			Labels:         namespace.Labels,
+			MeshEnrollment: namespaceMeshEnrollment(namespace.Labels),
+		}
+		if !labelsAvailable {
+			input.Availability = map[string]engine.Availability{
+				"labels": {Reason: "namespace list permission unavailable"},
+			}
+		}
+		byName[input.Name] = input
+	}
+	for _, workload := range workloads {
+		name := workload.Namespace.Name
+		if name == "" {
+			name = workload.Ref.Namespace
+		}
+		input, exists := byName[name]
+		if !exists {
+			input = engine.NamespaceInput{Name: name, Labels: workload.Namespace.Labels}
+		}
+		input.MeshEnrollment = meshEnrollmentState(workload.Namespace.AmbientEnrolled)
+		if !labelsAvailable {
+			input.Availability = map[string]engine.Availability{
+				"labels": {Reason: "namespace list permission unavailable"},
+			}
+		}
+		byName[name] = input
+	}
+
+	names := make([]string, 0, len(byName))
+	for name := range byName {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	out := make([]engine.NamespaceInput, 0, len(names))
+	for _, name := range names {
+		out = append(out, byName[name])
+	}
+	return out
+}
+
+func namespaceMeshEnrollment(labels map[string]string) string {
+	if labels["istio.io/dataplane-mode"] == "ambient" || labels["istio-injection"] == "enabled" || labels["istio.io/rev"] != "" {
+		return "enrolled"
+	}
+	return "not-enrolled"
 }
 
 func meshEnrollmentState(value resolver.Tristate) string {

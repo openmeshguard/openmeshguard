@@ -7,6 +7,10 @@ import (
 	"testing"
 
 	"github.com/openmeshguard/openmeshguard/internal/collect"
+	"github.com/openmeshguard/openmeshguard/internal/engine"
+	"github.com/openmeshguard/openmeshguard/internal/resolver"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 func TestVersionCommandPrintsScannerAndResolverVersions(t *testing.T) {
@@ -118,6 +122,55 @@ func TestControlsValidateCommand(t *testing.T) {
 		if !strings.Contains(err.Error(), expected) {
 			t.Fatalf("malformed controls validate error %q does not contain %q", err, expected)
 		}
+	}
+
+	duplicatePath := "../../internal/engine/testdata/duplicate-builtin.yaml"
+	_, _, err = executeForTest(t, defaultVersionInfo(), "controls", "validate", duplicatePath)
+	if err == nil || !strings.Contains(err.Error(), "duplicate control ID") {
+		t.Fatalf("controls validate duplicate error = %v, want collision with built-ins", err)
+	}
+}
+
+func TestNamespaceInputsIncludeNamespacesWithoutWorkloads(t *testing.T) {
+	snapshot := collect.Snapshot{Namespaces: []corev1.Namespace{
+		{ObjectMeta: metav1.ObjectMeta{Name: "empty", Labels: map[string]string{"team": "platform"}}},
+		{ObjectMeta: metav1.ObjectMeta{Name: "payments", Labels: map[string]string{"istio-injection": "enabled"}}},
+	}}
+	workloads := []resolver.WorkloadInput{{
+		Ref:       resolver.WorkloadRef{Namespace: "payments", Name: "api"},
+		Namespace: resolver.NamespaceInput{Name: "payments", Labels: map[string]string{"istio-injection": "enabled"}},
+	}}
+
+	got := namespaceInputs(snapshot, workloads, nil)
+	if len(got) != 2 || got[0].Name != "empty" || got[1].Name != "payments" {
+		t.Fatalf("namespace inputs = %#v, want empty and workload namespaces", got)
+	}
+	if got[0].Labels["team"] != "platform" || got[1].MeshEnrollment != "unknown" {
+		t.Fatalf("namespace inputs lost labels or resolver enrollment: %#v", got)
+	}
+}
+
+func TestNamespaceInputsMarkDeniedLabelsUnavailable(t *testing.T) {
+	snapshot := collect.Snapshot{PermissionSummary: []collect.Permission{{
+		Resource: "namespaces", Verbs: []string{"list"}, Granted: false,
+	}}}
+	got := namespaceInputs(snapshot, nil, []string{"payments"})
+	if len(got) != 1 || got[0].Name != "payments" {
+		t.Fatalf("namespace inputs = %#v, want requested namespace", got)
+	}
+	availability, exists := got[0].Availability["labels"]
+	if !exists || availability.Available || !strings.Contains(availability.Reason, "permission") {
+		t.Fatalf("label availability = %#v, want permission-derived unavailable", got[0].Availability)
+	}
+}
+
+func TestScanRejectsResourceControlsInsteadOfSilentlySkipping(t *testing.T) {
+	err := validateScanControlScopes([]engine.Pack{{
+		File:     "resource-pack.yaml",
+		Controls: []engine.Control{{ID: "ACME-GW-001", Scope: "resource"}},
+	}})
+	if err == nil || !strings.Contains(err.Error(), "resource-pack.yaml: control ACME-GW-001") || !strings.Contains(err.Error(), "unavailable in scan") {
+		t.Fatalf("resource scope error = %v", err)
 	}
 }
 

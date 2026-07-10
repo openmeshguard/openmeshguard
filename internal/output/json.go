@@ -194,8 +194,11 @@ func findings(input []engine.Finding) []finding {
 			})
 		}
 		var findingRemediation *remediation
-		if item.Remediation.Guidance != "" {
-			findingRemediation = &remediation{Guidance: item.Remediation.Guidance}
+		if item.Remediation.Guidance != "" || item.Remediation.SuggestedYAML != "" {
+			findingRemediation = &remediation{
+				Guidance:      item.Remediation.Guidance,
+				SuggestedYAML: item.Remediation.SuggestedYAML,
+			}
 		}
 		out = append(out, finding{
 			ID:              item.ID,

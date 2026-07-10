@@ -157,6 +157,7 @@ func TestGeneratedScanOutputMatchesSchema(t *testing.T) {
 	}
 	seenUnknown := false
 	seenNotApplicable := false
+	seenSuggestedYAML := false
 	for _, finding := range generated.Findings {
 		if !strings.HasPrefix(finding.ID, finding.ControlID+"-") {
 			t.Fatalf("finding ID %q does not use engine control prefix %q", finding.ID, finding.ControlID)
@@ -170,16 +171,22 @@ func TestGeneratedScanOutputMatchesSchema(t *testing.T) {
 		case "not-applicable":
 			seenNotApplicable = true
 		}
+		if finding.ControlID == "MG-MTLS-001" && finding.Remediation != nil && strings.Contains(finding.Remediation.SuggestedYAML, "kind: PeerAuthentication") {
+			seenSuggestedYAML = true
+		}
 	}
 	if !seenUnknown || !seenNotApplicable {
 		t.Fatalf("generated findings missing required shapes: unknown=%t not-applicable=%t", seenUnknown, seenNotApplicable)
+	}
+	if !seenSuggestedYAML {
+		t.Fatal("generated findings missing rendered suggestedYAML remediation")
 	}
 	if len(generated.Scores.Categories) != 1 {
 		t.Fatalf("score categories = %#v, want one mTLS category", generated.Scores.Categories)
 	}
 	category := generated.Scores.Categories[0]
-	if category.Category != "mtls" || category.Grade != "F" || category.PassRate == nil || *category.PassRate != 0 {
-		t.Fatalf("generated category score = %#v, want real mtls F grade at 0 pass rate", category)
+	if category.Category != "mtls" || category.Grade != "F" || category.PassRate == nil || *category.PassRate != 0.5 {
+		t.Fatalf("generated category score = %#v, want real mtls F grade at 50%% pass rate", category)
 	}
 }
 

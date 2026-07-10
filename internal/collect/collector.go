@@ -527,49 +527,50 @@ func (m resourceMeta) permissionForScope(granted bool, scopeName string) Permiss
 }
 
 var (
-	namespaceMeta = resourceMeta{
+	mtlsControlIDs = []string{"MG-MTLS-001", "MG-MTLS-002", "MG-MTLS-003"}
+	namespaceMeta  = resourceMeta{
 		resource: "namespaces",
 		impact:   "namespace labels and environment/data-plane inference may be unavailable",
-		controls: []string{"MG-MTLS-001"},
+		controls: mtlsControlIDs,
 	}
 	podMeta = resourceMeta{
 		resource: "pods",
 		impact:   "sidecar detection from running pods may be unavailable",
-		controls: []string{"MG-MTLS-001"},
+		controls: mtlsControlIDs,
 	}
 	serviceMeta = resourceMeta{
 		resource: "services",
 		impact:   "service inventory and multi-cluster gateway signals may be unavailable",
-		controls: []string{"MG-MTLS-001"},
+		controls: mtlsControlIDs,
 	}
 	deploymentMeta = resourceMeta{
 		apiGroup: "apps",
 		resource: "deployments",
 		impact:   "deployment workload posture may be unavailable",
-		controls: []string{"MG-MTLS-001"},
+		controls: mtlsControlIDs,
 	}
 	replicaSetMeta = resourceMeta{
 		apiGroup: "apps",
 		resource: "replicasets",
 		impact:   "standalone ReplicaSet workload posture may be unavailable",
-		controls: []string{"MG-MTLS-001"},
+		controls: mtlsControlIDs,
 	}
 	statefulSetMeta = resourceMeta{
 		apiGroup: "apps",
 		resource: "statefulsets",
 		impact:   "StatefulSet workload posture may be unavailable",
-		controls: []string{"MG-MTLS-001"},
+		controls: mtlsControlIDs,
 	}
 	daemonSetMeta = resourceMeta{
 		apiGroup: "apps",
 		resource: "daemonsets",
 		impact:   "DaemonSet workload posture may be unavailable",
-		controls: []string{"MG-MTLS-001"},
+		controls: mtlsControlIDs,
 	}
 	peerAuthenticationMeta = resourceMeta{
 		apiGroup: "security.istio.io",
 		resource: "peerauthentications",
 		impact:   "effective mTLS posture resolves to unknown without PeerAuthentication evidence",
-		controls: []string{"MG-MTLS-001"},
+		controls: mtlsControlIDs,
 	}
 )

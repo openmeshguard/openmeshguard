@@ -3,6 +3,7 @@ package collect
 import (
 	"context"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -368,6 +369,31 @@ func TestListPagesReturnsRepeatedExpiredContinueToken(t *testing.T) {
 	}
 	if calls != 4 {
 		t.Fatalf("list calls = %d, want 4", calls)
+	}
+}
+
+func TestMTLSPermissionMetadataNamesEveryBuiltinControl(t *testing.T) {
+	tests := []struct {
+		name string
+		meta resourceMeta
+	}{
+		{name: "namespaces", meta: namespaceMeta},
+		{name: "pods", meta: podMeta},
+		{name: "services", meta: serviceMeta},
+		{name: "deployments", meta: deploymentMeta},
+		{name: "replicasets", meta: replicaSetMeta},
+		{name: "statefulsets", meta: statefulSetMeta},
+		{name: "daemonsets", meta: daemonSetMeta},
+		{name: "peerauthentications", meta: peerAuthenticationMeta},
+	}
+	want := []string{"MG-MTLS-001", "MG-MTLS-002", "MG-MTLS-003"}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			permission := tt.meta.permissionForScope(false, "cluster")
+			if !reflect.DeepEqual(permission.AffectedControls, want) {
+				t.Fatalf("affected controls = %#v, want %#v", permission.AffectedControls, want)
+			}
+		})
 	}
 }
 
