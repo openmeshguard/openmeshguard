@@ -6,8 +6,8 @@
     "resolverVersion": "resolver-v0-placeholder",
     "controlPacks": [
       {
-        "name": "builtin-empty",
-        "version": "0.0.0",
+        "name": "builtin-mtls",
+        "version": "0.1.0",
         "source": "builtin"
       }
     ]

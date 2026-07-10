@@ -80,6 +80,47 @@ func TestScanRootNamespaceFlag(t *testing.T) {
 	}
 }
 
+func TestScanControlPackFlagIsRepeatable(t *testing.T) {
+	cmd := newScanCommand(defaultVersionInfo())
+	flag := cmd.Flags().Lookup("control-pack")
+	if flag == nil {
+		t.Fatal("scan command missing control-pack flag")
+	}
+	if flag.Value.Type() != "stringArray" {
+		t.Fatalf("control-pack flag type = %q, want stringArray", flag.Value.Type())
+	}
+
+	opts := scanOptions{AllNamespaces: true, RootNamespace: collect.DefaultRootNamespace, ControlPacks: []string{"  "}}
+	if err := opts.normalizeAndValidate(); err == nil || !strings.Contains(err.Error(), "control pack path must not be empty") {
+		t.Fatalf("empty control pack validation error = %v, want control pack path error", err)
+	}
+}
+
+func TestControlsValidateCommand(t *testing.T) {
+	validPath := "../../internal/engine/testdata/valid.yaml"
+	stdout, stderr, err := executeForTest(t, defaultVersionInfo(), "controls", "validate", validPath)
+	if err != nil {
+		t.Fatalf("controls validate returned error: %v", err)
+	}
+	if stderr != "" {
+		t.Fatalf("controls validate wrote stderr %q", stderr)
+	}
+	if !strings.Contains(stdout, "valid control pack: "+validPath) {
+		t.Fatalf("controls validate output = %q", stdout)
+	}
+
+	malformedPath := "../../internal/engine/testdata/malformed.yaml"
+	_, _, err = executeForTest(t, defaultVersionInfo(), "controls", "validate", malformedPath)
+	if err == nil {
+		t.Fatal("controls validate accepted malformed pack")
+	}
+	for _, expected := range []string{"malformed.yaml:", "control ACME-MTLS-001", "CEL compile error at 1:"} {
+		if !strings.Contains(err.Error(), expected) {
+			t.Fatalf("malformed controls validate error %q does not contain %q", err, expected)
+		}
+	}
+}
+
 func executeForTest(t *testing.T, info versionInfo, args ...string) (string, string, error) {
 	t.Helper()
 

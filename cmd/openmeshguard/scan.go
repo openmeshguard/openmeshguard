@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/openmeshguard/openmeshguard/internal/collect"
+	"github.com/openmeshguard/openmeshguard/internal/engine"
 	"github.com/openmeshguard/openmeshguard/internal/normalize"
 	"github.com/openmeshguard/openmeshguard/internal/output"
 	"github.com/openmeshguard/openmeshguard/internal/resolver"
@@ -23,6 +24,7 @@ type scanOptions struct {
 	AllNamespaces bool
 	Namespaces    []string
 	RootNamespace string
+	ControlPacks  []string
 }
 
 func newScanCommand(info versionInfo) *cobra.Command {
@@ -42,6 +44,7 @@ func newScanCommand(info versionInfo) *cobra.Command {
 	cmd.Flags().BoolVar(&opts.AllNamespaces, "all-namespaces", false, "scan all namespaces")
 	cmd.Flags().StringArrayVar(&opts.Namespaces, "namespace", nil, "namespace to scan; may be repeated")
 	cmd.Flags().StringVar(&opts.RootNamespace, "root-namespace", collect.DefaultRootNamespace, "Istio mesh root namespace")
+	cmd.Flags().StringArrayVar(&opts.ControlPacks, "control-pack", nil, "user control pack path; may be repeated")
 	return cmd
 }
 
@@ -70,10 +73,23 @@ func (o *scanOptions) normalizeAndValidate() error {
 	if !o.AllNamespaces && len(o.Namespaces) == 0 {
 		return fmt.Errorf("scan scope required: pass --all-namespaces or at least one --namespace")
 	}
+	controlPacks := make([]string, 0, len(o.ControlPacks))
+	for _, path := range o.ControlPacks {
+		path = strings.TrimSpace(path)
+		if path == "" {
+			return fmt.Errorf("control pack path must not be empty")
+		}
+		controlPacks = append(controlPacks, path)
+	}
+	o.ControlPacks = controlPacks
 	return nil
 }
 
 func runScan(ctx context.Context, info versionInfo, opts scanOptions, stdout io.Writer) error {
+	packs, err := engine.LoadPacks(opts.ControlPacks)
+	if err != nil {
+		return fmt.Errorf("load control packs: %w", err)
+	}
 	restConfig, clusterContext, err := clientConfig(opts)
 	if err != nil {
 		return err
@@ -99,16 +115,44 @@ func runScan(ctx context.Context, info versionInfo, opts scanOptions, stdout io.
 	normalized := normalize.Build(snapshot)
 	resolved := resolver.New()
 	workloadPostures := make([]resolver.WorkloadResult, 0, len(normalized.Workloads))
+	engineWorkloads := make([]engine.WorkloadInput, 0, len(normalized.Workloads))
 	for _, workload := range normalized.Workloads {
-		workloadPostures = append(workloadPostures, resolver.WorkloadResult{
+		posture := resolver.WorkloadResult{
 			Ref:   workload.Ref,
 			Mode:  workload.DataPlaneMode,
 			MTLS:  resolved.ResolveMTLS(workload),
 			Authz: resolved.ResolveAuthz(workload),
+		}
+		workloadPostures = append(workloadPostures, posture)
+		engineWorkloads = append(engineWorkloads, engine.WorkloadInput{
+			Posture: posture,
+			Namespace: engine.NamespaceInput{
+				Name:           workload.Namespace.Name,
+				Labels:         workload.Namespace.Labels,
+				MeshEnrollment: meshEnrollmentState(workload.Namespace.AmbientEnrolled),
+			},
 		})
 	}
+	evaluated, err := engine.Evaluate(packs, engine.Input{
+		Workloads: engineWorkloads,
+		Inventory: map[string]any{
+			"counts": normalized.Inventory.Counts,
+			"dataPlane": map[string]any{
+				"mode": string(normalized.Inventory.DataPlaneMode),
+			},
+			"multiCluster": map[string]any{
+				"participationDetected": normalized.Inventory.MultiCluster.ParticipationDetected,
+				"evaluated":             false,
+				"signals":               normalized.Inventory.MultiCluster.Signals,
+				"meshNetworks":          normalized.Inventory.MultiCluster.MeshNetworks,
+			},
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("evaluate controls: %w", err)
+	}
 
-	return output.WriteScanJSON(stdout, output.ScanInput{
+	return output.WriteScanJSONWithEvaluation(stdout, output.ScanInput{
 		ScannerVersion:    info.Version,
 		ResolverVersion:   resolved.Version(),
 		ClusterContext:    clusterContext,
@@ -116,7 +160,18 @@ func runScan(ctx context.Context, info versionInfo, opts scanOptions, stdout io.
 		PermissionSummary: snapshot.PermissionSummary,
 		Inventory:         normalized.Inventory,
 		WorkloadPostures:  workloadPostures,
-	})
+	}, packs, evaluated)
+}
+
+func meshEnrollmentState(value resolver.Tristate) string {
+	switch value {
+	case resolver.True:
+		return "enrolled"
+	case resolver.False:
+		return "not-enrolled"
+	default:
+		return "unknown"
+	}
 }
 
 func clientConfig(opts scanOptions) (*rest.Config, string, error) {

@@ -37,6 +37,7 @@ func newRootCommand(info versionInfo) *cobra.Command {
 
 	cmd.AddCommand(newVersionCommand(info))
 	cmd.AddCommand(newScanCommand(info))
+	cmd.AddCommand(newControlsCommand())
 	for _, name := range []string{"report", "export", "score"} {
 		cmd.AddCommand(newStubCommand(name))
 	}

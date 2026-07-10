@@ -2,8 +2,10 @@ package output
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -122,18 +124,62 @@ func TestGeneratedScanOutputMatchesSchema(t *testing.T) {
 			Mode:  workload.DataPlaneMode,
 			MTLS:  resolved.ResolveMTLS(workload),
 			Authz: resolved.ResolveAuthz(workload),
+		}, {
+			Ref: resolver.WorkloadRef{
+				Cluster: "cluster-a", Namespace: "legacy", Name: "outside-mesh", Kind: "Deployment",
+			},
+			Mode: resolver.ModeNotApplicable,
+			MTLS: resolver.MTLSResult{
+				Effective: resolver.MTLSNotInMesh,
+				Chain:     []resolver.Step{{Order: 1, Kind: "DataPlane", Effect: "workload is not enrolled"}},
+			},
+			Authz: resolved.ResolveAuthz(resolver.WorkloadInput{}),
 		}},
 	})
 	if err != nil {
 		t.Fatalf("write generated scan output: %v", err)
 	}
 
-	report, err := jsonschema.UnmarshalJSON(bytes.NewReader(output.Bytes()))
+	rawReport, err := jsonschema.UnmarshalJSON(bytes.NewReader(output.Bytes()))
 	if err != nil {
 		t.Fatalf("decode generated report: %v", err)
 	}
-	if err := schema.Validate(report); err != nil {
+	if err := schema.Validate(rawReport); err != nil {
 		t.Fatalf("generated report should match canonical schema: %v\n%s", err, output.String())
+	}
+
+	var generated report
+	if err := json.Unmarshal(output.Bytes(), &generated); err != nil {
+		t.Fatalf("decode generated report into output model: %v", err)
+	}
+	if len(generated.Findings) == 0 {
+		t.Fatal("generated report has no engine findings")
+	}
+	seenUnknown := false
+	seenNotApplicable := false
+	for _, finding := range generated.Findings {
+		if !strings.HasPrefix(finding.ID, finding.ControlID+"-") {
+			t.Fatalf("finding ID %q does not use engine control prefix %q", finding.ID, finding.ControlID)
+		}
+		switch finding.Status {
+		case "unknown":
+			seenUnknown = true
+			if finding.UnknownReason == "" {
+				t.Fatalf("unknown finding %s missing unknownReason", finding.ID)
+			}
+		case "not-applicable":
+			seenNotApplicable = true
+		}
+	}
+	if !seenUnknown || !seenNotApplicable {
+		t.Fatalf("generated findings missing required shapes: unknown=%t not-applicable=%t", seenUnknown, seenNotApplicable)
+	}
+	if len(generated.Scores.Categories) != 1 {
+		t.Fatalf("score categories = %#v, want one mTLS category", generated.Scores.Categories)
+	}
+	category := generated.Scores.Categories[0]
+	if category.Category != "mtls" || category.Grade != "F" || category.PassRate == nil || *category.PassRate != 0 {
+		t.Fatalf("generated category score = %#v, want real mtls F grade at 0 pass rate", category)
 	}
 }
 
