@@ -14,6 +14,7 @@ controls:
     scope: resource
     environments: []
     match:
+      apiGroups: [gateway.networking.k8s.io]
       kinds: [Gateway]
     requires: [resource.name, params.requiredPrefix]
     applicability: 'resource.kind == "Gateway"'

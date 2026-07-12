@@ -25,6 +25,8 @@ var (
 	builtinIDPattern = regexp.MustCompile(`^MG-[A-Z]+-[0-9]{3}$`)
 	userIDPattern    = regexp.MustCompile(`^[A-Z]+-[A-Z]+-[0-9]{3}$`)
 	requiresPattern  = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)+$`)
+	apiGroupPattern  = regexp.MustCompile(`^[a-z0-9](?:[-a-z0-9]*[a-z0-9])?(?:\.[a-z0-9](?:[-a-z0-9]*[a-z0-9])?)*$`)
+	kindPattern      = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9]*$`)
 )
 
 type validationIssue struct {
@@ -190,7 +192,7 @@ func validateKnownFields(file string, root *yaml.Node) validationErrors {
 			)...)
 		}
 		if match := mappingValue(node, "match"); match != nil {
-			issues = append(issues, unknownMappingFields(file, controlID, match, setOf("kinds"))...)
+			issues = append(issues, unknownMappingFields(file, controlID, match, setOf("apiGroups", "kinds"))...)
 		}
 	}
 	return issues
@@ -304,12 +306,7 @@ func validateControl(file string, node *yaml.Node, control *Control, source Sour
 	if control.EvidenceType == "runtime" && !requiresVerified(control.requiredPaths) {
 		issues = append(issues, issueAt(file, controlID, mappingValue(node, "requires"), "runtime evidenceType must require a verified.* field"))
 	}
-	if control.Scope == "resource" && len(control.Match.Kinds) == 0 {
-		issues = append(issues, issueAt(file, controlID, node, "resource scope requires match.kinds"))
-	}
-	if control.Scope != "resource" && len(control.Match.Kinds) > 0 {
-		issues = append(issues, issueAt(file, controlID, mappingValue(node, "match"), "match.kinds is only valid for resource scope"))
-	}
+	issues = append(issues, validateMatch(file, controlID, node, control)...)
 	remediation := mappingValue(node, "remediation")
 	issues = append(issues, requireFields(file, controlID, remediation, "guidance")...)
 	if remediation != nil && strings.TrimSpace(control.Remediation.Guidance) == "" && mappingValue(remediation, "guidance") != nil {
@@ -328,6 +325,76 @@ func validateControl(file string, node *yaml.Node, control *Control, source Sour
 		control.expressionProgram, control.expressionPaths, compileIssues = compileBoolean(file, controlID, "expression", mappingValue(node, "expression"), control.Scope, control.Expression)
 		issues = append(issues, compileIssues...)
 		issues = append(issues, validateDependenciesRequire(file, controlID, node, "expression", control.expressionPaths, control.requiredPaths)...)
+	}
+	return issues
+}
+
+func validateMatch(file, controlID string, controlNode *yaml.Node, control *Control) validationErrors {
+	matchNode := mappingValue(controlNode, "match")
+	if control.Scope != "resource" {
+		if matchNode != nil {
+			return validationErrors{issueAt(file, controlID, matchNode, "match is only valid for resource scope")}
+		}
+		return nil
+	}
+
+	issues := requireFields(file, controlID, matchNode, "apiGroups", "kinds")
+	issues = append(issues, validateMatchList(
+		file, controlID, matchNode, "apiGroups", control.Match.APIGroups, true,
+	)...)
+	issues = append(issues, validateMatchList(
+		file, controlID, matchNode, "kinds", control.Match.Kinds, false,
+	)...)
+	for index := range control.Match.APIGroups {
+		control.Match.APIGroups[index] = strings.TrimSpace(control.Match.APIGroups[index])
+	}
+	for index := range control.Match.Kinds {
+		control.Match.Kinds[index] = strings.TrimSpace(control.Match.Kinds[index])
+	}
+	return issues
+}
+
+func validateMatchList(
+	file, controlID string,
+	matchNode *yaml.Node,
+	field string,
+	values []string,
+	allowEmptyValue bool,
+) validationErrors {
+	fieldNode := mappingValue(matchNode, field)
+	if fieldNode == nil {
+		return nil
+	}
+	if fieldNode.Kind != yaml.SequenceNode || len(values) == 0 {
+		return validationErrors{issueAt(file, controlID, fieldNode, fmt.Sprintf("match.%s must contain at least one value", field))}
+	}
+
+	seen := map[string]struct{}{}
+	var issues validationErrors
+	for index, value := range values {
+		location := sequenceValue(fieldNode, index)
+		value = strings.TrimSpace(value)
+		if location != nil && location.Tag == "!!null" {
+			issues = append(issues, issueAt(file, controlID, location, fmt.Sprintf("match.%s entries must be strings", field)))
+			continue
+		}
+		if value == "" && !allowEmptyValue {
+			issues = append(issues, issueAt(file, controlID, location, fmt.Sprintf("match.%s entries must not be empty", field)))
+			continue
+		}
+		if field == "apiGroups" && value != "" && !apiGroupPattern.MatchString(value) {
+			issues = append(issues, issueAt(file, controlID, location, fmt.Sprintf("match.apiGroups value %q must be a Kubernetes API group without a version", value)))
+			continue
+		}
+		if field == "kinds" && !kindPattern.MatchString(value) {
+			issues = append(issues, issueAt(file, controlID, location, fmt.Sprintf("match.kinds value %q must be a Kubernetes Kind", value)))
+			continue
+		}
+		if _, exists := seen[value]; exists {
+			issues = append(issues, issueAt(file, controlID, location, fmt.Sprintf("duplicate match.%s value %q", field, value)))
+			continue
+		}
+		seen[value] = struct{}{}
 	}
 	return issues
 }

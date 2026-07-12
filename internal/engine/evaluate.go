@@ -477,9 +477,13 @@ func namespaceTargets(input Input, params map[string]any) []evaluationTarget {
 }
 
 func resourceTargets(control Control, input Input, params map[string]any) []evaluationTarget {
+	apiGroups := setOf(control.Match.APIGroups...)
 	kinds := setOf(control.Match.Kinds...)
 	var targets []evaluationTarget
 	for _, resource := range input.Resources {
+		if _, matches := apiGroups[apiGroupFromAPIVersion(resource.APIVersion)]; !matches {
+			continue
+		}
 		if _, matches := kinds[resource.Kind]; !matches {
 			continue
 		}
@@ -495,7 +499,7 @@ func resourceTargets(control Control, input Input, params map[string]any) []eval
 		}
 		evidence := append([]string(nil), resource.EvidenceSources...)
 		if len(evidence) == 0 {
-			evidence = []string{"kubernetes-api", "istio-crd"}
+			evidence = defaultResourceEvidence(resource.APIVersion)
 		}
 		targets = append(targets, evaluationTarget{
 			key: key, environment: resource.Environment,
@@ -508,6 +512,22 @@ func resourceTargets(control Control, input Input, params map[string]any) []eval
 	}
 	sort.Slice(targets, func(i, j int) bool { return targets[i].key < targets[j].key })
 	return targets
+}
+
+func apiGroupFromAPIVersion(apiVersion string) string {
+	apiGroup, _, hasVersion := strings.Cut(strings.TrimSpace(apiVersion), "/")
+	if !hasVersion {
+		return ""
+	}
+	return apiGroup
+}
+
+func defaultResourceEvidence(apiVersion string) []string {
+	evidence := []string{"kubernetes-api"}
+	if strings.HasSuffix(apiGroupFromAPIVersion(apiVersion), "istio.io") {
+		evidence = append(evidence, "istio-crd")
+	}
+	return evidence
 }
 
 func defaultWorkloadAvailability(workload WorkloadInput, namespace NamespaceInput) map[string]Availability {

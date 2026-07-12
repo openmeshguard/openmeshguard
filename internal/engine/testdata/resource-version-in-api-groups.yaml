@@ -1,0 +1,21 @@
+apiVersion: openmeshguard.io/v1alpha1
+kind: ControlPack
+metadata:
+  name: resource-version-in-api-groups
+  version: 1.0.0
+controls:
+  - id: ACME-GW-001
+    title: API groups must not contain versions
+    category: exposure
+    severity: medium
+    evidenceType: config
+    scope: resource
+    match:
+      apiGroups: [gateway.networking.k8s.io/v1]
+      kinds: [Gateway]
+    requires: [resource.name]
+    applicability: 'true'
+    expression: 'resource.name != ""'
+    message: Resource match contains an API version.
+    remediation:
+      guidance: Use the API group without its version.

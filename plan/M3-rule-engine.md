@@ -49,15 +49,17 @@ Exception matching (M6 with context inputs), runtime controls (M7), authz contro
 - MG-MTLS-003 is deliberately the independent critical check for a known `mtls.effective == disabled` result. Per-port plaintext remains MG-MTLS-002; DestinationRule contradiction detection is not folded into MG-MTLS-003 until its missing producer is assigned, so unavailable secondary evidence cannot downgrade a confirmed critical result.
 - Namespace targets come from the complete collected namespace set, including namespaces with no workload. Resource-scoped custom packs are rejected by the real scan path until normalized resource production exists; the standalone engine continues to support and test resource scope.
 - Resolution chains are selected from AST-derived requires/applicability/expression dependencies and are globally renumbered when mTLS and authorization evidence is combined. The CEL workload object now carries every field in the frozen resolver result.
+- Resource controls deliberately remain source-native rather than translating Istio traffic APIs into Kubernetes Gateway API or an OpenMeshGuard-specific common model. `match.apiGroups` and `match.kinds` are both required; values within a list are ORed and the two dimensions are ANDed. Equivalent objectives with different source schemas use distinct control IDs, native CEL paths, remediation, and parity tests.
 
 ### Flags raised
 - DestinationRule collection remains unassigned and was not added in M3; likely ownership is M5. `workload.mtls.clientTLSContradiction` remains unavailable, and any custom control requiring it is verified to become `unknown`. No built-in currently claims that contradiction is evaluable.
 - Workload ports likewise have no real-scan producer yet. MG-MTLS-002 remains `unknown` through `requires` rather than assuming an empty port map.
 - Scan-config parameters and severity/environment overrides were not added because the config/classification surface is owned by M6 and no frozen scan-config format exists yet. The prior summary claim that the CLI already supplied overrides was removed.
 - Real-scan resource inputs remain unimplemented with their resource collectors. M3 now fails those packs explicitly instead of silently producing no targets.
-- No frozen contract files or exported resolver/output JSON shapes were changed. No contract change is proposed by M3.
+- The human explicitly approved the additive frozen control-format change for native API-group matching during M3 review. `docs/contracts/control-format.md` now requires `match.apiGroups` plus `match.kinds` for resource controls and documents paired Istio/Gateway API controls; no exported resolver or canonical-output JSON shape changed.
 
 ### Verification
 - `make build`, `make test`, `make lint`, and `make schema-test` pass.
 - The generated-output schema test covers engine-generated IDs, `unknown` plus `unknownReason`, `not-applicable`, and a real mTLS category grade/pass rate.
 - `internal/engine/testdata/malformed.yaml` exercises the human review gate with file-, control-, and CEL-position diagnostics; the validation table also covers every rejection required by the contract.
+- Resource tests prove API group and Kind are matched together, a same-Kind resource from another API is never evaluated, paired Gateway objectives retain parity, and findings preserve the native source API version.

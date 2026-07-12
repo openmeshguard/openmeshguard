@@ -64,7 +64,8 @@ type Remediation struct {
 }
 
 type Match struct {
-	Kinds []string `yaml:"kinds,omitempty"`
+	APIGroups []string `yaml:"apiGroups,omitempty"`
+	Kinds     []string `yaml:"kinds,omitempty"`
 }
 
 // Availability overrides the engine's default availability inference for a

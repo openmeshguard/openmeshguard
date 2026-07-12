@@ -119,6 +119,26 @@ func TestValidateFileRejections(t *testing.T) {
 			contains: []string{"scope-invalid-requires.yaml:", "control ACME-GOV-001", `requires path "resource.kind" is not available to workload scope`},
 		},
 		{
+			name:     "resource match requires API groups",
+			fixture:  "resource-missing-api-groups.yaml",
+			contains: []string{"resource-missing-api-groups.yaml:", "control ACME-GW-001", `missing required field "apiGroups"`},
+		},
+		{
+			name:     "resource match API groups must not be empty",
+			fixture:  "resource-empty-api-groups.yaml",
+			contains: []string{"resource-empty-api-groups.yaml:", "control ACME-GW-001", "match.apiGroups must contain at least one value"},
+		},
+		{
+			name:     "resource match API groups exclude versions",
+			fixture:  "resource-version-in-api-groups.yaml",
+			contains: []string{"resource-version-in-api-groups.yaml:", "control ACME-GW-001", `match.apiGroups value "gateway.networking.k8s.io/v1" must be a Kubernetes API group without a version`},
+		},
+		{
+			name:     "match is resource scope only",
+			fixture:  "match-on-workload.yaml",
+			contains: []string{"match-on-workload.yaml:", "control ACME-GOV-001", "match is only valid for resource scope"},
+		},
+		{
 			name:     "duplicate within pack",
 			fixture:  "duplicate-in-pack.yaml",
 			contains: []string{"duplicate-in-pack.yaml:", "control ACME-MTLS-001", "duplicate control ID"},
@@ -176,6 +196,32 @@ func TestDuplicateControlIDAcrossBuiltinAndUserPack(t *testing.T) {
 func TestValidUserPackUsesStringsExtension(t *testing.T) {
 	if err := ValidateFile(filepath.Join("testdata", "valid.yaml")); err != nil {
 		t.Fatalf("ValidateFile returned error: %v", err)
+	}
+}
+
+func TestResourceMatchAllowsExplicitCoreAPIGroup(t *testing.T) {
+	_, err := decodeAndValidate("core-resource.yaml", []byte(`
+apiVersion: openmeshguard.io/v1alpha1
+kind: ControlPack
+metadata: {name: core-resource, version: 1.0.0}
+controls:
+  - id: ACME-CORE-001
+    title: ConfigMaps must be named
+    category: governance
+    severity: low
+    evidenceType: config
+    scope: resource
+    match:
+      apiGroups: [""]
+      kinds: [ConfigMap]
+    requires: [resource.name]
+    applicability: 'true'
+    expression: 'resource.name != ""'
+    message: ConfigMap must be named.
+    remediation: {guidance: Set metadata.name.}
+`), SourceUser)
+	if err != nil {
+		t.Fatalf("decode core API resource control: %v", err)
 	}
 }
 

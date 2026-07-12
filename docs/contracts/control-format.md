@@ -38,7 +38,7 @@ controls:
 
 ## Semantics (binding on the engine)
 
-1. **Scope** determines the iteration unit. `workload` controls evaluate once per entry in `workloadPostures`; `namespace` controls once per mesh namespace; `resource` controls once per matching resource kind (declared via `match.kinds`).
+1. **Scope** determines the iteration unit. `workload` controls evaluate once per entry in `workloadPostures`; `namespace` controls once per mesh namespace; `resource` controls once per matching source API group and resource kind (declared via `match.apiGroups` and `match.kinds`).
 2. **Environments** filter by resolved classification. A control scoped to `production` never evaluates unclassified namespaces — those are covered separately by MG-ENV-001. Empty list = evaluate everywhere.
 3. **`applicability`** is a CEL expression. False ⇒ finding status `not-applicable` (not a pass, not counted in pass rates).
 4. **`requires`** lists dotted paths into the evaluation input. If any resolves to an unknown/unavailable value, the engine emits status `unknown` with `unknownReason` set, and never evaluates `expression`. This is how "unknown is never pass and never fail" is enforced mechanically — controls cannot forget it.
@@ -60,6 +60,39 @@ Available variables by scope:
 
 Standard CEL macros plus the `strings` extension are enabled. No custom functions in v1alpha1 without a contract update.
 
+## Resource matching and views
+
+Resource controls are explicit about the native API family they evaluate. They
+must declare both `match.apiGroups` and `match.kinds`:
+
+```yaml
+match:
+  apiGroups: [gateway.networking.k8s.io]
+  kinds: [Gateway]
+```
+
+Values within each list are ORed; the two dimensions are ANDed. The example
+above matches `Gateway` resources in `gateway.networking.k8s.io`, regardless of
+the served version. The core Kubernetes API group is written as an empty string
+(`apiGroups: [""]`). A resource that does not match is not a control target: it
+produces no finding and does not affect scoring. `match` is evaluated before
+`applicability` and never produces `not-applicable`.
+
+The `resource` CEL variable preserves the matched source API rather than
+translating between API families. `resource.apiVersion`, `resource.kind`,
+`resource.namespace`, and `resource.name` identify the native object;
+source-native fields retain their API structure under `resource.spec`. Engine-
+derived evidence may be exposed alongside `spec` when its semantics are common,
+such as `resource.isPubliclyExposed`. Missing source or derived evidence follows
+the normal `requires` rule and produces `unknown`; it is never synthesized by
+cross-API translation.
+
+Equivalent objectives implemented by APIs with different schemas use separate
+control IDs. For example, an Istio `Gateway` control reads
+`resource.spec.servers`, while a Kubernetes Gateway API control reads
+`resource.spec.listeners`. This keeps evaluation and remediation source-native
+and makes any parity between the controls explicit and testable.
+
 ## Validation
 
 `openmeshguard controls validate <path>` (and pack loading at scan time) must reject:
@@ -67,6 +100,7 @@ Standard CEL macros plus the `strings` extension are enabled. No custom function
 - Unknown fields, missing required fields, malformed IDs (`^MG-[A-Z]+-[0-9]{3}$` for built-ins; user packs may use their own prefix but must match `^[A-Z]+-[A-Z]+-[0-9]{3}$`).
 - CEL expressions that fail compilation or reference variables outside the declared scope.
 - `runtime` evidenceType controls that do not `require` a `verified.*` field.
+- Resource controls without non-empty `match.apiGroups` and `match.kinds` lists (the empty-string value explicitly selects the core API group); `match` is invalid for workload and namespace controls.
 - Duplicate control IDs across all loaded packs.
 
 Error messages must point at the pack file, control ID, and CEL compile position.
@@ -75,16 +109,35 @@ Error messages must point at the pack file, control ID, and CEL compile position
 
 ```yaml
   - id: MG-GW-001
-    title: Public gateways must not use wildcard hosts
+    title: Public Istio gateways must not use wildcard hosts
     category: exposure
     severity: high
     evidenceType: config
     scope: resource
-    match: { kinds: [Gateway] }        # istio networking Gateway
-    requires: [resource.servers]
+    match:
+      apiGroups: [networking.istio.io]
+      kinds: [Gateway]
+    requires: [resource.spec.servers]
     applicability: 'resource.isPubliclyExposed'
-    expression: '!resource.servers.exists(s, s.hosts.exists(h, h == "*" || h.startsWith("*.")))'
-    message: 'Gateway {{ .Resource }} exposes wildcard host(s) publicly.'
+    expression: '!resource.spec.servers.exists(s, s.hosts.exists(h, h == "*" || h.startsWith("*.")))'
+    message: 'Istio Gateway {{ .Resource }} exposes wildcard host(s) publicly.'
+
+  - id: MG-GW-002
+    title: Public Kubernetes gateways must not use wildcard hosts
+    category: exposure
+    severity: high
+    evidenceType: config
+    scope: resource
+    match:
+      apiGroups: [gateway.networking.k8s.io]
+      kinds: [Gateway]
+    requires: [resource.spec.listeners]
+    applicability: 'resource.isPubliclyExposed'
+    expression: >-
+      !resource.spec.listeners.exists(l,
+        has(l.hostname) &&
+        (l.hostname == "*" || l.hostname.startsWith("*.")))
+    message: 'Kubernetes Gateway {{ .Resource }} exposes a wildcard hostname publicly.'
 
   - id: MG-MTLS-101
     title: No plaintext traffic observed to mesh workloads

@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 
@@ -249,10 +250,11 @@ controls:
     scope: resource
     environments: []
     match:
+      apiGroups: [networking.istio.io]
       kinds: [Gateway]
-    requires: [resource.servers]
+    requires: [resource.spec.servers]
     applicability: 'resource.isPubliclyExposed'
-    expression: '!resource.servers.exists(s, s.hosts.exists(h, h == "*"))'
+    expression: '!resource.spec.servers.exists(s, s.hosts.exists(h, h == "*"))'
     message: 'Gateway {{ .Resource }} exposes a wildcard host.'
     remediation:
       guidance: Replace wildcard hosts with explicit names.
@@ -272,14 +274,27 @@ controls:
 				APIVersion: "networking.istio.io/v1", Kind: "Gateway", Namespace: "istio-system", Name: "public",
 				Fields: map[string]any{
 					"isPubliclyExposed": true,
-					"servers":           []any{map[string]any{"hosts": []any{"*"}}},
+					"spec": map[string]any{
+						"servers": []any{map[string]any{"hosts": []any{"*"}}},
+					},
 				},
 			},
 			{
 				APIVersion: "networking.istio.io/v1", Kind: "Gateway", Namespace: "istio-system", Name: "private",
 				Fields: map[string]any{
 					"isPubliclyExposed": false,
-					"servers":           []any{map[string]any{"hosts": []any{"internal.example"}}},
+					"spec": map[string]any{
+						"servers": []any{map[string]any{"hosts": []any{"internal.example"}}},
+					},
+				},
+			},
+			{
+				APIVersion: "gateway.networking.k8s.io/v1", Kind: "Gateway", Namespace: "istio-system", Name: "same-kind-other-api",
+				Fields: map[string]any{
+					"isPubliclyExposed": true,
+					"spec": map[string]any{
+						"listeners": []any{map[string]any{"hostname": "*"}},
+					},
 				},
 			},
 			{APIVersion: "networking.istio.io/v1", Kind: "ServiceEntry", Namespace: "payments", Name: "ignored"},
@@ -301,6 +316,112 @@ controls:
 	}
 	if len(statuses["ACME-GW-001"]) != 2 || resourceStatusCounts[statusNotApplicable] != 1 || resourceStatusCounts[statusOpen] != 1 {
 		t.Fatalf("resource statuses = %#v, want not-applicable and open Gateway results", statuses["ACME-GW-001"])
+	}
+}
+
+func TestEquivalentGatewayControlsStaySourceNative(t *testing.T) {
+	pack := decodePackForTest(t, `
+apiVersion: openmeshguard.io/v1alpha1
+kind: ControlPack
+metadata: {name: source-native-gateways, version: 1.0.0}
+controls:
+  - id: ACME-GW-001
+    title: Public gateways must not use wildcard hosts
+    category: exposure
+    severity: high
+    evidenceType: config
+    scope: resource
+    match:
+      apiGroups: [gateway.networking.k8s.io]
+      kinds: [Gateway]
+    requires: [resource.spec.listeners]
+    applicability: 'resource.isPubliclyExposed'
+    expression: '!resource.spec.listeners.exists(l, has(l.hostname) && l.hostname == "*")'
+    message: 'Kubernetes Gateway {{ .Resource }} exposes a wildcard hostname.'
+    remediation: {guidance: Replace wildcard listener hostnames.}
+    frameworks: [nist-csf-2.0/PR.DS]
+  - id: ACME-GW-002
+    title: Public gateways must not use wildcard hosts
+    category: exposure
+    severity: high
+    evidenceType: config
+    scope: resource
+    match:
+      apiGroups: [networking.istio.io]
+      kinds: [Gateway]
+    requires: [resource.spec.servers]
+    applicability: 'resource.isPubliclyExposed'
+    expression: '!resource.spec.servers.exists(s, s.hosts.exists(h, h == "*"))'
+    message: 'Istio Gateway {{ .Resource }} exposes a wildcard hostname.'
+    remediation: {guidance: Replace wildcard server hosts.}
+    frameworks: [nist-csf-2.0/PR.DS]
+`)
+	if pack.Controls[0].Title != pack.Controls[1].Title ||
+		pack.Controls[0].Category != pack.Controls[1].Category ||
+		pack.Controls[0].Severity != pack.Controls[1].Severity ||
+		!reflect.DeepEqual(pack.Controls[0].Frameworks, pack.Controls[1].Frameworks) {
+		t.Fatalf("equivalent controls drifted: %#v and %#v", pack.Controls[0], pack.Controls[1])
+	}
+
+	result, err := Evaluate([]Pack{pack}, Input{Resources: []ResourceInput{
+		{
+			APIVersion: "gateway.networking.k8s.io/v1", Kind: "Gateway", Namespace: "ingress", Name: "kubernetes-public",
+			Fields: map[string]any{
+				"isPubliclyExposed": true,
+				"spec":              map[string]any{"listeners": []any{map[string]any{"hostname": "*"}}},
+			},
+		},
+		{
+			APIVersion: "networking.istio.io/v1", Kind: "Gateway", Namespace: "ingress", Name: "istio-public",
+			Fields: map[string]any{
+				"isPubliclyExposed": true,
+				"spec":              map[string]any{"servers": []any{map[string]any{"hosts": []any{"*"}}}},
+			},
+		},
+		{
+			APIVersion: "example.io/v1", Kind: "Gateway", Namespace: "ingress", Name: "unmatched",
+			Fields: map[string]any{"isPubliclyExposed": true},
+		},
+	}})
+	if err != nil {
+		t.Fatalf("Evaluate returned error: %v", err)
+	}
+	if len(result.Findings) != 2 {
+		t.Fatalf("findings = %#v, want one per matched source API", result.Findings)
+	}
+	wantAPIVersion := map[string]string{
+		"ACME-GW-001": "gateway.networking.k8s.io/v1",
+		"ACME-GW-002": "networking.istio.io/v1",
+	}
+	for _, finding := range result.Findings {
+		if len(finding.Resources) != 1 || finding.Resources[0].APIVersion != wantAPIVersion[finding.ControlID] {
+			t.Fatalf("finding %s resources = %#v, want source-native API version %q", finding.ControlID, finding.Resources, wantAPIVersion[finding.ControlID])
+		}
+		if finding.ControlID == "ACME-GW-001" && containsString(finding.EvidenceSources, "istio-crd") {
+			t.Fatalf("Gateway API evidence mislabeled as Istio CRD: %#v", finding.EvidenceSources)
+		}
+		if finding.ControlID == "ACME-GW-002" && !containsString(finding.EvidenceSources, "istio-crd") {
+			t.Fatalf("Istio Gateway evidence missing Istio CRD source: %#v", finding.EvidenceSources)
+		}
+	}
+}
+
+func TestAPIGroupFromAPIVersion(t *testing.T) {
+	tests := []struct {
+		apiVersion string
+		want       string
+	}{
+		{apiVersion: "v1", want: ""},
+		{apiVersion: "apps/v1", want: "apps"},
+		{apiVersion: "gateway.networking.k8s.io/v1", want: "gateway.networking.k8s.io"},
+		{apiVersion: " networking.istio.io/v1 ", want: "networking.istio.io"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.apiVersion, func(t *testing.T) {
+			if got := apiGroupFromAPIVersion(tt.apiVersion); got != tt.want {
+				t.Fatalf("apiGroupFromAPIVersion(%q) = %q, want %q", tt.apiVersion, got, tt.want)
+			}
+		})
 	}
 }
 
