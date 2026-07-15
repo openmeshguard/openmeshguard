@@ -15,10 +15,10 @@ func parseValidatedTemplate(name, source string) (*template.Template, error) {
 		return nil, err
 	}
 	for _, definition := range tmpl.Templates() {
-		if definition.Tree == nil || definition.Tree.Root == nil {
+		if definition.Tree == nil || definition.Root == nil {
 			continue
 		}
-		if err := validateTemplateNode(definition.Tree.Root, messageDataType); err != nil {
+		if err := validateTemplateNode(definition.Root, messageDataType); err != nil {
 			return nil, err
 		}
 	}

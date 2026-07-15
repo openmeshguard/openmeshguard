@@ -326,17 +326,6 @@ func namespaceMeshEnrollment(labels map[string]string) string {
 	return "not-enrolled"
 }
 
-func meshEnrollmentState(value resolver.Tristate) string {
-	switch value {
-	case resolver.True:
-		return "enrolled"
-	case resolver.False:
-		return "not-enrolled"
-	default:
-		return "unknown"
-	}
-}
-
 func clientConfig(opts scanOptions) (*rest.Config, string, error) {
 	loadingRules := clientcmd.NewDefaultClientConfigLoadingRules()
 	if opts.Kubeconfig != "" {
