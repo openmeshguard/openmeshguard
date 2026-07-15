@@ -140,8 +140,9 @@ func runScan(ctx context.Context, info versionInfo, opts scanOptions, stdout io.
 		engineWorkloads = append(engineWorkloads, engine.WorkloadInput{Posture: posture, Namespace: namespacesByName[namespaceName]})
 	}
 	evaluated, err := engine.Evaluate(packs, engine.Input{
-		Workloads:  engineWorkloads,
-		Namespaces: engineNamespaces,
+		Workloads:             engineWorkloads,
+		Namespaces:            engineNamespaces,
+		InventoryAvailability: inventoryAvailability(snapshot),
 		Inventory: map[string]any{
 			"counts": normalized.Inventory.Counts,
 			"dataPlane": map[string]any{
@@ -222,7 +223,7 @@ func namespaceInputs(snapshot collect.Snapshot, workloads []resolver.WorkloadInp
 		if !exists {
 			input = engine.NamespaceInput{Name: name, Labels: workload.Namespace.Labels}
 		}
-		input.MeshEnrollment = meshEnrollmentState(workload.Namespace.AmbientEnrolled)
+		input.MeshEnrollment = mergeMeshEnrollment(input.MeshEnrollment, workload.Namespace.AmbientEnrolled)
 		if !labelsAvailable {
 			input.Availability = map[string]engine.Availability{
 				"labels": {Reason: "namespace list permission unavailable"},
@@ -241,6 +242,81 @@ func namespaceInputs(snapshot collect.Snapshot, workloads []resolver.WorkloadInp
 		out = append(out, byName[name])
 	}
 	return out
+}
+
+func mergeMeshEnrollment(current string, observed resolver.Tristate) string {
+	switch observed {
+	case resolver.True:
+		return "enrolled"
+	case resolver.False:
+		if current == "" || current == "unknown" {
+			return "not-enrolled"
+		}
+		return current
+	default:
+		if current == "" {
+			return "unknown"
+		}
+		return current
+	}
+}
+
+func inventoryAvailability(snapshot collect.Snapshot) map[string]engine.Availability {
+	reasons := map[string][]string{}
+	for _, permission := range snapshot.PermissionSummary {
+		if permission.Granted {
+			continue
+		}
+		reason := "list permission unavailable for " + permission.Resource
+		if permission.APIGroup != "" {
+			reason += "." + permission.APIGroup
+		}
+		if len(permission.DeniedScopes) > 0 {
+			scopes := append([]string(nil), permission.DeniedScopes...)
+			sort.Strings(scopes)
+			reason += " in " + strings.Join(scopes, ", ")
+		}
+		for _, path := range inventoryPathsForResource(permission.APIGroup, permission.Resource) {
+			reasons[path] = append(reasons[path], reason)
+		}
+	}
+
+	availability := make(map[string]engine.Availability, len(reasons))
+	for path, pathReasons := range reasons {
+		sort.Strings(pathReasons)
+		availability[path] = engine.Availability{Reason: strings.Join(pathReasons, "; ")}
+	}
+	return availability
+}
+
+func inventoryPathsForResource(apiGroup, resource string) []string {
+	countPaths := map[string]string{
+		"/namespaces":                           "counts.namespaces",
+		"/pods":                                 "counts.pods",
+		"/services":                             "counts.services",
+		"apps/deployments":                      "counts.deployments",
+		"apps/replicasets":                      "counts.replicasets",
+		"apps/statefulsets":                     "counts.statefulsets",
+		"apps/daemonsets":                       "counts.daemonsets",
+		"security.istio.io/peerauthentications": "counts.peerAuthentications",
+	}
+	key := apiGroup + "/" + resource
+	var paths []string
+	if countPath, exists := countPaths[key]; exists {
+		paths = append(paths, countPath)
+	}
+	if (apiGroup == "" && (resource == "namespaces" || resource == "pods")) ||
+		(apiGroup == "apps" && (resource == "deployments" || resource == "replicasets" || resource == "statefulsets" || resource == "daemonsets")) {
+		paths = append(paths, "dataPlane.mode")
+	}
+	if apiGroup == "" && (resource == "namespaces" || resource == "services") {
+		paths = append(paths,
+			"multiCluster.participationDetected",
+			"multiCluster.signals",
+			"multiCluster.meshNetworks",
+		)
+	}
+	return paths
 }
 
 func namespaceMeshEnrollment(labels map[string]string) string {

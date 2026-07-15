@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -145,8 +146,86 @@ func TestNamespaceInputsIncludeNamespacesWithoutWorkloads(t *testing.T) {
 	if len(got) != 2 || got[0].Name != "empty" || got[1].Name != "payments" {
 		t.Fatalf("namespace inputs = %#v, want empty and workload namespaces", got)
 	}
-	if got[0].Labels["team"] != "platform" || got[1].MeshEnrollment != "unknown" {
+	if got[0].Labels["team"] != "platform" || got[1].MeshEnrollment != "enrolled" {
 		t.Fatalf("namespace inputs lost labels or resolver enrollment: %#v", got)
+	}
+}
+
+func TestNamespaceInputsAggregateMeshEnrollment(t *testing.T) {
+	tests := []struct {
+		name      string
+		labels    map[string]string
+		workloads []resolver.Tristate
+		want      string
+	}{
+		{name: "sidecar label survives unobserved workload", labels: map[string]string{"istio-injection": "enabled"}, workloads: []resolver.Tristate{resolver.Unobserved}, want: "enrolled"},
+		{name: "ambient label survives unobserved workload", labels: map[string]string{"istio.io/dataplane-mode": "ambient"}, workloads: []resolver.Tristate{resolver.Unobserved}, want: "enrolled"},
+		{name: "positive observation refines unlabeled namespace", workloads: []resolver.Tristate{resolver.True}, want: "enrolled"},
+		{name: "positive observation wins regardless of workload order", workloads: []resolver.Tristate{resolver.True, resolver.False}, want: "enrolled"},
+		{name: "unobserved workload-only namespace stays unknown", workloads: []resolver.Tristate{resolver.Unobserved}, want: "unknown"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			snapshot := collect.Snapshot{Namespaces: []corev1.Namespace{{ObjectMeta: metav1.ObjectMeta{Name: "payments", Labels: tt.labels}}}}
+			if tt.labels == nil {
+				snapshot.Namespaces = nil
+			}
+			workloads := make([]resolver.WorkloadInput, 0, len(tt.workloads))
+			for index, enrollment := range tt.workloads {
+				workloads = append(workloads, resolver.WorkloadInput{
+					Ref:       resolver.WorkloadRef{Namespace: "payments", Name: fmt.Sprintf("workload-%d", index)},
+					Namespace: resolver.NamespaceInput{Name: "payments", AmbientEnrolled: enrollment},
+				})
+			}
+			got := namespaceInputs(snapshot, workloads, nil)
+			if len(got) != 1 || got[0].MeshEnrollment != tt.want {
+				t.Fatalf("namespace inputs = %#v, want meshEnrollment %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestInventoryAvailabilityFromPermissionSummary(t *testing.T) {
+	tests := []struct {
+		name       string
+		permission collect.Permission
+		wantPaths  []string
+		rejectPath string
+	}{
+		{
+			name:       "services affect count and multi-cluster evidence",
+			permission: collect.Permission{Resource: "services", Granted: false},
+			wantPaths:  []string{"counts.services", "multiCluster.participationDetected", "multiCluster.signals", "multiCluster.meshNetworks"},
+			rejectPath: "dataPlane.mode",
+		},
+		{
+			name:       "pods affect count and data-plane evidence",
+			permission: collect.Permission{Resource: "pods", Granted: false, DeniedScopes: []string{"payments"}},
+			wantPaths:  []string{"counts.pods", "dataPlane.mode"},
+			rejectPath: "multiCluster.participationDetected",
+		},
+		{
+			name:       "peer authentication affects only its count",
+			permission: collect.Permission{APIGroup: "security.istio.io", Resource: "peerauthentications", Granted: false},
+			wantPaths:  []string{"counts.peerAuthentications"},
+			rejectPath: "dataPlane.mode",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := inventoryAvailability(collect.Snapshot{PermissionSummary: []collect.Permission{tt.permission}})
+			for _, path := range tt.wantPaths {
+				availability, exists := got[path]
+				if !exists || availability.Available || !strings.Contains(availability.Reason, tt.permission.Resource) {
+					t.Fatalf("availability[%q] = %#v, want permission-derived unknown in %#v", path, availability, got)
+				}
+			}
+			if _, exists := got[tt.rejectPath]; exists {
+				t.Fatalf("availability unexpectedly contains %q: %#v", tt.rejectPath, got)
+			}
+		})
 	}
 }
 
