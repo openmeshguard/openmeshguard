@@ -173,6 +173,12 @@ func knownBooleanDependency(path string) bool {
 	}
 }
 
+func directKnownBooleanExpression(checked *cel.Ast) bool {
+	root := celast.NavigateAST(checked.NativeRep())
+	path, found, err := dependencyPath(root)
+	return err == nil && found && knownBooleanDependency(path)
+}
+
 // AffectedControlIDs derives permission impact from the controls loaded for the
 // current scan. Paths identify evidence that may be unavailable; scopes identify
 // target sets that may be incomplete because their backing resources could not

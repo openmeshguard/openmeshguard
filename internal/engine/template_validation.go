@@ -26,27 +26,27 @@ func parseValidatedTemplate(name, source string) (*template.Template, error) {
 }
 
 func validateTemplateNode(node parse.Node, dotType reflect.Type) error {
+	return validateTemplateNodeWithVariables(node, dotType, map[string]reflect.Type{"$": messageDataType})
+}
+
+func validateTemplateNodeWithVariables(node parse.Node, dotType reflect.Type, variables map[string]reflect.Type) error {
 	if node == nil {
 		return nil
 	}
 	switch typed := node.(type) {
 	case *parse.ListNode:
 		for _, child := range typed.Nodes {
-			if err := validateTemplateNode(child, dotType); err != nil {
+			if err := validateTemplateNodeWithVariables(child, dotType, variables); err != nil {
 				return err
 			}
 		}
 	case *parse.ActionNode:
-		return validateTemplateNode(typed.Pipe, dotType)
+		return validateTemplatePipe(typed.Pipe, dotType, variables)
 	case *parse.PipeNode:
-		for _, command := range typed.Cmds {
-			if err := validateTemplateNode(command, dotType); err != nil {
-				return err
-			}
-		}
+		return validateTemplatePipe(typed, dotType, variables)
 	case *parse.CommandNode:
 		for _, argument := range typed.Args {
-			if err := validateTemplateNode(argument, dotType); err != nil {
+			if err := validateTemplateNodeWithVariables(argument, dotType, variables); err != nil {
 				return err
 			}
 		}
@@ -55,38 +55,47 @@ func validateTemplateNode(node parse.Node, dotType reflect.Type) error {
 		if err != nil {
 			return fmt.Errorf("selector %s is invalid: %w", typed.String(), err)
 		}
+	case *parse.VariableNode:
+		if _, _, err := templateNodeType(typed, dotType, variables); err != nil {
+			return fmt.Errorf("selector %s is invalid: %w", typed.String(), err)
+		}
 	case *parse.ChainNode:
-		if err := validateTemplateNode(typed.Node, dotType); err != nil {
+		if err := validateTemplateNodeWithVariables(typed.Node, dotType, variables); err != nil {
 			return err
 		}
-		if fields, ok := staticTemplateSelector(typed.Node); ok {
-			fields = append(fields, typed.Field...)
-			if _, err := templateSelectorType(dotType, fields); err != nil {
+		if baseType, known, err := templateNodeType(typed.Node, dotType, variables); err != nil {
+			return fmt.Errorf("selector %s is invalid: %w", typed.String(), err)
+		} else if known {
+			if _, err := templateSelectorType(baseType, typed.Field); err != nil {
 				return fmt.Errorf("selector %s is invalid: %w", typed.String(), err)
 			}
 		}
 	case *parse.IfNode:
-		if err := validateTemplateNode(typed.Pipe, dotType); err != nil {
+		branchVariables := cloneTemplateVariables(variables)
+		if err := validateTemplatePipe(typed.Pipe, dotType, branchVariables); err != nil {
 			return err
 		}
-		if err := validateTemplateNode(typed.List, dotType); err != nil {
+		if err := validateTemplateNodeWithVariables(typed.List, dotType, cloneTemplateVariables(branchVariables)); err != nil {
 			return err
 		}
-		return validateTemplateNode(typed.ElseList, dotType)
+		return validateTemplateNodeWithVariables(typed.ElseList, dotType, cloneTemplateVariables(branchVariables))
 	case *parse.WithNode:
-		if err := validateTemplateNode(typed.Pipe, dotType); err != nil {
+		withType := templatePipelineType(typed.Pipe, dotType, variables)
+		branchVariables := cloneTemplateVariables(variables)
+		if err := validateTemplatePipe(typed.Pipe, dotType, branchVariables); err != nil {
 			return err
 		}
-		withType := templatePipelineType(typed.Pipe, dotType)
-		if err := validateTemplateNode(typed.List, withType); err != nil {
+		if err := validateTemplateNodeWithVariables(typed.List, withType, cloneTemplateVariables(branchVariables)); err != nil {
 			return err
 		}
-		return validateTemplateNode(typed.ElseList, dotType)
+		return validateTemplateNodeWithVariables(typed.ElseList, dotType, cloneTemplateVariables(branchVariables))
 	case *parse.RangeNode:
-		if err := validateTemplateNode(typed.Pipe, dotType); err != nil {
+		rangeType := templatePipelineType(typed.Pipe, dotType, variables)
+		branchVariables := cloneTemplateVariables(variables)
+		if err := validateTemplatePipe(typed.Pipe, dotType, branchVariables); err != nil {
 			return err
 		}
-		rangeType := templatePipelineType(typed.Pipe, dotType)
+		setRangeVariableTypes(typed.Pipe, rangeType, branchVariables)
 		for rangeType != nil && (rangeType.Kind() == reflect.Pointer || rangeType.Kind() == reflect.Interface) {
 			rangeType = rangeType.Elem()
 		}
@@ -95,46 +104,106 @@ func validateTemplateNode(node parse.Node, dotType reflect.Type) error {
 		} else {
 			rangeType = nil
 		}
-		if err := validateTemplateNode(typed.List, rangeType); err != nil {
+		if err := validateTemplateNodeWithVariables(typed.List, rangeType, cloneTemplateVariables(branchVariables)); err != nil {
 			return err
 		}
-		return validateTemplateNode(typed.ElseList, dotType)
+		return validateTemplateNodeWithVariables(typed.ElseList, dotType, cloneTemplateVariables(branchVariables))
 	case *parse.TemplateNode:
-		return validateTemplateNode(typed.Pipe, dotType)
+		return validateTemplateNodeWithVariables(typed.Pipe, dotType, cloneTemplateVariables(variables))
 	}
 	return nil
 }
 
-func templatePipelineType(pipe *parse.PipeNode, dotType reflect.Type) reflect.Type {
+func validateTemplatePipe(pipe *parse.PipeNode, dotType reflect.Type, variables map[string]reflect.Type) error {
+	if pipe == nil {
+		return nil
+	}
+	for _, command := range pipe.Cmds {
+		if err := validateTemplateNodeWithVariables(command, dotType, variables); err != nil {
+			return err
+		}
+	}
+	pipelineType := templatePipelineType(pipe, dotType, variables)
+	for _, declaration := range pipe.Decl {
+		if len(declaration.Ident) > 0 {
+			variables[declaration.Ident[0]] = pipelineType
+		}
+	}
+	return nil
+}
+
+func templatePipelineType(pipe *parse.PipeNode, dotType reflect.Type, variables map[string]reflect.Type) reflect.Type {
 	if pipe == nil || len(pipe.Cmds) != 1 || len(pipe.Cmds[0].Args) != 1 {
 		return nil
 	}
-	fields, ok := staticTemplateSelector(pipe.Cmds[0].Args[0])
-	if !ok {
-		return nil
-	}
-	fieldType, err := templateSelectorType(dotType, fields)
-	if err != nil {
+	fieldType, known, err := templateNodeType(pipe.Cmds[0].Args[0], dotType, variables)
+	if err != nil || !known {
 		return nil
 	}
 	return fieldType
 }
 
-func staticTemplateSelector(node parse.Node) ([]string, bool) {
+func templateNodeType(node parse.Node, dotType reflect.Type, variables map[string]reflect.Type) (reflect.Type, bool, error) {
 	switch typed := node.(type) {
 	case *parse.DotNode:
-		return nil, true
+		return dotType, true, nil
 	case *parse.FieldNode:
-		return append([]string(nil), typed.Ident...), true
-	case *parse.ChainNode:
-		fields, ok := staticTemplateSelector(typed.Node)
-		if !ok {
-			return nil, false
+		fieldType, err := templateSelectorType(dotType, typed.Ident)
+		return fieldType, true, err
+	case *parse.VariableNode:
+		if len(typed.Ident) == 0 {
+			return nil, false, nil
 		}
-		return append(fields, typed.Field...), true
+		variableType, exists := variables[typed.Ident[0]]
+		if !exists {
+			return nil, false, nil
+		}
+		fieldType, err := templateSelectorType(variableType, typed.Ident[1:])
+		return fieldType, true, err
+	case *parse.ChainNode:
+		baseType, known, err := templateNodeType(typed.Node, dotType, variables)
+		if err != nil || !known {
+			return nil, known, err
+		}
+		fieldType, err := templateSelectorType(baseType, typed.Field)
+		return fieldType, true, err
 	default:
-		return nil, false
+		return nil, false, nil
 	}
+}
+
+func cloneTemplateVariables(input map[string]reflect.Type) map[string]reflect.Type {
+	out := make(map[string]reflect.Type, len(input))
+	for name, variableType := range input {
+		out[name] = variableType
+	}
+	return out
+}
+
+func setRangeVariableTypes(pipe *parse.PipeNode, collectionType reflect.Type, variables map[string]reflect.Type) {
+	for collectionType != nil && (collectionType.Kind() == reflect.Pointer || collectionType.Kind() == reflect.Interface) {
+		collectionType = collectionType.Elem()
+	}
+	if pipe == nil || collectionType == nil || len(pipe.Decl) == 0 {
+		return
+	}
+	var keyType, valueType reflect.Type
+	switch collectionType.Kind() {
+	case reflect.Array, reflect.Slice:
+		keyType = reflect.TypeOf(0)
+		valueType = collectionType.Elem()
+	case reflect.Map:
+		keyType = collectionType.Key()
+		valueType = collectionType.Elem()
+	default:
+		return
+	}
+	if len(pipe.Decl) == 1 {
+		variables[pipe.Decl[0].Ident[0]] = valueType
+		return
+	}
+	variables[pipe.Decl[0].Ident[0]] = keyType
+	variables[pipe.Decl[1].Ident[0]] = valueType
 }
 
 func templateSelectorType(current reflect.Type, fields []string) (reflect.Type, error) {

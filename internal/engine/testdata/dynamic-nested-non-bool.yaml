@@ -1,0 +1,18 @@
+apiVersion: openmeshguard.io/v1alpha1
+kind: ControlPack
+metadata:
+  name: dynamic-nested-non-bool
+  version: 1.0.0
+controls:
+  - id: ACME-MTLS-001
+    title: Nested dynamic expressions must be boolean
+    category: mtls
+    severity: high
+    evidenceType: config
+    scope: workload
+    requires: [mtls.clientTLSContradiction]
+    applicability: 'true'
+    expression: '[workload.mtls.clientTLSContradiction, "not-bool"][1]'
+    message: Non-boolean CEL was accepted.
+    remediation:
+      guidance: Return a boolean expression.

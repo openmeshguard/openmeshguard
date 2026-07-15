@@ -494,6 +494,19 @@ func compileBoolean(file, controlID, field string, node *yaml.Node, scope, expre
 	if strings.TrimSpace(expression) == "" {
 		return nil, nil, nil
 	}
+	rewritten, lexerIssues := rewriteNamespaceVariableChecked(expression)
+	if len(lexerIssues) > 0 {
+		issues := make(validationErrors, 0, len(lexerIssues))
+		for _, lexerIssue := range lexerIssues {
+			issues = append(issues, issueAt(
+				file,
+				controlID,
+				node,
+				fmt.Sprintf("%s CEL compile error at %d:%d: %s", field, lexerIssue.line, lexerIssue.column+1, lexerIssue.message),
+			))
+		}
+		return nil, nil, issues
+	}
 	if position := rootIdentifierPosition(expression, namespaceCELVariable); position >= 0 {
 		return nil, nil, validationErrors{issueAt(
 			file,
@@ -506,7 +519,7 @@ func compileBoolean(file, controlID, field string, node *yaml.Node, scope, expre
 	if err != nil {
 		return nil, nil, validationErrors{issueAt(file, controlID, node, fmt.Sprintf("create CEL environment: %v", err))}
 	}
-	ast, compileIssues := environment.Compile(rewriteNamespaceVariable(expression))
+	ast, compileIssues := environment.Compile(rewritten)
 	if compileIssues != nil && compileIssues.Err() != nil {
 		issues := make(validationErrors, 0, len(compileIssues.Errors()))
 		for _, compileIssue := range compileIssues.Errors() {
@@ -530,7 +543,7 @@ func compileBoolean(file, controlID, field string, node *yaml.Node, scope, expre
 		return nil, nil, validationErrors{issueAt(file, controlID, node, fmt.Sprintf("%s CEL dependency error: %v", field, dependencyErr))}
 	}
 	if ast.OutputType() != cel.BoolType {
-		if ast.OutputType() != cel.DynType || len(paths) != 1 || !knownBooleanDependency(paths[0]) {
+		if ast.OutputType() != cel.DynType || !directKnownBooleanExpression(ast) {
 			return nil, nil, validationErrors{issueAt(file, controlID, node, fmt.Sprintf("%s CEL expression must return bool, got %s", field, ast.OutputType()))}
 		}
 	}
@@ -564,10 +577,19 @@ func celEnvironment(scope string) (*cel.Env, error) {
 // as a root variable. Rewrite only root identifier tokens to an equal-length
 // internal name so pack syntax and CEL error positions remain contract-accurate.
 func rewriteNamespaceVariable(expression string) string {
+	rewritten, _ := rewriteNamespaceVariableChecked(expression)
+	return rewritten
+}
+
+func rewriteNamespaceVariableChecked(expression string) (string, []celLexerIssue) {
+	tokens, issues := lexCEL(expression)
+	if len(issues) > 0 {
+		return expression, issues
+	}
 	var rewritten strings.Builder
 	rewritten.Grow(len(expression))
 	previousToken := 0
-	for _, token := range lexCEL(expression) {
+	for _, token := range tokens {
 		text := token.GetText()
 		if token.GetTokenType() == celparser.CELLexerIDENTIFIER && text == "namespace" && previousToken != celparser.CELLexerDOT {
 			rewritten.WriteString(namespaceCELVariable)
@@ -578,7 +600,7 @@ func rewriteNamespaceVariable(expression string) string {
 			previousToken = token.GetTokenType()
 		}
 	}
-	return rewritten.String()
+	return rewritten.String(), nil
 }
 
 func isIdentifierStart(value byte) bool {
@@ -592,7 +614,8 @@ func isIdentifierPart(value byte) bool {
 func rootIdentifierPosition(expression, wanted string) int {
 	position := 0
 	previousToken := 0
-	for _, token := range lexCEL(expression) {
+	tokens, _ := lexCEL(expression)
+	for _, token := range tokens {
 		text := token.GetText()
 		if token.GetTokenType() == celparser.CELLexerIDENTIFIER && text == wanted && previousToken != celparser.CELLexerDOT {
 			return position
@@ -605,14 +628,37 @@ func rootIdentifierPosition(expression, wanted string) int {
 	return -1
 }
 
-func lexCEL(expression string) []antlr.Token {
+type celLexerIssue struct {
+	line    int
+	column  int
+	message string
+}
+
+type celLexerErrorListener struct {
+	*antlr.DefaultErrorListener
+	issues []celLexerIssue
+}
+
+func (listener *celLexerErrorListener) SyntaxError(
+	_ antlr.Recognizer,
+	_ interface{},
+	line, column int,
+	message string,
+	_ antlr.RecognitionException,
+) {
+	listener.issues = append(listener.issues, celLexerIssue{line: line, column: column, message: message})
+}
+
+func lexCEL(expression string) ([]antlr.Token, []celLexerIssue) {
 	lexer := celparser.NewCELLexer(antlr.NewInputStream(expression))
 	lexer.RemoveErrorListeners()
+	listener := &celLexerErrorListener{DefaultErrorListener: antlr.NewDefaultErrorListener()}
+	lexer.AddErrorListener(listener)
 	var tokens []antlr.Token
 	for {
 		token := lexer.NextToken()
 		if token.GetTokenType() == antlr.TokenEOF {
-			return tokens
+			return tokens, listener.issues
 		}
 		tokens = append(tokens, token)
 	}

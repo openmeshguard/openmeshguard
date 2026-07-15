@@ -110,9 +110,24 @@ func TestValidateFileRejections(t *testing.T) {
 			contains: []string{"dynamic-non-bool.yaml:", "control ACME-GOV-001", "expression CEL expression must return bool, got dyn"},
 		},
 		{
+			name:     "nested dynamic CEL result is not a boolean",
+			fixture:  "dynamic-nested-non-bool.yaml",
+			contains: []string{"dynamic-nested-non-bool.yaml:", "control ACME-MTLS-001", "expression CEL expression must return bool, got dyn"},
+		},
+		{
+			name:     "CEL lexer errors are rejected",
+			fixture:  "cel-lexer-error.yaml",
+			contains: []string{"cel-lexer-error.yaml:", "control ACME-MTLS-001", "expression CEL compile error at 1:25", "token recognition error"},
+		},
+		{
 			name:     "message selector must exist",
 			fixture:  "template-unknown-field.yaml",
 			contains: []string{"template-unknown-field.yaml:", "control ACME-GOV-001", "message template is invalid", "field Worklod does not exist"},
+		},
+		{
+			name:     "message variable selector must exist",
+			fixture:  "template-variable-unknown-field.yaml",
+			contains: []string{"template-variable-unknown-field.yaml:", "control ACME-GOV-001", "message template is invalid", "field Mtlls does not exist"},
 		},
 		{
 			name:     "null contract headers",
@@ -462,6 +477,7 @@ func TestUserSuggestedYAMLTemplateValidation(t *testing.T) {
 	}{
 		{name: "static selector typo", template: "namespace: {{ .Namespce }}", wantError: "field Namespce does not exist"},
 		{name: "symlink escape", symlinkEscape: true, wantError: "open template within control pack directory"},
+		{name: "static selector through variable", template: "{{$p := .Posture}}mode: {{$p.Mtls.Effective}}"},
 		{name: "dynamic params selector", template: "owner: {{ .Params.owner }}"},
 	}
 
