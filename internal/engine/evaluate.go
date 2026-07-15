@@ -226,17 +226,19 @@ func unavailableReasonForPaths(control Control, target evaluationTarget, paths [
 }
 
 func requiredDisplayPath(scope, path string) string {
-	if strings.HasPrefix(path, scope+".") {
-		return strings.TrimPrefix(path, scope+".")
+	segments, err := parseEvidencePath(path)
+	if err == nil && len(segments) > 1 && segments[0] == scope {
+		return formatEvidencePath(segments[1:])
 	}
 	return path
 }
 
 func absoluteRequiredPath(scope, path string) string {
 	path = strings.TrimSpace(path)
-	for _, root := range []string{"workload.", "namespace.", "resource.", "inventory.", "params."} {
-		if strings.HasPrefix(path, root) {
-			return path
+	segments, err := parseEvidencePath(path)
+	if err == nil && len(segments) > 0 {
+		if _, rooted := dependencyRoots[segments[0]]; rooted {
+			return formatEvidencePath(segments)
 		}
 	}
 	switch scope {
@@ -339,8 +341,8 @@ func resolutionChain(control Control, workload *WorkloadInput) []resolver.Step {
 	usesMTLS := false
 	usesAuthz := false
 	for _, path := range paths {
-		usesMTLS = usesMTLS || path == "workload.mtls" || strings.HasPrefix(path, "workload.mtls.")
-		usesAuthz = usesAuthz || path == "workload.authorization" || strings.HasPrefix(path, "workload.authorization.")
+		usesMTLS = usesMTLS || evidencePathHasPrefix(path, "workload.mtls")
+		usesAuthz = usesAuthz || evidencePathHasPrefix(path, "workload.authorization")
 	}
 	var chain []resolver.Step
 	if usesMTLS {
@@ -666,8 +668,15 @@ func normalizeAvailability(defaultRoot string, input map[string]Availability) ma
 	out := make(map[string]Availability, len(input))
 	for path, availability := range input {
 		path = strings.TrimSpace(path)
-		if !strings.Contains(path, ".") || (!strings.HasPrefix(path, "workload.") && !strings.HasPrefix(path, "namespace.") && !strings.HasPrefix(path, "resource.") && !strings.HasPrefix(path, "inventory.") && !strings.HasPrefix(path, "params.")) {
+		segments, err := parseEvidencePath(path)
+		if err != nil || len(segments) == 0 {
+			continue
+		}
+		if _, rooted := dependencyRoots[segments[0]]; !rooted {
 			path = defaultRoot + "." + path
+		}
+		if canonical, canonicalErr := parseEvidencePath(path); canonicalErr == nil {
+			path = formatEvidencePath(canonical)
 		}
 		out[path] = availability
 	}
@@ -696,7 +705,10 @@ func available(values map[string]Availability, path string) bool {
 }
 
 func lookupPath(activation map[string]any, path string) (any, bool) {
-	parts := strings.Split(path, ".")
+	parts, err := parseEvidencePath(path)
+	if err != nil {
+		return nil, false
+	}
 	var current any = activation
 	for _, part := range parts {
 		var ok bool
@@ -732,19 +744,19 @@ func lookupMapKey(value any, key string) (any, bool) {
 }
 
 func availabilityForPath(values map[string]Availability, path string) (Availability, bool) {
-	for candidate := path; candidate != ""; {
+	segments, err := parseEvidencePath(path)
+	if err != nil {
+		return Availability{}, false
+	}
+	for length := len(segments); length > 0; length-- {
+		candidate := formatEvidencePath(segments[:length])
 		if value, exists := values[candidate]; exists {
 			return value, true
 		}
-		separator := strings.LastIndex(candidate, ".")
-		if separator < 0 {
-			break
-		}
-		candidate = candidate[:separator]
 	}
 	var descendants []string
 	for candidate, value := range values {
-		if strings.HasPrefix(candidate, path+".") && !value.Available {
+		if candidate != path && evidencePathHasPrefix(candidate, path) && !value.Available {
 			descendants = append(descendants, candidate)
 		}
 	}
@@ -763,7 +775,7 @@ func unknownValue(path string, value any) bool {
 		path != "namespace.meshEnrollment" &&
 		path != "inventory.dataPlane.mode" &&
 		path != "workload.mtls.byPort" &&
-		!strings.HasPrefix(path, "workload.mtls.byPort.") &&
+		!(evidencePathHasPrefix(path, "workload.mtls.byPort") && path != "workload.mtls.byPort") &&
 		path != "workload.verified" {
 		return false
 	}

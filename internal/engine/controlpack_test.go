@@ -125,6 +125,11 @@ func TestValidateFileRejections(t *testing.T) {
 			contains: []string{"scope-invalid-requires.yaml:", "control ACME-GOV-001", `requires path "resource.kind" is not available to workload scope`},
 		},
 		{
+			name:     "requires bracket key must be a literal",
+			fixture:  "requires-dynamic-key.yaml",
+			contains: []string{"requires-dynamic-key.yaml:", "control ACME-GOV-001", "must use dotted fields and optional literal bracket keys"},
+		},
+		{
 			name:     "resource match requires API groups",
 			fixture:  "resource-missing-api-groups.yaml",
 			contains: []string{"resource-missing-api-groups.yaml:", "control ACME-GW-001", `missing required field "apiGroups"`},
@@ -298,6 +303,11 @@ func TestNamespaceCELRewritePreservesContractTextAndPositions(t *testing.T) {
 	if position := rootIdentifierPosition(`params.name == "omg_nsctx"`, namespaceCELVariable); position != -1 {
 		t.Fatalf("internal alias inside string reported at %d", position)
 	}
+	rawExpression := "R\"\"\"a\" namespace\"\"\" == R\"\"\"a\" namespace\"\"\" && // namespace in comment\nnamespace.name == \"payments\""
+	rawWant := "R\"\"\"a\" namespace\"\"\" == R\"\"\"a\" namespace\"\"\" && // namespace in comment\nomg_nsctx.name == \"payments\""
+	if got := rewriteNamespaceVariable(rawExpression); got != rawWant {
+		t.Fatalf("raw/comment rewrite = %q, want %q", got, rawWant)
+	}
 }
 
 func TestCELDependencyAnalysisUsesTheCheckedAST(t *testing.T) {
@@ -329,6 +339,21 @@ func TestCELDependencyAnalysisUsesTheCheckedAST(t *testing.T) {
 			wantPaths:  []string{"workload.mtls.byPort"},
 		},
 		{
+			name: "native label key preserves bracket boundary", scope: "workload",
+			expression: `namespace.labels["app.kubernetes.io/name"] == "api"`,
+			wantPaths:  []string{`namespace.labels["app.kubernetes.io/name"]`},
+		},
+		{
+			name: "independently read parent is retained", scope: "workload",
+			expression: `inventory.counts.exists(key, inventory.counts[key] == 0) && inventory.counts.pods > 0`,
+			wantPaths:  []string{"inventory.counts", "inventory.counts.pods"},
+		},
+		{
+			name: "comprehension variable may shadow contract root", scope: "workload",
+			expression: `workload.mtls.chain.exists(workload, workload.kind == "PeerAuthentication")`,
+			wantPaths:  []string{"workload.mtls.chain"},
+		},
+		{
 			name: "unbounded dynamic index is rejected", scope: "workload",
 			expression: `workload[params.field] == true`,
 			wantError:  "dynamic index into workload cannot be represented by a dotted requires path",
@@ -354,6 +379,32 @@ func TestCELDependencyAnalysisUsesTheCheckedAST(t *testing.T) {
 			}
 			if !reflect.DeepEqual(paths, tt.wantPaths) {
 				t.Fatalf("dependencies = %#v, want %#v", paths, tt.wantPaths)
+			}
+		})
+	}
+}
+
+func TestEvidencePathRoundTrip(t *testing.T) {
+	tests := []struct {
+		path     string
+		segments []string
+		want     string
+	}{
+		{path: "namespace.labels.team", segments: []string{"namespace", "labels", "team"}, want: "namespace.labels.team"},
+		{path: `namespace.labels["app.kubernetes.io/name"]`, segments: []string{"namespace", "labels", "app.kubernetes.io/name"}, want: `namespace.labels["app.kubernetes.io/name"]`},
+		{path: `params["owner.team"]`, segments: []string{"params", "owner.team"}, want: `params["owner.team"]`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.path, func(t *testing.T) {
+			segments, err := parseEvidencePath(tt.path)
+			if err != nil {
+				t.Fatalf("parseEvidencePath returned error: %v", err)
+			}
+			if !reflect.DeepEqual(segments, tt.segments) {
+				t.Fatalf("segments = %#v, want %#v", segments, tt.segments)
+			}
+			if got := formatEvidencePath(segments); got != tt.want {
+				t.Fatalf("formatEvidencePath = %q, want %q", got, tt.want)
 			}
 		})
 	}

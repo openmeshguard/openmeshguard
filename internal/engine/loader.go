@@ -12,8 +12,10 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/antlr4-go/antlr/v4"
 	"github.com/google/cel-go/cel"
 	"github.com/google/cel-go/ext"
+	celparser "github.com/google/cel-go/parser/gen"
 	builtincontrols "github.com/openmeshguard/openmeshguard/controls"
 	"gopkg.in/yaml.v3"
 )
@@ -23,7 +25,6 @@ const namespaceCELVariable = "omg_nsctx"
 var (
 	builtinIDPattern = regexp.MustCompile(`^MG-[A-Z]+-[0-9]{3}$`)
 	userIDPattern    = regexp.MustCompile(`^[A-Z]+-[A-Z]+-[0-9]{3}$`)
-	requiresPattern  = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)+$`)
 	apiGroupPattern  = regexp.MustCompile(`^[a-z0-9](?:[-a-z0-9]*[a-z0-9])?(?:\.[a-z0-9](?:[-a-z0-9]*[a-z0-9])?)*$`)
 	kindPattern      = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9]*$`)
 )
@@ -288,8 +289,11 @@ func validateControl(file string, node *yaml.Node, control *Control, source Sour
 	for index, required := range control.Requires {
 		required = strings.TrimSpace(required)
 		location := sequenceValue(mappingValue(node, "requires"), index)
-		if !requiresPattern.MatchString(required) {
-			issues = append(issues, issueAt(file, controlID, location, fmt.Sprintf("requires path %q must be a dotted path", required)))
+		segments, pathErr := parseEvidencePath(required)
+		if pathErr != nil || len(segments) < 2 {
+			issues = append(issues, issueAt(file, controlID, location, fmt.Sprintf("requires path %q must use dotted fields and optional literal bracket keys", required)))
+		} else {
+			required = formatEvidencePath(segments)
 		}
 		if _, exists := seenRequires[required]; exists {
 			issues = append(issues, issueAt(file, controlID, location, fmt.Sprintf("duplicate requires path %q", required)))
@@ -568,55 +572,17 @@ func celEnvironment(scope string) (*cel.Env, error) {
 func rewriteNamespaceVariable(expression string) string {
 	var rewritten strings.Builder
 	rewritten.Grow(len(expression))
-	var quote byte
-	escaped := false
-	var previousToken byte
-	for index := 0; index < len(expression); {
-		current := expression[index]
-		if quote != 0 {
-			rewritten.WriteByte(current)
-			index++
-			if escaped {
-				escaped = false
-				continue
-			}
-			if current == '\\' {
-				escaped = true
-				continue
-			}
-			if current == quote {
-				quote = 0
-				previousToken = 's'
-			}
-			continue
+	previousToken := 0
+	for _, token := range lexCEL(expression) {
+		text := token.GetText()
+		if token.GetTokenType() == celparser.CELLexerIDENTIFIER && text == "namespace" && previousToken != celparser.CELLexerDOT {
+			rewritten.WriteString(namespaceCELVariable)
+		} else {
+			rewritten.WriteString(text)
 		}
-		if current == '\'' || current == '"' {
-			quote = current
-			rewritten.WriteByte(current)
-			index++
-			continue
+		if token.GetTokenType() != celparser.CELLexerWHITESPACE && token.GetTokenType() != celparser.CELLexerCOMMENT {
+			previousToken = token.GetTokenType()
 		}
-		if isIdentifierStart(current) {
-			start := index
-			index++
-			for index < len(expression) && isIdentifierPart(expression[index]) {
-				index++
-			}
-			token := expression[start:index]
-			rootIdentifier := previousToken != '.'
-			if token == "namespace" && rootIdentifier {
-				rewritten.WriteString(namespaceCELVariable)
-			} else {
-				rewritten.WriteString(token)
-			}
-			previousToken = 'i'
-			continue
-		}
-		rewritten.WriteByte(current)
-		if current != ' ' && current != '\t' && current != '\n' && current != '\r' {
-			previousToken = current
-		}
-		index++
 	}
 	return rewritten.String()
 }
@@ -630,51 +596,32 @@ func isIdentifierPart(value byte) bool {
 }
 
 func rootIdentifierPosition(expression, wanted string) int {
-	var quote byte
-	escaped := false
-	var previousToken byte
-	for index := 0; index < len(expression); {
-		current := expression[index]
-		if quote != 0 {
-			index++
-			if escaped {
-				escaped = false
-				continue
-			}
-			if current == '\\' {
-				escaped = true
-				continue
-			}
-			if current == quote {
-				quote = 0
-				previousToken = 's'
-			}
-			continue
+	position := 0
+	previousToken := 0
+	for _, token := range lexCEL(expression) {
+		text := token.GetText()
+		if token.GetTokenType() == celparser.CELLexerIDENTIFIER && text == wanted && previousToken != celparser.CELLexerDOT {
+			return position
 		}
-		if current == '\'' || current == '"' {
-			quote = current
-			index++
-			continue
+		position += len(text)
+		if token.GetTokenType() != celparser.CELLexerWHITESPACE && token.GetTokenType() != celparser.CELLexerCOMMENT {
+			previousToken = token.GetTokenType()
 		}
-		if isIdentifierStart(current) {
-			start := index
-			index++
-			for index < len(expression) && isIdentifierPart(expression[index]) {
-				index++
-			}
-			rootIdentifier := previousToken != '.'
-			if rootIdentifier && expression[start:index] == wanted {
-				return start
-			}
-			previousToken = 'i'
-			continue
-		}
-		if current != ' ' && current != '\t' && current != '\n' && current != '\r' {
-			previousToken = current
-		}
-		index++
 	}
 	return -1
+}
+
+func lexCEL(expression string) []antlr.Token {
+	lexer := celparser.NewCELLexer(antlr.NewInputStream(expression))
+	lexer.RemoveErrorListeners()
+	var tokens []antlr.Token
+	for {
+		token := lexer.NextToken()
+		if token.GetTokenType() == antlr.TokenEOF {
+			return tokens
+		}
+		tokens = append(tokens, token)
+	}
 }
 
 func rejectDuplicateIDs(packs []Pack) error {
@@ -737,7 +684,7 @@ func validateEnum(file, control string, node *yaml.Node, field, value string, al
 
 func requiresVerified(paths []string) bool {
 	for _, path := range paths {
-		if strings.HasPrefix(path, "workload.verified.") {
+		if evidencePathHasPrefix(path, "workload.verified") && path != "workload.verified" {
 			return true
 		}
 	}
@@ -745,7 +692,11 @@ func requiresVerified(paths []string) bool {
 }
 
 func pathAllowedForScope(scope, path string) bool {
-	root, _, _ := strings.Cut(path, ".")
+	segments, err := parseEvidencePath(path)
+	if err != nil || len(segments) == 0 {
+		return false
+	}
+	root := segments[0]
 	if root == "inventory" || root == "params" {
 		return true
 	}

@@ -1,0 +1,18 @@
+apiVersion: openmeshguard.io/v1alpha1
+kind: ControlPack
+metadata:
+  name: dynamic-requires-key
+  version: 1.0.0
+controls:
+  - id: ACME-GOV-001
+    title: Dynamic requires key
+    category: governance
+    severity: medium
+    evidenceType: context
+    scope: workload
+    requires: ['namespace.labels[params.key]']
+    applicability: 'true'
+    expression: 'true'
+    message: Dynamic requires keys are invalid.
+    remediation:
+      guidance: Use a literal key.

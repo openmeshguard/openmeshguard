@@ -41,7 +41,7 @@ controls:
 1. **Scope** determines the iteration unit. `workload` controls evaluate once per entry in `workloadPostures`; `namespace` controls once per mesh namespace; `resource` controls once per matching source API group and resource kind (declared via `match.apiGroups` and `match.kinds`).
 2. **Environments** filter by resolved classification. A control scoped to `production` never evaluates unclassified namespaces — those are covered separately by MG-ENV-001. Empty list = evaluate everywhere.
 3. **`applicability`** is a CEL expression. False ⇒ finding status `not-applicable` (not a pass, not counted in pass rates).
-4. **`requires`** lists dotted paths into the evaluation input. If any resolves to an unknown/unavailable value, the engine emits status `unknown` with `unknownReason` set, and never evaluates `expression`. This is how "unknown is never pass and never fail" is enforced mechanically — controls cannot forget it.
+4. **`requires`** lists exact evidence paths into the evaluation input. Fixed fields use dotted segments; literal map keys that are not identifiers use bracket notation, such as `namespace.labels["app.kubernetes.io/name"]`. If any required path resolves to an unknown/unavailable value, the engine emits status `unknown` with `unknownReason` set, and never evaluates `expression`. This is how "unknown is never pass and never fail" is enforced mechanically — controls cannot forget it.
 5. **`expression`** is a CEL expression returning bool. `true` = pass (no finding). `false` = finding with the control's severity. Any CEL evaluation error is an engine error surfaced at pack-load or scan time — never silently converted to pass or fail.
 6. **Exceptions are engine concerns, not control concerns.** The engine matches findings to exception records after evaluation; controls never reference exceptions.
 7. Severity and environment baselines may be overridden per environment in the scan config file; overrides are recorded in the report's `scanner.controlPacks` provenance.
@@ -59,6 +59,18 @@ Available variables by scope:
 | `params` | all | Control-pack or scan-config supplied parameters (e.g. approved version baselines, allowed egress hosts). |
 
 Standard CEL macros plus the `strings` extension are enabled. No custom functions in v1alpha1 without a contract update.
+
+`requires` paths use the same field and literal-key boundaries as CEL. These
+two forms therefore refer to the same exact evidence:
+
+```yaml
+requires: ['namespace.labels["app.kubernetes.io/name"]']
+expression: 'namespace.labels["app.kubernetes.io/name"] == "payments"'
+```
+
+Literal bracket keys are one map segment even when they contain dots or
+slashes. Dynamic map indexes cannot be declared exactly and are rejected;
+iteration over a specifically required collection remains valid.
 
 ## Resource matching and views
 
@@ -99,6 +111,7 @@ and makes any parity between the controls explicit and testable.
 
 - Unknown fields, missing required fields, malformed IDs (`^MG-[A-Z]+-[0-9]{3}$` for built-ins; user packs may use their own prefix but must match `^[A-Z]+-[A-Z]+-[0-9]{3}$`).
 - CEL expressions that fail compilation or reference variables outside the declared scope.
+- Invalid `requires` syntax, including non-literal bracket keys; every expression dependency must have an exact matching evidence path.
 - `runtime` evidenceType controls that do not `require` a `verified.*` field.
 - Resource controls without non-empty `match.apiGroups` and `match.kinds` lists (the empty-string value explicitly selects the core API group); `match` is invalid for workload and namespace controls.
 - Duplicate control IDs across all loaded packs.

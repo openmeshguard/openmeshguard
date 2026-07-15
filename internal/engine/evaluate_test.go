@@ -659,6 +659,54 @@ controls:
 	}
 }
 
+func TestLiteralBracketRequiresPreservesNativeMapKey(t *testing.T) {
+	pack := decodePackForTest(t, `
+apiVersion: openmeshguard.io/v1alpha1
+kind: ControlPack
+metadata: {name: native-label-key, version: 1.0.0}
+controls:
+  - id: ACME-GOV-001
+    title: Application label must be api
+    category: governance
+    severity: medium
+    evidenceType: context
+    scope: workload
+    requires: ['namespace.labels["app.kubernetes.io/name"]']
+    applicability: 'true'
+    expression: 'namespace.labels["app.kubernetes.io/name"] == "api"'
+    message: 'Workload {{ .Workload }} has the wrong application label.'
+    remediation: {guidance: Correct the application label.}
+`)
+	tests := []struct {
+		name         string
+		availability map[string]Availability
+		wantStatus   string
+	}{
+		{name: "known native key passes"},
+		{name: "native key availability becomes unknown", availability: map[string]Availability{`labels["app.kubernetes.io/name"]`: {Reason: "label evidence unavailable"}}, wantStatus: statusUnknown},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			workload := workloadWithMTLS(resolver.MTLSStrict, nil)
+			workload.Namespace.Labels = map[string]string{"app.kubernetes.io/name": "api"}
+			workload.Namespace.Availability = tt.availability
+			result, err := Evaluate([]Pack{pack}, Input{Workloads: []WorkloadInput{workload}})
+			if err != nil {
+				t.Fatalf("Evaluate returned error: %v", err)
+			}
+			if tt.wantStatus == "" {
+				if len(result.Findings) != 0 || result.Scores[0].Grade != "A" {
+					t.Fatalf("result = %#v, want pass", result)
+				}
+				return
+			}
+			if len(result.Findings) != 1 || result.Findings[0].Status != tt.wantStatus {
+				t.Fatalf("result = %#v, want status %q", result, tt.wantStatus)
+			}
+		})
+	}
+}
+
 func TestInventoryAvailabilityAppliesToEveryScope(t *testing.T) {
 	pack := decodePackForTest(t, `
 apiVersion: openmeshguard.io/v1alpha1
