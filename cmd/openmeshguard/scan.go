@@ -115,6 +115,7 @@ func runScan(ctx context.Context, info versionInfo, opts scanOptions, stdout io.
 	if err != nil {
 		return fmt.Errorf("collect cluster resources: %w", err)
 	}
+	snapshot.PermissionSummary = permissionSummaryWithControls(snapshot.PermissionSummary, packs)
 
 	normalized := normalize.Build(snapshot)
 	resolved := resolver.New()
@@ -223,7 +224,7 @@ func namespaceInputs(snapshot collect.Snapshot, workloads []resolver.WorkloadInp
 		if !exists {
 			input = engine.NamespaceInput{Name: name, Labels: workload.Namespace.Labels}
 		}
-		input.MeshEnrollment = mergeMeshEnrollment(input.MeshEnrollment, workload.Namespace.AmbientEnrolled)
+		input.MeshEnrollment = mergeMeshEnrollment(input.MeshEnrollment, workloadEnrollmentObservation(workload))
 		if !labelsAvailable {
 			input.Availability = map[string]engine.Availability{
 				"labels": {Reason: "namespace list permission unavailable"},
@@ -242,6 +243,19 @@ func namespaceInputs(snapshot collect.Snapshot, workloads []resolver.WorkloadInp
 		out = append(out, byName[name])
 	}
 	return out
+}
+
+func workloadEnrollmentObservation(workload resolver.WorkloadInput) resolver.Tristate {
+	switch workload.DataPlaneMode {
+	case resolver.ModeSidecar, resolver.ModeAmbient, resolver.ModeMixed:
+		return resolver.True
+	case resolver.ModeNotApplicable:
+		return resolver.False
+	case resolver.ModeUnknown:
+		return workload.Namespace.AmbientEnrolled
+	default:
+		return workload.Namespace.AmbientEnrolled
+	}
 }
 
 func mergeMeshEnrollment(current string, observed resolver.Tristate) string {
@@ -287,6 +301,35 @@ func inventoryAvailability(snapshot collect.Snapshot) map[string]engine.Availabi
 		availability[path] = engine.Availability{Reason: strings.Join(pathReasons, "; ")}
 	}
 	return availability
+}
+
+func permissionSummaryWithControls(permissions []collect.Permission, packs []engine.Pack) []collect.Permission {
+	out := append([]collect.Permission(nil), permissions...)
+	for index := range out {
+		paths, scopes := permissionEvidenceImpact(out[index])
+		out[index].AffectedControls = engine.AffectedControlIDs(packs, paths, scopes)
+	}
+	return out
+}
+
+func permissionEvidenceImpact(permission collect.Permission) ([]string, []string) {
+	paths := make([]string, 0, 6)
+	for _, path := range inventoryPathsForResource(permission.APIGroup, permission.Resource) {
+		paths = append(paths, "inventory."+path)
+	}
+	key := permission.APIGroup + "/" + permission.Resource
+	switch key {
+	case "/namespaces":
+		paths = append(paths, "namespace.labels", "namespace.meshEnrollment")
+		return paths, []string{"namespace"}
+	case "/pods":
+		paths = append(paths, "workload.dataPlaneMode", "workload.mtls")
+	case "apps/deployments", "apps/replicasets", "apps/statefulsets", "apps/daemonsets":
+		return paths, []string{"workload"}
+	case "security.istio.io/peerauthentications":
+		paths = append(paths, "workload.mtls")
+	}
+	return paths, nil
 }
 
 func inventoryPathsForResource(apiGroup, resource string) []string {

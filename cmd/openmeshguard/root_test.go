@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -152,17 +154,23 @@ func TestNamespaceInputsIncludeNamespacesWithoutWorkloads(t *testing.T) {
 }
 
 func TestNamespaceInputsAggregateMeshEnrollment(t *testing.T) {
+	type workloadObservation struct {
+		ambient resolver.Tristate
+		mode    resolver.DataPlaneMode
+	}
 	tests := []struct {
 		name      string
 		labels    map[string]string
-		workloads []resolver.Tristate
+		workloads []workloadObservation
 		want      string
 	}{
-		{name: "sidecar label survives unobserved workload", labels: map[string]string{"istio-injection": "enabled"}, workloads: []resolver.Tristate{resolver.Unobserved}, want: "enrolled"},
-		{name: "ambient label survives unobserved workload", labels: map[string]string{"istio.io/dataplane-mode": "ambient"}, workloads: []resolver.Tristate{resolver.Unobserved}, want: "enrolled"},
-		{name: "positive observation refines unlabeled namespace", workloads: []resolver.Tristate{resolver.True}, want: "enrolled"},
-		{name: "positive observation wins regardless of workload order", workloads: []resolver.Tristate{resolver.True, resolver.False}, want: "enrolled"},
-		{name: "unobserved workload-only namespace stays unknown", workloads: []resolver.Tristate{resolver.Unobserved}, want: "unknown"},
+		{name: "sidecar label survives unobserved workload", labels: map[string]string{"istio-injection": "enabled"}, workloads: []workloadObservation{{ambient: resolver.Unobserved, mode: resolver.ModeUnknown}}, want: "enrolled"},
+		{name: "ambient label survives unobserved workload", labels: map[string]string{"istio.io/dataplane-mode": "ambient"}, workloads: []workloadObservation{{ambient: resolver.Unobserved, mode: resolver.ModeUnknown}}, want: "enrolled"},
+		{name: "ambient observation refines unlabeled namespace", workloads: []workloadObservation{{ambient: resolver.True, mode: resolver.ModeUnknown}}, want: "enrolled"},
+		{name: "observed sidecar refines unlabeled namespace", workloads: []workloadObservation{{mode: resolver.ModeSidecar}}, want: "enrolled"},
+		{name: "positive observation wins regardless of workload order", workloads: []workloadObservation{{ambient: resolver.True, mode: resolver.ModeUnknown}, {ambient: resolver.False, mode: resolver.ModeUnknown}}, want: "enrolled"},
+		{name: "not in mesh observation refines unlabeled namespace", workloads: []workloadObservation{{mode: resolver.ModeNotApplicable}}, want: "not-enrolled"},
+		{name: "unobserved workload-only namespace stays unknown", workloads: []workloadObservation{{ambient: resolver.Unobserved, mode: resolver.ModeUnknown}}, want: "unknown"},
 	}
 
 	for _, tt := range tests {
@@ -172,10 +180,11 @@ func TestNamespaceInputsAggregateMeshEnrollment(t *testing.T) {
 				snapshot.Namespaces = nil
 			}
 			workloads := make([]resolver.WorkloadInput, 0, len(tt.workloads))
-			for index, enrollment := range tt.workloads {
+			for index, observation := range tt.workloads {
 				workloads = append(workloads, resolver.WorkloadInput{
-					Ref:       resolver.WorkloadRef{Namespace: "payments", Name: fmt.Sprintf("workload-%d", index)},
-					Namespace: resolver.NamespaceInput{Name: "payments", AmbientEnrolled: enrollment},
+					Ref:           resolver.WorkloadRef{Namespace: "payments", Name: fmt.Sprintf("workload-%d", index)},
+					DataPlaneMode: observation.mode,
+					Namespace:     resolver.NamespaceInput{Name: "payments", AmbientEnrolled: observation.ambient},
 				})
 			}
 			got := namespaceInputs(snapshot, workloads, nil)
@@ -226,6 +235,61 @@ func TestInventoryAvailabilityFromPermissionSummary(t *testing.T) {
 				t.Fatalf("availability unexpectedly contains %q: %#v", tt.rejectPath, got)
 			}
 		})
+	}
+}
+
+func TestPermissionSummaryDerivesAffectedControlsFromLoadedPacks(t *testing.T) {
+	directory := t.TempDir()
+	packPath := filepath.Join(directory, "permission-controls.yaml")
+	packData := []byte(`apiVersion: openmeshguard.io/v1alpha1
+kind: ControlPack
+metadata: {name: permission-controls, version: 1.0.0}
+controls:
+  - id: ACME-INV-001
+    title: Service inventory must be non-empty
+    category: governance
+    severity: low
+    evidenceType: context
+    scope: namespace
+    requires: [inventory.counts.services]
+    applicability: 'true'
+    expression: 'inventory.counts.services > 0'
+    message: No services were observed.
+    remediation: {guidance: Confirm service collection.}
+  - id: ACME-ENV-001
+    title: Namespaces must identify their team
+    category: governance
+    severity: medium
+    evidenceType: context
+    scope: namespace
+    requires: [namespace.labels.team]
+    applicability: 'true'
+    expression: 'namespace.labels.team != ""'
+    message: Namespace team is unavailable.
+    remediation: {guidance: Add a team label.}
+`)
+	if err := os.WriteFile(packPath, packData, 0o600); err != nil {
+		t.Fatalf("write permission pack: %v", err)
+	}
+	packs, err := engine.LoadPacks([]string{packPath})
+	if err != nil {
+		t.Fatalf("load permission pack: %v", err)
+	}
+	permissions := []collect.Permission{
+		{Resource: "services", Granted: false},
+		{Resource: "namespaces", Granted: false},
+		{APIGroup: "security.istio.io", Resource: "peerauthentications", Granted: false},
+	}
+	got := permissionSummaryWithControls(permissions, packs)
+	want := [][]string{
+		{"ACME-INV-001"},
+		{"ACME-ENV-001", "ACME-INV-001"},
+		{"MG-MTLS-001", "MG-MTLS-002", "MG-MTLS-003"},
+	}
+	for index := range want {
+		if strings.Join(got[index].AffectedControls, ",") != strings.Join(want[index], ",") {
+			t.Fatalf("permission %s affected controls = %#v, want %#v", got[index].Resource, got[index].AffectedControls, want[index])
+		}
 	}
 }
 

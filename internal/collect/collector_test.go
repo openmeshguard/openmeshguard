@@ -3,7 +3,6 @@ package collect
 import (
 	"context"
 	"errors"
-	"reflect"
 	"strings"
 	"testing"
 
@@ -372,7 +371,7 @@ func TestListPagesReturnsRepeatedExpiredContinueToken(t *testing.T) {
 	}
 }
 
-func TestMTLSPermissionMetadataNamesEveryBuiltinControl(t *testing.T) {
+func TestPermissionMetadataDoesNotEmbedControlCatalog(t *testing.T) {
 	tests := []struct {
 		name string
 		meta resourceMeta
@@ -386,12 +385,11 @@ func TestMTLSPermissionMetadataNamesEveryBuiltinControl(t *testing.T) {
 		{name: "daemonsets", meta: daemonSetMeta},
 		{name: "peerauthentications", meta: peerAuthenticationMeta},
 	}
-	want := []string{"MG-MTLS-001", "MG-MTLS-002", "MG-MTLS-003"}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			permission := tt.meta.permissionForScope(false, "cluster")
-			if !reflect.DeepEqual(permission.AffectedControls, want) {
-				t.Fatalf("affected controls = %#v, want %#v", permission.AffectedControls, want)
+			if len(permission.AffectedControls) != 0 {
+				t.Fatalf("affected controls = %#v, want scan-time derivation", permission.AffectedControls)
 			}
 		})
 	}

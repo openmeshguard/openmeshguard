@@ -507,18 +507,16 @@ type resourceMeta struct {
 	resource string
 	optional bool
 	impact   string
-	controls []string
 }
 
 func (m resourceMeta) permissionForScope(granted bool, scopeName string) Permission {
 	permission := Permission{
-		APIGroup:         m.apiGroup,
-		Resource:         m.resource,
-		Verbs:            []string{"list"},
-		Granted:          granted,
-		Optional:         m.optional,
-		Impact:           m.impact,
-		AffectedControls: append([]string(nil), m.controls...),
+		APIGroup: m.apiGroup,
+		Resource: m.resource,
+		Verbs:    []string{"list"},
+		Granted:  granted,
+		Optional: m.optional,
+		Impact:   m.impact,
 	}
 	if !granted && scopeName != "" {
 		permission.DeniedScopes = []string{scopeName}
@@ -527,50 +525,41 @@ func (m resourceMeta) permissionForScope(granted bool, scopeName string) Permiss
 }
 
 var (
-	mtlsControlIDs = []string{"MG-MTLS-001", "MG-MTLS-002", "MG-MTLS-003"}
-	namespaceMeta  = resourceMeta{
+	namespaceMeta = resourceMeta{
 		resource: "namespaces",
 		impact:   "namespace labels and environment/data-plane inference may be unavailable",
-		controls: mtlsControlIDs,
 	}
 	podMeta = resourceMeta{
 		resource: "pods",
 		impact:   "sidecar detection from running pods may be unavailable",
-		controls: mtlsControlIDs,
 	}
 	serviceMeta = resourceMeta{
 		resource: "services",
 		impact:   "service inventory and multi-cluster gateway signals may be unavailable",
-		controls: mtlsControlIDs,
 	}
 	deploymentMeta = resourceMeta{
 		apiGroup: "apps",
 		resource: "deployments",
 		impact:   "deployment workload posture may be unavailable",
-		controls: mtlsControlIDs,
 	}
 	replicaSetMeta = resourceMeta{
 		apiGroup: "apps",
 		resource: "replicasets",
 		impact:   "standalone ReplicaSet workload posture may be unavailable",
-		controls: mtlsControlIDs,
 	}
 	statefulSetMeta = resourceMeta{
 		apiGroup: "apps",
 		resource: "statefulsets",
 		impact:   "StatefulSet workload posture may be unavailable",
-		controls: mtlsControlIDs,
 	}
 	daemonSetMeta = resourceMeta{
 		apiGroup: "apps",
 		resource: "daemonsets",
 		impact:   "DaemonSet workload posture may be unavailable",
-		controls: mtlsControlIDs,
 	}
 	peerAuthenticationMeta = resourceMeta{
 		apiGroup: "security.istio.io",
 		resource: "peerauthentications",
 		impact:   "effective mTLS posture resolves to unknown without PeerAuthentication evidence",
-		controls: mtlsControlIDs,
 	}
 )

@@ -172,3 +172,40 @@ func knownBooleanDependency(path string) bool {
 		return false
 	}
 }
+
+// AffectedControlIDs derives permission impact from the controls loaded for the
+// current scan. Paths identify evidence that may be unavailable; scopes identify
+// target sets that may be incomplete because their backing resources could not
+// be listed.
+func AffectedControlIDs(packs []Pack, paths, scopes []string) []string {
+	scopeSet := make(map[string]struct{}, len(scopes))
+	for _, scope := range scopes {
+		scopeSet[scope] = struct{}{}
+	}
+	ids := map[string]struct{}{}
+	for _, pack := range packs {
+		for _, control := range pack.Controls {
+			if _, affected := scopeSet[control.Scope]; affected {
+				ids[control.ID] = struct{}{}
+				continue
+			}
+			dependencies := append([]string(nil), requiredPaths(control)...)
+			dependencies = append(dependencies, control.applicabilityPaths...)
+			dependencies = append(dependencies, control.expressionPaths...)
+			for _, dependency := range dependencies {
+				for _, path := range paths {
+					if evidencePathsOverlap(dependency, path) {
+						ids[control.ID] = struct{}{}
+						break
+					}
+				}
+			}
+		}
+	}
+	out := make([]string, 0, len(ids))
+	for id := range ids {
+		out = append(out, id)
+	}
+	sort.Strings(out)
+	return out
+}
