@@ -327,6 +327,11 @@ func TestCELDependencyAnalysisUsesTheCheckedAST(t *testing.T) {
 			expression: `workload[params.field] == true`,
 			wantError:  "dynamic index into workload cannot be represented by a dotted requires path",
 		},
+		{
+			name: "root map macro is rejected", scope: "workload",
+			expression: `workload.exists(key, key == "owner")`,
+			wantError:  "dynamic access to workload cannot be represented by an exact dotted requires path",
+		},
 	}
 
 	for _, tt := range tests {

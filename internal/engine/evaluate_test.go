@@ -630,6 +630,95 @@ func TestParentAvailabilityIncludesUnknownDescendants(t *testing.T) {
 	}
 }
 
+func TestLiteralUnknownOutsidePostureEnumsRemainsKnown(t *testing.T) {
+	pack := decodePackForTest(t, `
+apiVersion: openmeshguard.io/v1alpha1
+kind: ControlPack
+metadata: {name: literal-unknown, version: 1.0.0}
+controls:
+  - id: ACME-GOV-001
+    title: Team label must be platform
+    category: governance
+    severity: medium
+    evidenceType: context
+    scope: workload
+    requires: [namespace.labels.team]
+    applicability: 'true'
+    expression: 'namespace.labels.team == "platform"'
+    message: 'Workload {{ .Workload }} does not have the platform team label.'
+    remediation: {guidance: Correct the team label.}
+`)
+	workload := workloadWithMTLS(resolver.MTLSStrict, nil)
+	workload.Namespace.Labels = map[string]string{"team": "unknown"}
+	result, err := Evaluate([]Pack{pack}, Input{Workloads: []WorkloadInput{workload}})
+	if err != nil {
+		t.Fatalf("Evaluate returned error: %v", err)
+	}
+	if len(result.Findings) != 1 || result.Findings[0].Status != statusOpen || result.Scores[0].Grade != "F" {
+		t.Fatalf("result = %#v, want resolved open finding for literal label value", result)
+	}
+}
+
+func TestInventoryAvailabilityAppliesToEveryScope(t *testing.T) {
+	pack := decodePackForTest(t, `
+apiVersion: openmeshguard.io/v1alpha1
+kind: ControlPack
+metadata: {name: inventory-availability, version: 1.0.0}
+controls:
+  - id: ACME-GOV-001
+    title: Services must be present
+    category: governance
+    severity: medium
+    evidenceType: context
+    scope: namespace
+    requires: [inventory.counts.services]
+    applicability: 'true'
+    expression: 'inventory.counts.services > 0'
+    message: 'Service inventory is empty.'
+    remediation: {guidance: Restore service inventory evidence.}
+`)
+	result, err := Evaluate([]Pack{pack}, Input{
+		Namespaces: []NamespaceInput{{Name: "payments"}},
+		Inventory:  map[string]any{"counts": map[string]any{"services": 0}},
+		InventoryAvailability: map[string]Availability{
+			"counts.services": {Reason: "services list permission unavailable"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Evaluate returned error: %v", err)
+	}
+	if len(result.Findings) != 1 || result.Findings[0].Status != statusUnknown || !strings.Contains(result.Findings[0].UnknownReason, "services list permission unavailable") {
+		t.Fatalf("result = %#v, want permission-derived inventory unknown", result)
+	}
+}
+
+func TestResolutionChainsAreCELCompatibleMaps(t *testing.T) {
+	pack := decodePackForTest(t, `
+apiVersion: openmeshguard.io/v1alpha1
+kind: ControlPack
+metadata: {name: chain-shape, version: 1.0.0}
+controls:
+  - id: ACME-MTLS-001
+    title: PeerAuthentication must contribute to resolution
+    category: mtls
+    severity: high
+    evidenceType: config
+    scope: workload
+    requires: [mtls.chain]
+    applicability: 'true'
+    expression: 'workload.mtls.chain.exists(step, step.kind == "PeerAuthentication" && step.order == 1)'
+    message: 'Workload {{ .Workload }} has no PeerAuthentication resolution step.'
+    remediation: {guidance: Restore policy evidence.}
+`)
+	result, err := Evaluate([]Pack{pack}, Input{Workloads: []WorkloadInput{workloadWithMTLS(resolver.MTLSStrict, nil)}})
+	if err != nil {
+		t.Fatalf("Evaluate returned error: %v", err)
+	}
+	if len(result.Findings) != 0 || len(result.Scores) != 1 || result.Scores[0].Grade != "A" {
+		t.Fatalf("result = %#v, want CEL-compatible chain pass", result)
+	}
+}
+
 func decodePackForTest(t *testing.T, data string) Pack {
 	t.Helper()
 	pack, err := decodeAndValidate("test-pack.yaml", []byte(data), SourceUser)

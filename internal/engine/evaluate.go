@@ -217,7 +217,7 @@ func unavailableReasonForPaths(control Control, target evaluationTarget, paths [
 			}
 		}
 		value, available := lookupPath(target.activation, path)
-		if available && !unknownValue(value) {
+		if available && !unknownValue(path, value) {
 			continue
 		}
 		reasons = append(reasons, fmt.Sprintf("%s unavailable: required path has no known value", displayPath))
@@ -397,7 +397,8 @@ func workloadTargets(input Input, params map[string]any) []evaluationTarget {
 		if environment == "" {
 			environment = namespace.Environment
 		}
-		availability := defaultWorkloadAvailability(*workload, namespace)
+		availability := evaluationAvailability(input.InventoryAvailability)
+		mergeAvailability(availability, defaultWorkloadAvailability(*workload, namespace))
 		activation := map[string]any{
 			"workload":           workloadValue(*workload, availability),
 			"namespace":          namespaceValue(namespace),
@@ -457,7 +458,8 @@ func namespaceTargets(input Input, params map[string]any) []evaluationTarget {
 	}
 	targets := make([]evaluationTarget, 0, len(namespaces))
 	for _, namespace := range namespaces {
-		availability := normalizeAvailability("namespace", namespace.Availability)
+		availability := evaluationAvailability(input.InventoryAvailability)
+		mergeAvailability(availability, normalizeAvailability("namespace", namespace.Availability))
 		activation := map[string]any{
 			"namespace":          namespaceValue(namespace),
 			namespaceCELVariable: namespaceValue(namespace),
@@ -492,7 +494,8 @@ func resourceTargets(control Control, input Input, params map[string]any) []eval
 		value["kind"] = resource.Kind
 		value["namespace"] = resource.Namespace
 		value["name"] = resource.Name
-		availability := normalizeAvailability("resource", resource.Availability)
+		availability := evaluationAvailability(input.InventoryAvailability)
+		mergeAvailability(availability, normalizeAvailability("resource", resource.Availability))
 		key := resource.Namespace + "/" + resource.Name
 		if resource.Namespace == "" {
 			key = resource.Name
@@ -581,7 +584,7 @@ func workloadValue(workload WorkloadInput, availability map[string]Availability)
 		"dataPlaneMode": string(workload.Posture.Mode),
 	}
 	mtls := map[string]any{
-		"chain": workload.Posture.MTLS.Chain,
+		"chain": resolutionStepsValue(workload.Posture.MTLS.Chain),
 	}
 	if workload.Posture.MTLS.UnknownReason != "" {
 		mtls["unknownReason"] = workload.Posture.MTLS.UnknownReason
@@ -604,7 +607,7 @@ func workloadValue(workload WorkloadInput, availability map[string]Availability)
 	authz := map[string]any{
 		"policiesInScope": workload.Posture.Authz.PoliciesInScope,
 		"l7Unenforced":    workload.Posture.Authz.L7Unenforced,
-		"chain":           workload.Posture.Authz.Chain,
+		"chain":           resolutionStepsValue(workload.Posture.Authz.Chain),
 	}
 	if workload.Posture.Authz.UnknownReason != "" {
 		authz["unknownReason"] = workload.Posture.Authz.UnknownReason
@@ -628,6 +631,21 @@ func workloadValue(workload WorkloadInput, availability map[string]Availability)
 		value["appId"] = workload.AppID
 	}
 	return value
+}
+
+func resolutionStepsValue(steps []resolver.Step) []any {
+	values := make([]any, 0, len(steps))
+	for _, step := range steps {
+		values = append(values, map[string]any{
+			"order":     step.Order,
+			"kind":      step.Kind,
+			"name":      step.Name,
+			"namespace": step.Namespace,
+			"field":     step.Field,
+			"effect":    step.Effect,
+		})
+	}
+	return values
 }
 
 func namespaceValue(namespace NamespaceInput) map[string]any {
@@ -654,6 +672,16 @@ func normalizeAvailability(defaultRoot string, input map[string]Availability) ma
 		out[path] = availability
 	}
 	return out
+}
+
+func evaluationAvailability(inventory map[string]Availability) map[string]Availability {
+	return normalizeAvailability("inventory", inventory)
+}
+
+func mergeAvailability(destination, source map[string]Availability) {
+	for path, availability := range source {
+		destination[path] = availability
+	}
 }
 
 func setDefaultAvailability(values map[string]Availability, path string, value Availability) {
@@ -727,25 +755,40 @@ func availabilityForPath(values map[string]Availability, path string) (Availabil
 	return Availability{}, false
 }
 
-func unknownValue(value any) bool {
+func unknownValue(path string, value any) bool {
+	if path != "workload.dataPlaneMode" &&
+		path != "workload.mtls.effective" &&
+		path != "workload.authorization.effective" &&
+		path != "workload.verified.status" &&
+		path != "namespace.meshEnrollment" &&
+		path != "inventory.dataPlane.mode" &&
+		path != "workload.mtls.byPort" &&
+		!strings.HasPrefix(path, "workload.mtls.byPort.") &&
+		path != "workload.verified" {
+		return false
+	}
+	return containsUnknownSentinel(value)
+}
+
+func containsUnknownSentinel(value any) bool {
 	switch typed := value.(type) {
 	case string:
 		return strings.EqualFold(typed, "unknown")
 	case map[string]any:
 		for _, child := range typed {
-			if unknownValue(child) {
+			if containsUnknownSentinel(child) {
 				return true
 			}
 		}
 	case map[string]string:
 		for _, child := range typed {
-			if unknownValue(child) {
+			if containsUnknownSentinel(child) {
 				return true
 			}
 		}
 	case []any:
 		for _, child := range typed {
-			if unknownValue(child) {
+			if containsUnknownSentinel(child) {
 				return true
 			}
 		}

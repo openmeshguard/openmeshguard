@@ -113,11 +113,12 @@ type ResourceInput struct {
 // Input is the complete evaluation input. Inventory and Params are dynamic
 // maps because their contract-backed shapes expand in later milestones.
 type Input struct {
-	Workloads  []WorkloadInput
-	Namespaces []NamespaceInput
-	Resources  []ResourceInput
-	Inventory  map[string]any
-	Params     map[string]any
+	Workloads             []WorkloadInput
+	Namespaces            []NamespaceInput
+	Resources             []ResourceInput
+	Inventory             map[string]any
+	InventoryAvailability map[string]Availability
+	Params                map[string]any
 }
 
 type ResourceRef struct {

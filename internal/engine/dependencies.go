@@ -33,8 +33,13 @@ func analyzeDependencies(checked *cel.Ast) ([]string, error) {
 			dependencyErr = err
 			return
 		}
-		if found && strings.Contains(path, ".") {
-			paths[path] = struct{}{}
+		if found {
+			if strings.Contains(path, ".") {
+				paths[path] = struct{}{}
+			} else if !rootIsExplicitPathBase(expr) {
+				dependencyErr = fmt.Errorf("dynamic access to %s cannot be represented by an exact dotted requires path", path)
+				return
+			}
 		}
 		for _, child := range expr.Children() {
 			visit(child)
@@ -63,6 +68,26 @@ func analyzeDependencies(checked *cel.Ast) ([]string, error) {
 	}
 	sort.Strings(out)
 	return out, nil
+}
+
+func rootIsExplicitPathBase(expr celast.NavigableExpr) bool {
+	parent, found := expr.Parent()
+	if !found {
+		return false
+	}
+	switch parent.Kind() {
+	case celast.SelectKind:
+		return parent.AsSelect().Operand().ID() == expr.ID()
+	case celast.CallKind:
+		call := parent.AsCall()
+		if call.FunctionName() != operators.Index && call.FunctionName() != operators.OptIndex {
+			return false
+		}
+		args := call.Args()
+		return len(args) == 2 && args[0].ID() == expr.ID()
+	default:
+		return false
+	}
 }
 
 func dependencyPath(expr celast.NavigableExpr) (string, bool, error) {
