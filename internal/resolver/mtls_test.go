@@ -6,13 +6,13 @@ import (
 	"time"
 )
 
-func TestResolverV1Version(t *testing.T) {
-	if got := New().Version(); got != "mtls/v1" {
-		t.Fatalf("Version() = %q, want mtls/v1", got)
+func TestResolverV2Version(t *testing.T) {
+	if got := New().Version(); got != "mtls/v2" {
+		t.Fatalf("Version() = %q, want mtls/v2", got)
 	}
 }
 
-func TestResolverV1ResolveMTLS(t *testing.T) {
+func TestResolverV2ResolveMTLS(t *testing.T) {
 	tests := []struct {
 		name                    string
 		in                      WorkloadInput
@@ -358,7 +358,7 @@ func TestResolverV1ResolveMTLS(t *testing.T) {
 	}
 }
 
-func TestResolverV1OmitsClientTLSConclusionWhenDestinationRulesUnavailable(t *testing.T) {
+func TestResolverV2OmitsClientTLSConclusionWhenDestinationRulesUnavailable(t *testing.T) {
 	in := sidecarWorkload(peerAuthentication("istio-system", "default", "STRICT", false))
 	in.DestinationRulesKnown = false
 	in.DestRules = []DestinationRuleView{{
@@ -378,7 +378,7 @@ func TestResolverV1OmitsClientTLSConclusionWhenDestinationRulesUnavailable(t *te
 	}
 }
 
-func TestResolverV1ResolveAuthz(t *testing.T) {
+func TestResolverV2ResolveAuthz(t *testing.T) {
 	result := New().ResolveAuthz(WorkloadInput{})
 	if result.Effective != AuthzUnknown {
 		t.Fatalf("effective = %q, want %q", result.Effective, AuthzUnknown)

@@ -4,7 +4,7 @@
 // resolver. Move it to internal/resolver/ during M0 scaffolding; from then on,
 // changes to exported types in this file require human approval.
 //
-// The current mTLS semantics tag is mtls/v1. Bump it whenever mTLS
+// The current mTLS semantics tag is mtls/v2. Bump it whenever mTLS
 // precedence, inheritance, contradiction, or unknown propagation semantics
 // change, and add or update table coverage for the changed behavior.
 //
