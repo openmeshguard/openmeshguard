@@ -794,18 +794,17 @@ func availabilityForPath(values map[string]Availability, path string) (Availabil
 }
 
 func unknownValue(path string, value any) bool {
-	if path != "workload.dataPlaneMode" &&
-		path != "workload.mtls.effective" &&
-		path != "workload.authorization.effective" &&
-		path != "workload.verified.status" &&
-		path != "namespace.meshEnrollment" &&
-		path != "inventory.dataPlane.mode" &&
-		path != "workload.mtls.byPort" &&
-		!(evidencePathHasPrefix(path, "workload.mtls.byPort") && path != "workload.mtls.byPort") &&
-		path != "workload.verified" {
-		return false
+	switch path {
+	case "workload.dataPlaneMode",
+		"workload.mtls.effective",
+		"workload.authorization.effective",
+		"workload.verified.status",
+		"namespace.meshEnrollment",
+		"inventory.dataPlane.mode",
+		"workload.verified":
+		return containsUnknownSentinel(value)
 	}
-	return containsUnknownSentinel(value)
+	return evidencePathHasPrefix(path, "workload.mtls.byPort") && containsUnknownSentinel(value)
 }
 
 func containsUnknownSentinel(value any) bool {
