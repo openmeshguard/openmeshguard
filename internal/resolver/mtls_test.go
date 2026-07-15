@@ -341,8 +341,12 @@ func TestResolverV1ResolveMTLS(t *testing.T) {
 			if !reflect.DeepEqual(result.ByPort, tt.wantByPort) {
 				t.Fatalf("byPort = %#v, want %#v", result.ByPort, tt.wantByPort)
 			}
-			if result.ClientTLSContradiction != tt.wantClientContradiction {
-				t.Fatalf("clientTLSContradiction = %t, want %t", result.ClientTLSContradiction, tt.wantClientContradiction)
+			wantContradictionKnown := tt.in.DestinationRulesKnown && tt.wantEffective != MTLSUnknown && tt.wantEffective != MTLSNotInMesh
+			if gotKnown := result.ClientTLSContradiction != nil; gotKnown != wantContradictionKnown {
+				t.Fatalf("clientTLSContradiction known = %t, want %t", gotKnown, wantContradictionKnown)
+			}
+			if result.ClientTLSContradiction != nil && *result.ClientTLSContradiction != tt.wantClientContradiction {
+				t.Fatalf("clientTLSContradiction = %t, want %t", *result.ClientTLSContradiction, tt.wantClientContradiction)
 			}
 			if result.UnknownReason != tt.wantUnknownReason {
 				t.Fatalf("unknownReason = %q, want %q", result.UnknownReason, tt.wantUnknownReason)
@@ -351,6 +355,26 @@ func TestResolverV1ResolveMTLS(t *testing.T) {
 				t.Fatalf("chain = %#v, want %#v", result.Chain, tt.wantChain)
 			}
 		})
+	}
+}
+
+func TestResolverV1OmitsClientTLSConclusionWhenDestinationRulesUnavailable(t *testing.T) {
+	in := sidecarWorkload(peerAuthentication("istio-system", "default", "STRICT", false))
+	in.DestinationRulesKnown = false
+	in.DestRules = []DestinationRuleView{{
+		Name: "untrusted-input", Namespace: "payments", TLSMode: "DISABLE",
+	}}
+	result := New().ResolveMTLS(in)
+	if result.Effective != MTLSStrict {
+		t.Fatalf("effective = %q, want strict server posture", result.Effective)
+	}
+	if result.ClientTLSContradiction != nil {
+		t.Fatalf("clientTLSContradiction = %v, want omitted without DestinationRule evidence", *result.ClientTLSContradiction)
+	}
+	for _, step := range result.Chain {
+		if step.Kind == "DestinationRule" {
+			t.Fatalf("resolution chain used unavailable DestinationRule evidence: %#v", result.Chain)
+		}
 	}
 }
 
@@ -369,11 +393,12 @@ func TestResolverV1ResolveAuthz(t *testing.T) {
 
 func sidecarWorkload(peerAuthentications ...PeerAuthenticationView) WorkloadInput {
 	return WorkloadInput{
-		Ref:           workloadRef(),
-		Ports:         []int32{8080, 9090},
-		DataPlaneMode: ModeSidecar,
-		MeshDefaults:  knownMeshDefaults(),
-		PeerAuthN:     peerAuthentications,
+		Ref:                   workloadRef(),
+		Ports:                 []int32{8080, 9090},
+		DataPlaneMode:         ModeSidecar,
+		MeshDefaults:          knownMeshDefaults(),
+		PeerAuthN:             peerAuthentications,
+		DestinationRulesKnown: true,
 	}
 }
 

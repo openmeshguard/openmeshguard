@@ -50,7 +50,7 @@ type postureData struct {
 type mtlsData struct {
 	Effective              string
 	ByPort                 map[int32]resolver.MTLSEffective
-	ClientTLSContradiction bool
+	ClientTLSContradiction *bool
 }
 
 type authorizationData struct {
@@ -270,7 +270,9 @@ func evaluateBool(program cel.Program, activation map[string]any) (bool, error) 
 
 func assembleFinding(control Control, target evaluationTarget, status, confidence string) (Finding, error) {
 	remediation := control.Remediation
-	if remediation.SuggestedYAML != "" {
+	if status != statusOpen {
+		remediation.SuggestedYAML = ""
+	} else if remediation.SuggestedYAML != "" {
 		rendered, err := renderTemplate(control.ID+"-remediation", remediation.SuggestedYAML, target.templateData)
 		if err != nil {
 			return Finding{}, err
@@ -286,19 +288,41 @@ func assembleFinding(control Control, target evaluationTarget, status, confidenc
 		Status:          status,
 		Confidence:      confidence,
 		DataPlaneMode:   target.dataPlaneMode,
-		EvidenceSources: findingEvidence(control, target.evidence),
+		EvidenceSources: findingEvidence(control, target),
 		Resources:       []ResourceRef{target.resource},
 		ResolutionChain: resolutionChain(control, target.workload),
 		Remediation:     remediation,
 	}, nil
 }
 
-func findingEvidence(control Control, targetEvidence []string) []string {
-	evidence := append([]string(nil), targetEvidence...)
+func findingEvidence(control Control, target evaluationTarget) []string {
+	evidence := append([]string(nil), target.evidence...)
+	usesMTLS, usesAuthz := controlPostureDependencies(control)
+	if target.workload != nil && ((usesMTLS && target.workload.Posture.MTLS.Effective != resolver.MTLSUnknown) ||
+		(usesAuthz && target.workload.Posture.Authz.Effective != resolver.AuthzUnknown)) {
+		evidence = append(evidence, "istio-crd")
+	}
+	for _, step := range resolutionChain(control, target.workload) {
+		switch step.Kind {
+		case "PeerAuthentication", "DestinationRule", "AuthorizationPolicy":
+			evidence = append(evidence, "istio-crd")
+		}
+	}
 	if control.EvidenceType == "runtime" {
 		evidence = append(evidence, "prometheus")
 	}
 	return uniqueStrings(evidence)
+}
+
+func controlPostureDependencies(control Control) (usesMTLS, usesAuthz bool) {
+	paths := append([]string(nil), requiredPaths(control)...)
+	paths = append(paths, control.applicabilityPaths...)
+	paths = append(paths, control.expressionPaths...)
+	for _, path := range paths {
+		usesMTLS = usesMTLS || evidencePathHasPrefix(path, "workload.mtls")
+		usesAuthz = usesAuthz || evidencePathHasPrefix(path, "workload.authorization")
+	}
+	return usesMTLS, usesAuthz
 }
 
 func uniqueStrings(values []string) []string {
@@ -321,7 +345,7 @@ func deterministicFindingID(controlID string, target evaluationTarget) string {
 	identity := strings.Join([]string{
 		controlID,
 		target.cluster,
-		target.resource.APIVersion,
+		apiGroupFromAPIVersion(target.resource.APIVersion),
 		target.resource.Kind,
 		target.resource.Namespace,
 		target.resource.Name,
@@ -334,16 +358,7 @@ func resolutionChain(control Control, workload *WorkloadInput) []resolver.Step {
 	if workload == nil {
 		return nil
 	}
-	var paths []string
-	paths = append(paths, requiredPaths(control)...)
-	paths = append(paths, control.applicabilityPaths...)
-	paths = append(paths, control.expressionPaths...)
-	usesMTLS := false
-	usesAuthz := false
-	for _, path := range paths {
-		usesMTLS = usesMTLS || evidencePathHasPrefix(path, "workload.mtls")
-		usesAuthz = usesAuthz || evidencePathHasPrefix(path, "workload.authorization")
-	}
+	usesMTLS, usesAuthz := controlPostureDependencies(control)
 	var chain []resolver.Step
 	if usesMTLS {
 		chain = append(chain, workload.Posture.MTLS.Chain...)
@@ -415,7 +430,7 @@ func workloadTargets(input Input, params map[string]any) []evaluationTarget {
 			availability: availability,
 			resource:     ResourceRef{Kind: workload.Posture.Ref.Kind, Namespace: workload.Posture.Ref.Namespace, Name: workload.Posture.Ref.Name},
 			workload:     workload,
-			evidence:     []string{"kubernetes-api", "istio-crd"},
+			evidence:     []string{"kubernetes-api"},
 			templateData: messageData{
 				Workload:  name,
 				Namespace: namespace.Name,
@@ -531,6 +546,8 @@ func defaultResourceEvidence(apiVersion string) []string {
 	evidence := []string{"kubernetes-api"}
 	if strings.HasSuffix(apiGroupFromAPIVersion(apiVersion), "istio.io") {
 		evidence = append(evidence, "istio-crd")
+	} else if apiGroupFromAPIVersion(apiVersion) == "gateway.networking.k8s.io" {
+		evidence = append(evidence, "gateway-api")
 	}
 	return evidence
 }
@@ -553,7 +570,9 @@ func defaultWorkloadAvailability(workload WorkloadInput, namespace NamespaceInpu
 	if workload.Posture.MTLS.ByPort == nil {
 		setDefaultAvailability(availability, "workload.mtls.byPort", Availability{Reason: "workload ports unavailable"})
 	}
-	setDefaultAvailability(availability, "workload.mtls.clientTLSContradiction", Availability{Reason: "DestinationRule collection unavailable"})
+	if workload.Posture.MTLS.ClientTLSContradiction == nil {
+		setDefaultAvailability(availability, "workload.mtls.clientTLSContradiction", Availability{Reason: "DestinationRule collection unavailable"})
+	}
 	if workload.Posture.Authz.Effective == resolver.AuthzUnknown {
 		reason := workload.Posture.Authz.UnknownReason
 		if reason == "" {
@@ -601,8 +620,8 @@ func workloadValue(workload WorkloadInput, availability map[string]Availability)
 		}
 		mtls["byPort"] = byPort
 	}
-	if available(availability, "workload.mtls.clientTLSContradiction") {
-		mtls["clientTLSContradiction"] = workload.Posture.MTLS.ClientTLSContradiction
+	if available(availability, "workload.mtls.clientTLSContradiction") && workload.Posture.MTLS.ClientTLSContradiction != nil {
+		mtls["clientTLSContradiction"] = *workload.Posture.MTLS.ClientTLSContradiction
 	}
 	value["mtls"] = mtls
 
@@ -638,14 +657,21 @@ func workloadValue(workload WorkloadInput, availability map[string]Availability)
 func resolutionStepsValue(steps []resolver.Step) []any {
 	values := make([]any, 0, len(steps))
 	for _, step := range steps {
-		values = append(values, map[string]any{
-			"order":     step.Order,
-			"kind":      step.Kind,
-			"name":      step.Name,
-			"namespace": step.Namespace,
-			"field":     step.Field,
-			"effect":    step.Effect,
-		})
+		value := map[string]any{
+			"order":  step.Order,
+			"kind":   step.Kind,
+			"effect": step.Effect,
+		}
+		if step.Name != "" {
+			value["name"] = step.Name
+		}
+		if step.Namespace != "" {
+			value["namespace"] = step.Namespace
+		}
+		if step.Field != "" {
+			value["field"] = step.Field
+		}
+		values = append(values, value)
 	}
 	return values
 }

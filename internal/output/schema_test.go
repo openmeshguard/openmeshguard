@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/openmeshguard/openmeshguard/internal/collect"
+	"github.com/openmeshguard/openmeshguard/internal/engine"
 	"github.com/openmeshguard/openmeshguard/internal/normalize"
 	"github.com/openmeshguard/openmeshguard/internal/resolver"
 	"github.com/santhosh-tekuri/jsonschema/v6"
@@ -187,6 +188,47 @@ func TestGeneratedScanOutputMatchesSchema(t *testing.T) {
 	category := generated.Scores.Categories[0]
 	if category.Category != "mtls" || category.Grade != "F" || category.PassRate == nil || *category.PassRate != 0.5 {
 		t.Fatalf("generated category score = %#v, want real mtls F grade at 50%% pass rate", category)
+	}
+}
+
+func TestClientTLSContradictionOutputTracksDestinationRuleAvailability(t *testing.T) {
+	knownFalse := false
+	workloads := []resolver.WorkloadResult{
+		{
+			Ref:   resolver.WorkloadRef{Namespace: "payments", Name: "unavailable", Kind: "Deployment"},
+			Mode:  resolver.ModeSidecar,
+			MTLS:  resolver.MTLSResult{Effective: resolver.MTLSStrict, Chain: []resolver.Step{}},
+			Authz: resolver.AuthzResult{Effective: resolver.AuthzUnknown, Chain: []resolver.Step{}, UnknownReason: "not implemented"},
+		},
+		{
+			Ref:   resolver.WorkloadRef{Namespace: "payments", Name: "collected", Kind: "Deployment"},
+			Mode:  resolver.ModeSidecar,
+			MTLS:  resolver.MTLSResult{Effective: resolver.MTLSStrict, ClientTLSContradiction: &knownFalse, Chain: []resolver.Step{}},
+			Authz: resolver.AuthzResult{Effective: resolver.AuthzUnknown, Chain: []resolver.Step{}, UnknownReason: "not implemented"},
+		},
+	}
+	reportJSON, err := json.Marshal(buildReport(ScanInput{
+		ScannerVersion: "dev", ResolverVersion: resolver.New().Version(), ClusterContext: "fixture",
+		Scope: ScanScope{AllNamespaces: true}, Inventory: normalize.Inventory{Counts: map[string]int{}}, WorkloadPostures: workloads,
+	}, nil, engine.Result{}))
+	if err != nil {
+		t.Fatalf("marshal report: %v", err)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(reportJSON, &decoded); err != nil {
+		t.Fatalf("decode report: %v", err)
+	}
+	postures := decoded["workloadPostures"].([]any)
+	unavailableMTLS := postures[0].(map[string]any)["mtls"].(map[string]any)
+	if _, exists := unavailableMTLS["clientTLSContradiction"]; exists {
+		t.Fatalf("unavailable DestinationRule evidence emitted clientTLSContradiction: %#v", unavailableMTLS)
+	}
+	collectedMTLS := postures[1].(map[string]any)["mtls"].(map[string]any)
+	if value, exists := collectedMTLS["clientTLSContradiction"]; !exists || value != false {
+		t.Fatalf("collected DestinationRule evidence = %#v, want explicit false contradiction", collectedMTLS)
+	}
+	if err := compileSchemaForTest(t).Validate(decoded); err != nil {
+		t.Fatalf("availability-shaped report should match canonical schema: %v", err)
 	}
 }
 

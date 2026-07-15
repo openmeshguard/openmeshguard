@@ -180,14 +180,34 @@ controls:
     message: Client and server TLS contradict.
     remediation: {guidance: Correct DestinationRule TLS.}
 `)
-	customResult, err := Evaluate([]Pack{contradictionPack}, Input{Workloads: []WorkloadInput{
-		workloadWithMTLS(resolver.MTLSPermissive, nil),
-	}})
-	if err != nil {
-		t.Fatalf("Evaluate DestinationRule-dependent control: %v", err)
+	tests := []struct {
+		name          string
+		contradiction *bool
+		wantFindings  int
+		wantStatus    string
+	}{
+		{name: "unavailable is unknown", wantFindings: 1, wantStatus: statusUnknown},
+		{name: "collected false passes", contradiction: boolPointer(false)},
+		{name: "collected true fails", contradiction: boolPointer(true), wantFindings: 1, wantStatus: statusOpen},
 	}
-	if len(customResult.Findings) != 1 || customResult.Findings[0].Status != statusUnknown || !strings.Contains(customResult.Findings[0].UnknownReason, "DestinationRule collection unavailable") {
-		t.Fatalf("DestinationRule-dependent result = %#v, want explicit unknown", customResult)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			workload := workloadWithMTLS(resolver.MTLSPermissive, nil)
+			workload.Posture.MTLS.ClientTLSContradiction = tt.contradiction
+			customResult, err := Evaluate([]Pack{contradictionPack}, Input{Workloads: []WorkloadInput{workload}})
+			if err != nil {
+				t.Fatalf("Evaluate DestinationRule-dependent control: %v", err)
+			}
+			if len(customResult.Findings) != tt.wantFindings {
+				t.Fatalf("DestinationRule-dependent findings = %#v, want %d", customResult.Findings, tt.wantFindings)
+			}
+			if tt.wantFindings > 0 && customResult.Findings[0].Status != tt.wantStatus {
+				t.Fatalf("DestinationRule-dependent status = %q, want %q", customResult.Findings[0].Status, tt.wantStatus)
+			}
+			if tt.wantStatus == statusUnknown && !strings.Contains(customResult.Findings[0].UnknownReason, "DestinationRule collection unavailable") {
+				t.Fatalf("unknownReason = %q, want DestinationRule availability", customResult.Findings[0].UnknownReason)
+			}
+		})
 	}
 }
 
@@ -400,6 +420,9 @@ controls:
 		if finding.ControlID == "ACME-GW-001" && containsString(finding.EvidenceSources, "istio-crd") {
 			t.Fatalf("Gateway API evidence mislabeled as Istio CRD: %#v", finding.EvidenceSources)
 		}
+		if finding.ControlID == "ACME-GW-001" && !containsString(finding.EvidenceSources, "gateway-api") {
+			t.Fatalf("Gateway API evidence missing gateway-api source: %#v", finding.EvidenceSources)
+		}
 		if finding.ControlID == "ACME-GW-002" && !containsString(finding.EvidenceSources, "istio-crd") {
 			t.Fatalf("Istio Gateway evidence missing Istio CRD source: %#v", finding.EvidenceSources)
 		}
@@ -578,6 +601,99 @@ controls:
 	}
 }
 
+func TestSuggestedYAMLOnlyRendersForOpenFindings(t *testing.T) {
+	pack := decodePackForTest(t, `
+apiVersion: openmeshguard.io/v1alpha1
+kind: ControlPack
+metadata: {name: remediation-status, version: 1.0.0}
+controls:
+  - id: ACME-GOV-001
+    title: Owner must be platform
+    category: governance
+    severity: medium
+    evidenceType: context
+    scope: namespace
+    requires: [params.owner, params.applies]
+    applicability: 'params.applies == true'
+    expression: 'false'
+    message: 'Namespace {{ .Namespace }} has the wrong owner.'
+    remediation: {guidance: Set the owner.}
+`)
+	pack.Controls[0].Remediation.SuggestedYAML = "owner: {{ .Params.owner }}"
+	tests := []struct {
+		name       string
+		params     map[string]any
+		wantStatus string
+		wantYAML   string
+	}{
+		{name: "unknown does not render missing parameter", wantStatus: statusUnknown},
+		{name: "not applicable omits suggested YAML", params: map[string]any{"owner": "platform", "applies": false}, wantStatus: statusNotApplicable},
+		{name: "open renders suggested YAML", params: map[string]any{"owner": "platform", "applies": true}, wantStatus: statusOpen, wantYAML: "owner: platform"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := Evaluate([]Pack{pack}, Input{Namespaces: []NamespaceInput{{Name: "payments"}}, Params: tt.params})
+			if err != nil {
+				t.Fatalf("Evaluate returned error: %v", err)
+			}
+			if len(result.Findings) != 1 || result.Findings[0].Status != tt.wantStatus {
+				t.Fatalf("findings = %#v, want status %q", result.Findings, tt.wantStatus)
+			}
+			if result.Findings[0].Remediation.SuggestedYAML != tt.wantYAML {
+				t.Fatalf("suggested YAML = %q, want %q", result.Findings[0].Remediation.SuggestedYAML, tt.wantYAML)
+			}
+		})
+	}
+}
+
+func TestEvidenceSourcesDescribeEvidenceActuallyUsed(t *testing.T) {
+	contextPack := decodePackForTest(t, `
+apiVersion: openmeshguard.io/v1alpha1
+kind: ControlPack
+metadata: {name: context-evidence, version: 1.0.0}
+controls:
+  - id: ACME-GOV-001
+    title: Team must be platform
+    category: governance
+    severity: medium
+    evidenceType: context
+    scope: workload
+    requires: [namespace.labels.team]
+    applicability: 'true'
+    expression: 'namespace.labels.team == "platform"'
+    message: Wrong team.
+    remediation: {guidance: Correct the label.}
+`)
+	contextWorkload := workloadWithMTLS(resolver.MTLSStrict, nil)
+	contextWorkload.Namespace.Labels = map[string]string{"team": "payments"}
+	contextResult, err := Evaluate([]Pack{contextPack}, Input{Workloads: []WorkloadInput{contextWorkload}})
+	if err != nil {
+		t.Fatalf("evaluate context control: %v", err)
+	}
+	if len(contextResult.Findings) != 1 || containsString(contextResult.Findings[0].EvidenceSources, "istio-crd") {
+		t.Fatalf("context evidence sources = %#v, want Kubernetes API only", contextResult.Findings)
+	}
+
+	builtins, err := LoadBuiltins()
+	if err != nil {
+		t.Fatalf("load built-ins: %v", err)
+	}
+	mtlsResult, err := Evaluate([]Pack{packWithControl(t, builtins, "MG-MTLS-001")}, Input{Workloads: []WorkloadInput{workloadWithMTLS(resolver.MTLSPermissive, nil)}})
+	if err != nil {
+		t.Fatalf("evaluate mTLS control: %v", err)
+	}
+	if len(mtlsResult.Findings) != 1 || !containsString(mtlsResult.Findings[0].EvidenceSources, "istio-crd") {
+		t.Fatalf("mTLS evidence sources = %#v, want Istio CRD", mtlsResult.Findings)
+	}
+	unknownResult, err := Evaluate([]Pack{packWithControl(t, builtins, "MG-MTLS-001")}, Input{Workloads: []WorkloadInput{unknownWorkload("PeerAuthentication unavailable")}})
+	if err != nil {
+		t.Fatalf("evaluate unknown mTLS control: %v", err)
+	}
+	if len(unknownResult.Findings) != 1 || containsString(unknownResult.Findings[0].EvidenceSources, "istio-crd") {
+		t.Fatalf("unknown mTLS evidence sources = %#v, want unavailable source omitted", unknownResult.Findings)
+	}
+}
+
 func TestCanonicalAuthorizationFieldsAndCombinedChain(t *testing.T) {
 	pack := decodePackForTest(t, `
 apiVersion: openmeshguard.io/v1alpha1
@@ -747,23 +863,40 @@ kind: ControlPack
 metadata: {name: chain-shape, version: 1.0.0}
 controls:
   - id: ACME-MTLS-001
-    title: PeerAuthentication must contribute to resolution
+    title: Default resolution steps omit resource-only fields
     category: mtls
     severity: high
     evidenceType: config
     scope: workload
     requires: [mtls.chain]
     applicability: 'true'
-    expression: 'workload.mtls.chain.exists(step, step.kind == "PeerAuthentication" && step.order == 1)'
-    message: 'Workload {{ .Workload }} has no PeerAuthentication resolution step.'
+    expression: 'workload.mtls.chain.exists(step, step.kind == "MeshConfigDefault" && step.order == 1 && !has(step.name) && !has(step.namespace))'
+    message: 'Workload {{ .Workload }} has an invalid default resolution step.'
     remediation: {guidance: Restore policy evidence.}
 `)
-	result, err := Evaluate([]Pack{pack}, Input{Workloads: []WorkloadInput{workloadWithMTLS(resolver.MTLSStrict, nil)}})
+	workload := workloadWithMTLS(resolver.MTLSStrict, nil)
+	workload.Posture.MTLS.Chain = []resolver.Step{{Order: 1, Kind: "MeshConfigDefault", Effect: "uses the mesh default"}}
+	result, err := Evaluate([]Pack{pack}, Input{Workloads: []WorkloadInput{workload}})
 	if err != nil {
 		t.Fatalf("Evaluate returned error: %v", err)
 	}
 	if len(result.Findings) != 0 || len(result.Scores) != 1 || result.Scores[0].Grade != "A" {
 		t.Fatalf("result = %#v, want CEL-compatible chain pass", result)
+	}
+}
+
+func TestDeterministicFindingIDIgnoresServedAPIVersion(t *testing.T) {
+	target := evaluationTarget{cluster: "cluster-a", resource: ResourceRef{
+		APIVersion: "gateway.networking.k8s.io/v1beta1", Kind: "Gateway", Namespace: "ingress", Name: "public",
+	}}
+	first := deterministicFindingID("ACME-GW-001", target)
+	target.resource.APIVersion = "gateway.networking.k8s.io/v1"
+	if second := deterministicFindingID("ACME-GW-001", target); second != first {
+		t.Fatalf("finding ID changed across served versions: %q and %q", first, second)
+	}
+	target.resource.APIVersion = "networking.istio.io/v1"
+	if otherGroup := deterministicFindingID("ACME-GW-001", target); otherGroup == first {
+		t.Fatalf("finding ID %q did not distinguish API groups", otherGroup)
 	}
 }
 
@@ -824,4 +957,8 @@ func notInMeshWorkload() WorkloadInput {
 	workload.Posture.Mode = resolver.ModeNotApplicable
 	workload.Posture.MTLS.Chain = []resolver.Step{{Order: 1, Kind: "DataPlane", Effect: "not enrolled"}}
 	return workload
+}
+
+func boolPointer(value bool) *bool {
+	return &value
 }

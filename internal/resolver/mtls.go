@@ -97,9 +97,14 @@ func (ResolverV1) ResolveMTLS(in WorkloadInput) MTLSResult {
 		return unknownMTLS(ambientDisableUnsupportedReason)
 	}
 
-	chain, contradiction, err := applyDestinationRules(chain, effective, byPort, in.Ports, in.DestRules)
-	if err != nil {
-		return unknownMTLS(err.Error())
+	var contradiction *bool
+	if in.DestinationRulesKnown {
+		resolvedChain, resolvedContradiction, err := applyDestinationRules(chain, effective, byPort, in.Ports, in.DestRules)
+		if err != nil {
+			return unknownMTLS(err.Error())
+		}
+		chain = resolvedChain
+		contradiction = &resolvedContradiction
 	}
 
 	return MTLSResult{
@@ -585,9 +590,8 @@ func orderChain(chain []Step) []Step {
 
 func unknownMTLS(reason string) MTLSResult {
 	return MTLSResult{
-		Effective:              MTLSUnknown,
-		ClientTLSContradiction: false,
-		Chain:                  []Step{},
-		UnknownReason:          reason,
+		Effective:     MTLSUnknown,
+		Chain:         []Step{},
+		UnknownReason: reason,
 	}
 }

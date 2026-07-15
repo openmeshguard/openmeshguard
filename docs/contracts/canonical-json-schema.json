@@ -257,7 +257,7 @@
               "type": "object",
               "additionalProperties": { "enum": ["strict", "permissive", "disabled", "unknown"] }
             },
-            "clientTLSContradiction": { "type": "boolean", "description": "True when a DestinationRule client TLS setting contradicts the server-side declared posture." },
+            "clientTLSContradiction": { "type": "boolean", "description": "When DestinationRule evidence was collected, true if a client TLS setting contradicts the server-side declared posture and false otherwise. Omitted when DestinationRule evidence was unavailable." },
             "chain": { "type": "array", "items": { "$ref": "#/$defs/ResolutionStep" } },
             "unknownReason": { "type": "string", "minLength": 1, "description": "Required when effective is unknown: which input/permission was missing." }
           }
