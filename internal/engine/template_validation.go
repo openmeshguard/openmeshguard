@@ -167,6 +167,11 @@ func templateNodeType(node parse.Node, dotType reflect.Type, variables map[strin
 		}
 		fieldType, err := templateSelectorType(baseType, typed.Field)
 		return fieldType, true, err
+	case *parse.PipeNode:
+		if len(typed.Cmds) != 1 || len(typed.Cmds[0].Args) != 1 {
+			return nil, false, nil
+		}
+		return templateNodeType(typed.Cmds[0].Args[0], dotType, variables)
 	default:
 		return nil, false, nil
 	}

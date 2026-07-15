@@ -309,7 +309,7 @@ controls:
 		{"ACME-INV-001"},
 		{"ACME-ENV-001", "ACME-INV-001"},
 		{"MG-MTLS-001", "MG-MTLS-002", "MG-MTLS-003"},
-		{"ACME-GOV-002", "MG-MTLS-001", "MG-MTLS-002", "MG-MTLS-003"},
+		{"ACME-ENV-001", "ACME-GOV-002", "ACME-INV-001", "MG-MTLS-001", "MG-MTLS-002", "MG-MTLS-003"},
 	}
 	for index := range want {
 		if strings.Join(got[index].AffectedControls, ",") != strings.Join(want[index], ",") {

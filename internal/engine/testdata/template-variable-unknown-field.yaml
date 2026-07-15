@@ -13,6 +13,6 @@ controls:
     requires: [workload.workload.name]
     applicability: 'true'
     expression: 'false'
-    message: '{{$p := .Posture}}{{$p.Mtlls.Effective}}'
+    message: '{{$p := (.Posture)}}{{$p.Mtlls.Effective}}'
     remediation:
       guidance: Correct the template selector.

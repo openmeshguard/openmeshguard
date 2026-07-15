@@ -462,16 +462,18 @@ func namespaceTargets(input Input, params map[string]any) []evaluationTarget {
 	for _, namespace := range namespaces {
 		seen[namespace.Name] = struct{}{}
 	}
-	for _, workload := range input.Workloads {
-		namespace := workload.Namespace
-		if namespace.Name == "" {
-			namespace.Name = workload.Posture.Ref.Namespace
+	if !input.NamespaceTargetsComplete {
+		for _, workload := range input.Workloads {
+			namespace := workload.Namespace
+			if namespace.Name == "" {
+				namespace.Name = workload.Posture.Ref.Namespace
+			}
+			if _, exists := seen[namespace.Name]; exists {
+				continue
+			}
+			seen[namespace.Name] = struct{}{}
+			namespaces = append(namespaces, namespace)
 		}
-		if _, exists := seen[namespace.Name]; exists {
-			continue
-		}
-		seen[namespace.Name] = struct{}{}
-		namespaces = append(namespaces, namespace)
 	}
 	targets := make([]evaluationTarget, 0, len(namespaces))
 	for _, namespace := range namespaces {

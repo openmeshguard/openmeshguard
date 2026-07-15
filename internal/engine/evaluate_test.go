@@ -339,6 +339,46 @@ controls:
 	}
 }
 
+func TestCompleteNamespaceTargetsDoNotBackfillWorkloadContext(t *testing.T) {
+	pack := decodePackForTest(t, `
+apiVersion: openmeshguard.io/v1alpha1
+kind: ControlPack
+metadata: {name: complete-namespace-targets, version: 1.0.0}
+controls:
+  - id: ACME-GOV-001
+    title: Namespace target must be explicit
+    category: governance
+    severity: medium
+    evidenceType: context
+    scope: namespace
+    requires: [namespace.name]
+    applicability: 'true'
+    expression: 'false'
+    message: Namespace was evaluated.
+    remediation: {guidance: Correct the namespace.}
+`)
+	workload := workloadWithMTLS(resolver.MTLSNotInMesh, nil)
+	workload.Namespace = NamespaceInput{Name: "outside-mesh"}
+	result, err := Evaluate([]Pack{pack}, Input{
+		Workloads:                []WorkloadInput{workload},
+		NamespaceTargetsComplete: true,
+	})
+	if err != nil {
+		t.Fatalf("Evaluate returned error: %v", err)
+	}
+	if len(result.Findings) != 0 || len(result.Scores) != 1 || result.Scores[0].Evaluated != 0 {
+		t.Fatalf("result = %#v, want no workload-derived namespace target", result)
+	}
+
+	derived, err := Evaluate([]Pack{pack}, Input{Workloads: []WorkloadInput{workload}})
+	if err != nil {
+		t.Fatalf("Evaluate with namespace derivation returned error: %v", err)
+	}
+	if len(derived.Findings) != 1 || derived.Findings[0].Status != statusOpen {
+		t.Fatalf("derived result = %#v, want legacy workload-context backfill", derived)
+	}
+}
+
 func TestEquivalentGatewayControlsStaySourceNative(t *testing.T) {
 	pack := decodePackForTest(t, `
 apiVersion: openmeshguard.io/v1alpha1

@@ -113,12 +113,16 @@ type ResourceInput struct {
 // Input is the complete evaluation input. Inventory and Params are dynamic
 // maps because their contract-backed shapes expand in later milestones.
 type Input struct {
-	Workloads             []WorkloadInput
-	Namespaces            []NamespaceInput
-	Resources             []ResourceInput
-	Inventory             map[string]any
-	InventoryAvailability map[string]Availability
-	Params                map[string]any
+	Workloads  []WorkloadInput
+	Namespaces []NamespaceInput
+	// NamespaceTargetsComplete prevents namespace-scope evaluation from
+	// deriving additional targets from workload context. The scan path sets it
+	// after selecting mesh and unknown-enrollment namespaces.
+	NamespaceTargetsComplete bool
+	Resources                []ResourceInput
+	Inventory                map[string]any
+	InventoryAvailability    map[string]Availability
+	Params                   map[string]any
 }
 
 type ResourceRef struct {
