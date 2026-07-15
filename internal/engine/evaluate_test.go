@@ -599,6 +599,31 @@ controls:
 	if len(result.Findings) != 1 || !strings.Contains(result.Findings[0].Reasoning, "15m") || !strings.Contains(result.Findings[0].Reasoning, "payments/client") {
 		t.Fatalf("findings = %#v, want rendered Verified fields", result.Findings)
 	}
+	if !containsString(result.Findings[0].EvidenceSources, "prometheus") {
+		t.Fatalf("open runtime evidence sources = %#v, want prometheus", result.Findings[0].EvidenceSources)
+	}
+
+	for _, tt := range []struct {
+		name     string
+		workload WorkloadInput
+		status   string
+	}{
+		{name: "unknown telemetry", workload: workloadWithMTLS(resolver.MTLSStrict, nil), status: statusUnknown},
+		{name: "not applicable before telemetry", workload: notInMeshWorkload(), status: statusNotApplicable},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := Evaluate([]Pack{pack}, Input{Workloads: []WorkloadInput{tt.workload}})
+			if err != nil {
+				t.Fatalf("Evaluate returned error: %v", err)
+			}
+			if len(result.Findings) != 1 || result.Findings[0].Status != tt.status {
+				t.Fatalf("findings = %#v, want %q", result.Findings, tt.status)
+			}
+			if containsString(result.Findings[0].EvidenceSources, "prometheus") {
+				t.Fatalf("unevaluated runtime evidence sources = %#v, want prometheus omitted", result.Findings[0].EvidenceSources)
+			}
+		})
+	}
 }
 
 func TestSuggestedYAMLOnlyRendersForOpenFindings(t *testing.T) {

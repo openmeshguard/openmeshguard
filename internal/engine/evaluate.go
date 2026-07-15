@@ -288,14 +288,14 @@ func assembleFinding(control Control, target evaluationTarget, status, confidenc
 		Status:          status,
 		Confidence:      confidence,
 		DataPlaneMode:   target.dataPlaneMode,
-		EvidenceSources: findingEvidence(control, target),
+		EvidenceSources: findingEvidence(control, target, status),
 		Resources:       []ResourceRef{target.resource},
 		ResolutionChain: resolutionChain(control, target.workload),
 		Remediation:     remediation,
 	}, nil
 }
 
-func findingEvidence(control Control, target evaluationTarget) []string {
+func findingEvidence(control Control, target evaluationTarget, status string) []string {
 	evidence := append([]string(nil), target.evidence...)
 	usesMTLS, usesAuthz := controlPostureDependencies(control)
 	if target.workload != nil && ((usesMTLS && target.workload.Posture.MTLS.Effective != resolver.MTLSUnknown) ||
@@ -308,7 +308,7 @@ func findingEvidence(control Control, target evaluationTarget) []string {
 			evidence = append(evidence, "istio-crd")
 		}
 	}
-	if control.EvidenceType == "runtime" {
+	if control.EvidenceType == "runtime" && status == statusOpen {
 		evidence = append(evidence, "prometheus")
 	}
 	return uniqueStrings(evidence)

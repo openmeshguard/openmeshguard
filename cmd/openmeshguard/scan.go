@@ -142,7 +142,7 @@ func runScan(ctx context.Context, info versionInfo, opts scanOptions, stdout io.
 	}
 	evaluated, err := engine.Evaluate(packs, engine.Input{
 		Workloads:             engineWorkloads,
-		Namespaces:            engineNamespaces,
+		Namespaces:            meshNamespaceInputs(engineNamespaces),
 		InventoryAvailability: inventoryAvailability(snapshot),
 		Inventory: map[string]any{
 			"counts": normalized.Inventory.Counts,
@@ -258,6 +258,16 @@ func workloadEnrollmentObservation(workload resolver.WorkloadInput) resolver.Tri
 	}
 }
 
+func meshNamespaceInputs(namespaces []engine.NamespaceInput) []engine.NamespaceInput {
+	out := make([]engine.NamespaceInput, 0, len(namespaces))
+	for _, namespace := range namespaces {
+		if namespace.MeshEnrollment != "not-enrolled" {
+			out = append(out, namespace)
+		}
+	}
+	return out
+}
+
 func mergeMeshEnrollment(current string, observed resolver.Tristate) string {
 	switch observed {
 	case resolver.True:
@@ -324,6 +334,7 @@ func permissionEvidenceImpact(permission collect.Permission) ([]string, []string
 		return paths, []string{"namespace"}
 	case "/pods":
 		paths = append(paths, "workload.dataPlaneMode", "workload.mtls")
+		return paths, []string{"workload"}
 	case "apps/deployments", "apps/replicasets", "apps/statefulsets", "apps/daemonsets":
 		return paths, []string{"workload"}
 	case "security.istio.io/peerauthentications":

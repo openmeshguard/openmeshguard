@@ -136,7 +136,7 @@ func TestControlsValidateCommand(t *testing.T) {
 
 func TestNamespaceInputsIncludeNamespacesWithoutWorkloads(t *testing.T) {
 	snapshot := collect.Snapshot{Namespaces: []corev1.Namespace{
-		{ObjectMeta: metav1.ObjectMeta{Name: "empty", Labels: map[string]string{"team": "platform"}}},
+		{ObjectMeta: metav1.ObjectMeta{Name: "empty", Labels: map[string]string{"team": "platform", "istio-injection": "enabled"}}},
 		{ObjectMeta: metav1.ObjectMeta{Name: "payments", Labels: map[string]string{"istio-injection": "enabled"}}},
 	}}
 	workloads := []resolver.WorkloadInput{{
@@ -150,6 +150,18 @@ func TestNamespaceInputsIncludeNamespacesWithoutWorkloads(t *testing.T) {
 	}
 	if got[0].Labels["team"] != "platform" || got[1].MeshEnrollment != "enrolled" {
 		t.Fatalf("namespace inputs lost labels or resolver enrollment: %#v", got)
+	}
+}
+
+func TestMeshNamespaceInputsExcludeOnlyKnownNonMeshNamespaces(t *testing.T) {
+	got := meshNamespaceInputs([]engine.NamespaceInput{
+		{Name: "mesh", MeshEnrollment: "enrolled"},
+		{Name: "outside", MeshEnrollment: "not-enrolled"},
+		{Name: "uncertain", MeshEnrollment: "unknown"},
+		{Name: "unobserved"},
+	})
+	if len(got) != 3 || got[0].Name != "mesh" || got[1].Name != "uncertain" || got[2].Name != "unobserved" {
+		t.Fatalf("mesh namespace inputs = %#v, want enrolled and unknown namespaces only", got)
 	}
 }
 
@@ -267,6 +279,17 @@ controls:
     expression: 'namespace.labels.team != ""'
     message: Namespace team is unavailable.
     remediation: {guidance: Add a team label.}
+  - id: ACME-GOV-002
+    title: Workload names must be present
+    category: governance
+    severity: low
+    evidenceType: context
+    scope: workload
+    requires: [workload.workload.name]
+    applicability: 'true'
+    expression: 'workload.workload.name != ""'
+    message: Workload name is unavailable.
+    remediation: {guidance: Restore workload collection.}
 `)
 	if err := os.WriteFile(packPath, packData, 0o600); err != nil {
 		t.Fatalf("write permission pack: %v", err)
@@ -279,12 +302,14 @@ controls:
 		{Resource: "services", Granted: false},
 		{Resource: "namespaces", Granted: false},
 		{APIGroup: "security.istio.io", Resource: "peerauthentications", Granted: false},
+		{Resource: "pods", Granted: false},
 	}
 	got := permissionSummaryWithControls(permissions, packs)
 	want := [][]string{
 		{"ACME-INV-001"},
 		{"ACME-ENV-001", "ACME-INV-001"},
 		{"MG-MTLS-001", "MG-MTLS-002", "MG-MTLS-003"},
+		{"ACME-GOV-002", "MG-MTLS-001", "MG-MTLS-002", "MG-MTLS-003"},
 	}
 	for index := range want {
 		if strings.Join(got[index].AffectedControls, ",") != strings.Join(want[index], ",") {
