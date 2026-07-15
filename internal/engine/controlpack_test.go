@@ -2,6 +2,7 @@ package engine
 
 import (
 	"io/fs"
+	"os"
 	"path/filepath"
 	"reflect"
 	"sort"
@@ -107,6 +108,11 @@ func TestValidateFileRejections(t *testing.T) {
 			name:     "dynamic CEL result must be known boolean",
 			fixture:  "dynamic-non-bool.yaml",
 			contains: []string{"dynamic-non-bool.yaml:", "control ACME-GOV-001", "expression CEL expression must return bool, got dyn"},
+		},
+		{
+			name:     "message selector must exist",
+			fixture:  "template-unknown-field.yaml",
+			contains: []string{"template-unknown-field.yaml:", "control ACME-GOV-001", "message template is invalid", "field Worklod does not exist"},
 		},
 		{
 			name:     "null contract headers",
@@ -391,6 +397,70 @@ func TestBuiltinMTLSCatalogMetadata(t *testing.T) {
 			}
 			if !reflect.DeepEqual(control.Frameworks, wantFrameworks) {
 				t.Fatalf("frameworks = %#v, want %#v", control.Frameworks, wantFrameworks)
+			}
+		})
+	}
+}
+
+func TestUserSuggestedYAMLTemplateValidation(t *testing.T) {
+	tests := []struct {
+		name          string
+		template      string
+		symlinkEscape bool
+		wantError     string
+	}{
+		{name: "static selector typo", template: "namespace: {{ .Namespce }}", wantError: "field Namespce does not exist"},
+		{name: "symlink escape", symlinkEscape: true, wantError: "resolved path escapes the control pack directory"},
+		{name: "dynamic params selector", template: "owner: {{ .Params.owner }}"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			directory := t.TempDir()
+			templatePath := filepath.Join(directory, "remediation.tmpl")
+			if tt.symlinkEscape {
+				outside := filepath.Join(t.TempDir(), "outside.tmpl")
+				if err := os.WriteFile(outside, []byte("secret material"), 0o600); err != nil {
+					t.Fatalf("write outside template: %v", err)
+				}
+				if err := os.Symlink(outside, templatePath); err != nil {
+					t.Skipf("create template symlink: %v", err)
+				}
+			} else if err := os.WriteFile(templatePath, []byte(tt.template), 0o600); err != nil {
+				t.Fatalf("write template: %v", err)
+			}
+
+			packPath := filepath.Join(directory, "pack.yaml")
+			pack := `apiVersion: openmeshguard.io/v1alpha1
+kind: ControlPack
+metadata: {name: template-validation, version: 1.0.0}
+controls:
+  - id: ACME-GOV-001
+    title: Template validation
+    category: governance
+    severity: medium
+    evidenceType: context
+    scope: namespace
+    requires: [namespace.name]
+    applicability: 'true'
+    expression: 'namespace.name != ""'
+    message: 'Namespace {{ .Namespace }} failed.'
+    remediation:
+      guidance: Correct the namespace.
+      suggestedYAMLTemplate: remediation.tmpl
+`
+			if err := os.WriteFile(packPath, []byte(pack), 0o600); err != nil {
+				t.Fatalf("write pack: %v", err)
+			}
+			err := ValidateFile(packPath)
+			if tt.wantError == "" {
+				if err != nil {
+					t.Fatalf("ValidateFile returned error: %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tt.wantError) {
+				t.Fatalf("ValidateFile error = %v, want %q", err, tt.wantError)
 			}
 		})
 	}

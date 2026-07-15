@@ -11,7 +11,6 @@ import (
 	"regexp"
 	"sort"
 	"strings"
-	"text/template"
 
 	"github.com/google/cel-go/cel"
 	"github.com/google/cel-go/ext"
@@ -314,7 +313,7 @@ func validateControl(file string, node *yaml.Node, control *Control, source Sour
 	}
 
 	if strings.TrimSpace(control.Message) != "" {
-		if _, err := template.New(control.ID).Option("missingkey=error").Parse(control.Message); err != nil {
+		if _, err := parseValidatedTemplate(control.ID, control.Message); err != nil {
 			issues = append(issues, issueAt(file, controlID, mappingValue(node, "message"), fmt.Sprintf("message template is invalid: %v", err)))
 		}
 	}
@@ -424,19 +423,38 @@ func loadRemediationTemplates(file string, root *yaml.Node, pack *Pack) validati
 		if pack.Source == SourceBuiltin {
 			data, err = fs.ReadFile(builtincontrols.BuiltinFS, path.Join("templates", filepath.ToSlash(clean)))
 		} else {
-			data, err = os.ReadFile(filepath.Join(filepath.Dir(file), clean))
+			data, err = readUserRemediationTemplate(file, clean)
 		}
 		if err != nil {
 			issues = append(issues, issueAt(file, control.ID, location, fmt.Sprintf("read suggestedYAMLTemplate %q: %v", reference, err)))
 			continue
 		}
-		if _, err := template.New(control.ID + "-remediation").Option("missingkey=error").Parse(string(data)); err != nil {
+		if _, err := parseValidatedTemplate(control.ID+"-remediation", string(data)); err != nil {
 			issues = append(issues, issueAt(file, control.ID, location, fmt.Sprintf("suggestedYAMLTemplate %q is invalid: %v", reference, err)))
 			continue
 		}
 		control.Remediation.SuggestedYAML = string(data)
 	}
 	return issues
+}
+
+func readUserRemediationTemplate(packFile, reference string) ([]byte, error) {
+	packDirectory, err := filepath.EvalSymlinks(filepath.Dir(packFile))
+	if err != nil {
+		return nil, fmt.Errorf("resolve control pack directory: %w", err)
+	}
+	templatePath, err := filepath.EvalSymlinks(filepath.Join(packDirectory, reference))
+	if err != nil {
+		return nil, err
+	}
+	relative, err := filepath.Rel(packDirectory, templatePath)
+	if err != nil {
+		return nil, fmt.Errorf("resolve template path relative to control pack: %w", err)
+	}
+	if relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+		return nil, fmt.Errorf("resolved path escapes the control pack directory")
+	}
+	return os.ReadFile(templatePath)
 }
 
 func validateDependenciesRequire(file, controlID string, node *yaml.Node, field string, paths, declared []string) validationErrors {
