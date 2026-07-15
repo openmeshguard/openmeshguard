@@ -79,3 +79,4 @@ Exception matching (M6 with context inputs), runtime controls (M7), authz contro
 - Additional adversarial validation fixtures prove lexer recovery cannot alter CEL, nested dynamic non-booleans cannot reach scan time, and selectors through typed template variables are checked during pack load.
 - Resource tests prove API group and Kind are matched together, a same-Kind resource from another API is never evaluated, paired Gateway objectives retain parity, and findings preserve the native source API version.
 - Generated-output tests prove unavailable DestinationRule evidence omits `clientTLSContradiction`, while completed collection emits an explicit boolean. Permission tests prove affected control IDs come from the built-in and user packs actually loaded for the scan.
+- The nonvisual closeout review/fix cycle completed with a clean final pass over the corrective commit; no accepted or actionable findings remain.
