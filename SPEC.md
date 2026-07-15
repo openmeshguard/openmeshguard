@@ -358,12 +358,13 @@ Prefix changed to `MG-`. Each control declares its evidence type: `config` (decl
 
 | Control ID | Type | Control |
 | --- | --- | --- |
-| MG-MTLS-001 | config | Production workloads must have effective strict mTLS (resolved, not per-resource). |
-| MG-MTLS-002 | config | Mesh-wide policy must not permit plaintext in production without exception. |
-| MG-MTLS-003 | config | Workloads must not have mTLS disabled (including via DestinationRule TLS contradiction) without approved exception. |
+| MG-MTLS-001 | config | Production mesh-managed workloads must resolve to effective strict mTLS. |
+| MG-MTLS-002 | config | Every declared, Service-bound workload port must resolve to strict mTLS. |
+| MG-MTLS-003 | config | Workloads must never resolve to globally disabled mTLS. |
 | MG-MTLS-004 | context | Namespaces transitioning to strict mTLS must have migration status and owner. |
 | MG-MTLS-005 | config | Ambient namespaces must have explicitly validated L4 mTLS posture. |
 | MG-MTLS-006 | config | Ambient workloads must have healthy ztunnel coverage on every scheduled node. |
+| MG-MTLS-007 | config | Client TLS configuration must not contradict resolved server mTLS. |
 | MG-MTLS-101 | runtime | No plaintext traffic observed to mesh workloads within the lookback window. |
 | MG-MTLS-102 | runtime | Verified mTLS share of observed inbound traffic per workload. |
 

@@ -359,6 +359,38 @@ func TestBuiltinSuggestedYAMLTemplateIsEmbedded(t *testing.T) {
 	}
 }
 
+func TestBuiltinMTLSCatalogMetadata(t *testing.T) {
+	packs, err := LoadBuiltins()
+	if err != nil {
+		t.Fatalf("LoadBuiltins returned error: %v", err)
+	}
+
+	wantFrameworks := []string{
+		"nist-csf-2.0/PR.DS-02",
+		"owasp-k8s-2025/K05",
+	}
+	tests := []struct {
+		id    string
+		title string
+	}{
+		{id: "MG-MTLS-001", title: "Mesh-managed workloads must resolve to strict mTLS"},
+		{id: "MG-MTLS-002", title: "Declared workload ports must resolve to strict mTLS"},
+		{id: "MG-MTLS-003", title: "Workloads must never resolve to globally disabled mTLS"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.id, func(t *testing.T) {
+			control := packWithControl(t, packs, tt.id).Controls[0]
+			if control.Title != tt.title {
+				t.Fatalf("title = %q, want %q", control.Title, tt.title)
+			}
+			if !reflect.DeepEqual(control.Frameworks, wantFrameworks) {
+				t.Fatalf("frameworks = %#v, want %#v", control.Frameworks, wantFrameworks)
+			}
+		})
+	}
+}
+
 func TestUnknownWorkloadIdentityFieldsAreNotTreatedAsStructural(t *testing.T) {
 	_, err := decodeAndValidate("unknown-identity.yaml", []byte(`
 apiVersion: openmeshguard.io/v1alpha1

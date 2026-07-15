@@ -5,7 +5,7 @@ metadata:
   version: 0.1.0
 controls:
   - id: MG-MTLS-001
-    title: Mesh workloads must have effective strict mTLS
+    title: Mesh-managed workloads must resolve to strict mTLS
     category: mtls
     severity: high
     evidenceType: config
@@ -24,11 +24,11 @@ controls:
         then inspect the attached resolution chain.
       suggestedYAMLTemplate: peerauthentication-strict.tmpl
     frameworks:
-      - nist-csf-2.0/PR.DS
-      - owasp-k8s/K01
+      - nist-csf-2.0/PR.DS-02
+      - owasp-k8s-2025/K05
 
   - id: MG-MTLS-002
-    title: Workload ports must not permit plaintext
+    title: Declared workload ports must resolve to strict mTLS
     category: mtls
     severity: high
     evidenceType: config
@@ -43,14 +43,14 @@ controls:
       declared workload ports.
     remediation:
       guidance: >-
-        Correct workload-level port mTLS overrides so every declared port
-        resolves to STRICT.
+        Correct workload-level port mTLS overrides so every declared,
+        Service-bound workload port resolves to STRICT.
     frameworks:
-      - nist-csf-2.0/PR.DS
-      - owasp-k8s/K01
+      - nist-csf-2.0/PR.DS-02
+      - owasp-k8s-2025/K05
 
   - id: MG-MTLS-003
-    title: Workloads must not have disabled mTLS
+    title: Workloads must never resolve to globally disabled mTLS
     category: mtls
     severity: critical
     evidenceType: config
@@ -67,5 +67,5 @@ controls:
         Apply or correct PeerAuthentication so the workload no longer resolves
         to DISABLE, then inspect the attached resolution chain.
     frameworks:
-      - nist-csf-2.0/PR.DS
-      - owasp-k8s/K01
+      - nist-csf-2.0/PR.DS-02
+      - owasp-k8s-2025/K05

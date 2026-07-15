@@ -12,7 +12,7 @@ metadata:
   version: 0.1.0
 controls:
   - id: MG-MTLS-001
-    title: Production workloads must have effective strict mTLS
+    title: Mesh-managed workloads must resolve to strict mTLS
     category: mtls                # mtls | authz | exposure | governance | lifecycle
     severity: high                # critical | high | medium | low | info
     evidenceType: config          # config | runtime | context
@@ -29,11 +29,11 @@ controls:
     remediation:
       guidance: >-
         Apply or correct PeerAuthentication so the workload resolves to STRICT,
-        and check for DestinationRule TLS contradictions in the resolution chain.
+        then inspect the attached resolution chain.
       suggestedYAMLTemplate: peerauthentication-strict.tmpl
     frameworks:                   # tags only, never compliance claims
-      - nist-csf-2.0/PR.DS
-      - owasp-k8s/K01
+      - nist-csf-2.0/PR.DS-02
+      - owasp-k8s-2025/K05
 ```
 
 ## Semantics (binding on the engine)
