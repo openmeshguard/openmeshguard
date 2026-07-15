@@ -443,22 +443,16 @@ func loadRemediationTemplates(file string, root *yaml.Node, pack *Pack) validati
 }
 
 func readUserRemediationTemplate(packFile, reference string) ([]byte, error) {
-	packDirectory, err := filepath.EvalSymlinks(filepath.Dir(packFile))
+	file, err := os.OpenInRoot(filepath.Dir(packFile), reference)
 	if err != nil {
-		return nil, fmt.Errorf("resolve control pack directory: %w", err)
+		return nil, fmt.Errorf("open template within control pack directory: %w", err)
 	}
-	templatePath, err := filepath.EvalSymlinks(filepath.Join(packDirectory, reference))
+	defer file.Close()
+	data, err := io.ReadAll(file)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("read template within control pack directory: %w", err)
 	}
-	relative, err := filepath.Rel(packDirectory, templatePath)
-	if err != nil {
-		return nil, fmt.Errorf("resolve template path relative to control pack: %w", err)
-	}
-	if relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
-		return nil, fmt.Errorf("resolved path escapes the control pack directory")
-	}
-	return os.ReadFile(templatePath)
+	return data, nil
 }
 
 func validateDependenciesRequire(file, controlID string, node *yaml.Node, field string, paths, declared []string) validationErrors {

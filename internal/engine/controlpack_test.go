@@ -461,7 +461,7 @@ func TestUserSuggestedYAMLTemplateValidation(t *testing.T) {
 		wantError     string
 	}{
 		{name: "static selector typo", template: "namespace: {{ .Namespce }}", wantError: "field Namespce does not exist"},
-		{name: "symlink escape", symlinkEscape: true, wantError: "resolved path escapes the control pack directory"},
+		{name: "symlink escape", symlinkEscape: true, wantError: "open template within control pack directory"},
 		{name: "dynamic params selector", template: "owner: {{ .Params.owner }}"},
 	}
 
