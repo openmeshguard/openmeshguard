@@ -1,0 +1,21 @@
+apiVersion: openmeshguard.io/v1alpha1
+kind: ControlPack
+metadata:
+  name: resource-empty-api-groups
+  version: 1.0.0
+controls:
+  - id: ACME-GW-001
+    title: Resource controls require an API group value
+    category: exposure
+    severity: medium
+    evidenceType: config
+    scope: resource
+    match:
+      apiGroups: []
+      kinds: [Gateway]
+    requires: [resource.name]
+    applicability: 'true'
+    expression: 'resource.name != ""'
+    message: Resource match is incomplete.
+    remediation:
+      guidance: Add the source API group.

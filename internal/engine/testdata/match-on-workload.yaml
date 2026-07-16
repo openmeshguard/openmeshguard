@@ -1,0 +1,21 @@
+apiVersion: openmeshguard.io/v1alpha1
+kind: ControlPack
+metadata:
+  name: match-on-workload
+  version: 1.0.0
+controls:
+  - id: ACME-GOV-001
+    title: Workload controls cannot match resources
+    category: governance
+    severity: medium
+    evidenceType: context
+    scope: workload
+    match:
+      apiGroups: [gateway.networking.k8s.io]
+      kinds: [Gateway]
+    requires: [workload.workload.name]
+    applicability: 'true'
+    expression: 'workload.workload.name != ""'
+    message: Invalid workload match.
+    remediation:
+      guidance: Remove the resource match.

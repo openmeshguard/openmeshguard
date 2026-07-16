@@ -1,0 +1,18 @@
+apiVersion: openmeshguard.io/v1alpha1
+kind: ControlPack
+metadata:
+  name: non-bool
+  version: 1.0.0
+controls:
+  - id: ACME-MTLS-001
+    title: Non-boolean expression
+    category: mtls
+    severity: high
+    evidenceType: config
+    scope: workload
+    requires: [mtls.effective]
+    applicability: 'true'
+    expression: '"not bool"'
+    message: Non-boolean expression.
+    remediation:
+      guidance: Return a boolean.

@@ -1,0 +1,30 @@
+apiVersion: openmeshguard.io/v1alpha1
+kind: ControlPack
+metadata:
+  name: duplicate-in-pack
+  version: 1.0.0
+controls:
+  - id: ACME-MTLS-001
+    title: First duplicate
+    category: mtls
+    severity: high
+    evidenceType: config
+    scope: workload
+    requires: [mtls.effective]
+    applicability: 'true'
+    expression: 'workload.mtls.effective == "strict"'
+    message: First duplicate.
+    remediation:
+      guidance: Remove one duplicate.
+  - id: ACME-MTLS-001
+    title: Second duplicate
+    category: mtls
+    severity: high
+    evidenceType: config
+    scope: workload
+    requires: [mtls.effective]
+    applicability: 'true'
+    expression: 'workload.mtls.effective != "disabled"'
+    message: Second duplicate.
+    remediation:
+      guidance: Remove one duplicate.

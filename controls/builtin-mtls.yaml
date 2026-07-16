@@ -1,0 +1,71 @@
+apiVersion: openmeshguard.io/v1alpha1
+kind: ControlPack
+metadata:
+  name: builtin-mtls
+  version: 0.1.0
+controls:
+  - id: MG-MTLS-001
+    title: Mesh-managed workloads must resolve to strict mTLS
+    category: mtls
+    severity: high
+    evidenceType: config
+    scope: workload
+    environments: []
+    requires:
+      - mtls.effective
+    applicability: 'workload.dataPlaneMode != "not-applicable"'
+    expression: 'workload.mtls.effective == "strict"'
+    message: >-
+      Effective mTLS for {{ .Workload }} resolves to
+      {{ .Posture.Mtls.Effective }}, not strict.
+    remediation:
+      guidance: >-
+        Apply or correct PeerAuthentication so the workload resolves to STRICT,
+        then inspect the attached resolution chain.
+      suggestedYAMLTemplate: peerauthentication-strict.tmpl
+    frameworks:
+      - nist-csf-2.0/PR.DS-02
+      - owasp-k8s-2025/K05
+
+  - id: MG-MTLS-002
+    title: Declared workload ports must resolve to strict mTLS
+    category: mtls
+    severity: high
+    evidenceType: config
+    scope: workload
+    environments: []
+    requires:
+      - mtls.byPort
+    applicability: 'workload.dataPlaneMode != "not-applicable"'
+    expression: '!workload.mtls.byPort.exists(port, workload.mtls.byPort[port] == "permissive" || workload.mtls.byPort[port] == "disabled")'
+    message: >-
+      Effective mTLS for {{ .Workload }} permits plaintext on one or more
+      declared workload ports.
+    remediation:
+      guidance: >-
+        Correct workload-level port mTLS overrides so every declared,
+        Service-bound workload port resolves to STRICT.
+    frameworks:
+      - nist-csf-2.0/PR.DS-02
+      - owasp-k8s-2025/K05
+
+  - id: MG-MTLS-003
+    title: Workloads must never resolve to globally disabled mTLS
+    category: mtls
+    severity: critical
+    evidenceType: config
+    scope: workload
+    environments: []
+    requires:
+      - mtls.effective
+    applicability: 'workload.dataPlaneMode != "not-applicable"'
+    expression: 'workload.mtls.effective != "disabled"'
+    message: >-
+      Effective mTLS for {{ .Workload }} is disabled.
+    remediation:
+      guidance: >-
+        Apply or correct PeerAuthentication so the workload no longer resolves
+        to DISABLE, then inspect the attached resolution chain.
+    frameworks:
+      - nist-csf-2.0/PR.DS-02
+      - owasp-k8s-2025/K05

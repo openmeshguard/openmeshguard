@@ -1,0 +1,18 @@
+apiVersion: openmeshguard.io/v1alpha1
+kind: ControlPack
+metadata:
+  name: runtime-no-verified
+  version: 1.0.0
+controls:
+  - id: ACME-MTLS-101
+    title: Runtime control missing verified requirement
+    category: mtls
+    severity: critical
+    evidenceType: runtime
+    scope: workload
+    requires: [mtls.effective]
+    applicability: 'true'
+    expression: 'workload.mtls.effective == "strict"'
+    message: Runtime control is malformed.
+    remediation:
+      guidance: Require a verified field.

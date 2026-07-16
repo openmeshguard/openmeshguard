@@ -1,0 +1,19 @@
+apiVersion: openmeshguard.io/v1alpha1
+kind: ControlPack
+metadata:
+  name: unknown-field
+  version: 1.0.0
+controls:
+  - id: ACME-MTLS-001
+    title: Unknown field
+    category: mtls
+    severity: high
+    evidenceType: config
+    scope: workload
+    requires: [mtls.effective]
+    applicability: 'true'
+    expression: 'workload.mtls.effective == "strict"'
+    message: Unknown field.
+    remediation:
+      guidance: Remove the unknown field.
+      typo: true

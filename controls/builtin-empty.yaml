@@ -1,6 +1,0 @@
-apiVersion: openmeshguard.io/v1alpha1
-kind: ControlPack
-metadata:
-  name: builtin-empty
-  version: 0.0.0
-controls: []

@@ -1,15 +1,13 @@
 package output
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
-	"strings"
 	"time"
 
 	"github.com/openmeshguard/openmeshguard/internal/collect"
+	"github.com/openmeshguard/openmeshguard/internal/engine"
 	"github.com/openmeshguard/openmeshguard/internal/normalize"
 	"github.com/openmeshguard/openmeshguard/internal/resolver"
 )
@@ -36,15 +34,31 @@ type ScanInput struct {
 
 // WriteScanJSON writes an indented canonical JSON report.
 func WriteScanJSON(w io.Writer, input ScanInput) error {
+	packs, err := engine.LoadPacks(nil)
+	if err != nil {
+		return fmt.Errorf("load built-in control packs: %w", err)
+	}
+	evaluated, err := engine.Evaluate(packs, defaultEngineInput(input))
+	if err != nil {
+		return fmt.Errorf("evaluate built-in controls: %w", err)
+	}
+	return WriteScanJSONWithEvaluation(w, input, packs, evaluated)
+}
+
+// WriteScanJSONWithEvaluation writes a report using an already-computed rule
+// engine result. The scan command uses this path so repeatable user packs and
+// producer-specific availability facts are preserved without changing the
+// frozen canonical JSON shape.
+func WriteScanJSONWithEvaluation(w io.Writer, input ScanInput, packs []engine.Pack, evaluated engine.Result) error {
 	encoder := json.NewEncoder(w)
 	encoder.SetIndent("", "  ")
-	if err := encoder.Encode(buildReport(input)); err != nil {
+	if err := encoder.Encode(buildReport(input, packs, evaluated)); err != nil {
 		return fmt.Errorf("encode canonical report: %w", err)
 	}
 	return nil
 }
 
-func buildReport(input ScanInput) report {
+func buildReport(input ScanInput, packs []engine.Pack, evaluated engine.Result) report {
 	generatedAt := input.GeneratedAt
 	if generatedAt.IsZero() {
 		generatedAt = time.Now().UTC()
@@ -56,11 +70,7 @@ func buildReport(input ScanInput) report {
 		Scanner: scanner{
 			Version:         input.ScannerVersion,
 			ResolverVersion: input.ResolverVersion,
-			ControlPacks: []controlPack{{
-				Name:    "builtin-empty",
-				Version: "0.0.0",
-				Source:  "builtin",
-			}},
+			ControlPacks:    controlPacks(packs),
 		},
 		Scan: scan{
 			ClusterContext: input.ClusterContext,
@@ -78,10 +88,37 @@ func buildReport(input ScanInput) report {
 		PermissionSummary: permissionSummary(input.PermissionSummary),
 		Inventory:         inventory(input.Inventory),
 		WorkloadPostures:  workloadPostures(input.WorkloadPostures),
-		Findings:          provisionalFindings(input.WorkloadPostures),
+		Findings:          findings(evaluated.Findings),
 		Scores: scores{
 			Overall:    nil,
-			Categories: []scoreCategory{},
+			Categories: scoreCategories(evaluated.Scores),
+		},
+	}
+}
+
+func defaultEngineInput(input ScanInput) engine.Input {
+	workloads := make([]engine.WorkloadInput, 0, len(input.WorkloadPostures))
+	for _, posture := range input.WorkloadPostures {
+		workloads = append(workloads, engine.WorkloadInput{
+			Posture: posture,
+			Namespace: engine.NamespaceInput{
+				Name: posture.Ref.Namespace,
+			},
+		})
+	}
+	return engine.Input{
+		Workloads: workloads,
+		Inventory: map[string]any{
+			"counts": input.Inventory.Counts,
+			"dataPlane": map[string]any{
+				"mode": string(input.Inventory.DataPlaneMode),
+			},
+			"multiCluster": map[string]any{
+				"participationDetected": input.Inventory.MultiCluster.ParticipationDetected,
+				"evaluated":             false,
+				"signals":               input.Inventory.MultiCluster.Signals,
+				"meshNetworks":          input.Inventory.MultiCluster.MeshNetworks,
+			},
 		},
 	}
 }
@@ -135,111 +172,66 @@ func inventory(input normalize.Inventory) inventorySummary {
 	}
 }
 
-// PROVISIONAL: replaced by CEL engine in M3.
-func provisionalFindings(workloads []resolver.WorkloadResult) []finding {
-	findings := []finding{}
-	for _, workload := range workloads {
-		dataPlaneUnavailable := workload.Mode == resolver.ModeUnknown ||
-			workload.Mode == resolver.ModeMixed ||
-			workload.Mode == resolver.ModeNotApplicable
-		status := "open"
-		confidence := "resolved"
-		var unknownReasons []string
-		var title, reasoning string
-		switch workload.MTLS.Effective {
-		case resolver.MTLSPermissive:
-			title = "Effective mTLS is permissive"
-			reasoning = fmt.Sprintf(
-				"%s/%s resolves to PERMISSIVE mTLS, so plaintext may be accepted by the workload.",
-				workload.Ref.Namespace,
-				workload.Ref.Name,
-			)
-		case resolver.MTLSDisabled:
-			title = "Effective mTLS is disabled"
-			reasoning = fmt.Sprintf(
-				"%s/%s resolves to DISABLED mTLS, so plaintext is accepted by the workload.",
-				workload.Ref.Namespace,
-				workload.Ref.Name,
-			)
-		case resolver.MTLSUnknown:
-			status = "unknown"
-			confidence = "unavailable"
-			title = "Effective mTLS is unknown"
-			reasoning = fmt.Sprintf(
-				"%s/%s mTLS posture could not be fully resolved.",
-				workload.Ref.Namespace,
-				workload.Ref.Name,
-			)
-			if workload.MTLS.UnknownReason != "" {
-				unknownReasons = append(unknownReasons, workload.MTLS.UnknownReason)
-			}
-		default:
-			if !dataPlaneUnavailable {
-				continue
-			}
-			status = "unknown"
-			confidence = "unavailable"
-			title = "Effective mTLS is unknown"
-			reasoning = fmt.Sprintf(
-				"%s/%s mTLS posture could not be fully resolved.",
-				workload.Ref.Namespace,
-				workload.Ref.Name,
-			)
-		}
-		if dataPlaneUnavailable {
-			status = "unknown"
-			confidence = "unavailable"
-			unknownReasons = append(unknownReasons, "data plane membership unavailable")
-		}
-		unknownReason := strings.Join(uniqueStrings(unknownReasons), "; ")
-		if status == "unknown" {
-			reasoning = fmt.Sprintf("%s/%s mTLS posture could not be fully resolved.", workload.Ref.Namespace, workload.Ref.Name)
-		}
-		findings = append(findings, finding{
-			ID:            findingID("MG-MTLS-001", workload.Ref),
-			ControlID:     "MG-MTLS-001",
-			Title:         title,
-			Severity:      "medium",
-			EvidenceType:  "config",
-			Status:        status,
-			Confidence:    confidence,
-			DataPlaneMode: string(workload.Mode),
-			EvidenceSources: []string{
-				"kubernetes-api",
-				"istio-crd",
-			},
-			Resources: []resourceRef{{
-				Kind:      workload.Ref.Kind,
-				Namespace: workload.Ref.Namespace,
-				Name:      workload.Ref.Name,
-			}},
-			ResolutionChain: workload.MTLS.Chain,
-			Reasoning:       reasoning,
-			UnknownReason:   unknownReason,
-		})
-	}
-	return findings
-}
-
-func uniqueStrings(values []string) []string {
-	seen := map[string]struct{}{}
-	out := make([]string, 0, len(values))
-	for _, value := range values {
-		if value == "" {
-			continue
-		}
-		if _, ok := seen[value]; ok {
-			continue
-		}
-		seen[value] = struct{}{}
-		out = append(out, value)
+func controlPacks(packs []engine.Pack) []controlPack {
+	provenance := engine.ProvenanceFor(packs)
+	out := make([]controlPack, 0, len(provenance))
+	for _, pack := range provenance {
+		out = append(out, controlPack{Name: pack.Name, Version: pack.Version, Source: pack.Source})
 	}
 	return out
 }
 
-func findingID(controlID string, workload resolver.WorkloadRef) string {
-	hash := sha256.Sum256([]byte(controlID + "|" + workload.Namespace + "|" + workload.Kind + "|" + workload.Name))
-	return controlID + "-" + hex.EncodeToString(hash[:])[:12]
+func findings(input []engine.Finding) []finding {
+	out := make([]finding, 0, len(input))
+	for _, item := range input {
+		resources := make([]resourceRef, 0, len(item.Resources))
+		for _, resource := range item.Resources {
+			resources = append(resources, resourceRef{
+				APIVersion: resource.APIVersion,
+				Kind:       resource.Kind,
+				Namespace:  resource.Namespace,
+				Name:       resource.Name,
+			})
+		}
+		var findingRemediation *remediation
+		if item.Remediation.Guidance != "" || item.Remediation.SuggestedYAML != "" {
+			findingRemediation = &remediation{
+				Guidance:      item.Remediation.Guidance,
+				SuggestedYAML: item.Remediation.SuggestedYAML,
+			}
+		}
+		out = append(out, finding{
+			ID:              item.ID,
+			ControlID:       item.ControlID,
+			Title:           item.Title,
+			Severity:        item.Severity,
+			EvidenceType:    item.EvidenceType,
+			Status:          item.Status,
+			Confidence:      item.Confidence,
+			DataPlaneMode:   item.DataPlaneMode,
+			EvidenceSources: append([]string(nil), item.EvidenceSources...),
+			Resources:       resources,
+			ResolutionChain: append([]resolver.Step(nil), item.ResolutionChain...),
+			Reasoning:       item.Reasoning,
+			Remediation:     findingRemediation,
+			UnknownReason:   item.UnknownReason,
+		})
+	}
+	return out
+}
+
+func scoreCategories(input []engine.CategoryScore) []scoreCategory {
+	out := make([]scoreCategory, 0, len(input))
+	for _, item := range input {
+		out = append(out, scoreCategory{
+			Category:  item.Category,
+			Grade:     item.Grade,
+			PassRate:  item.PassRate,
+			Evaluated: item.Evaluated,
+			Unknown:   item.Unknown,
+		})
+	}
+	return out
 }
 
 type report struct {
@@ -326,7 +318,13 @@ type finding struct {
 	Resources       []resourceRef   `json:"resources"`
 	ResolutionChain []resolver.Step `json:"resolutionChain,omitempty"`
 	Reasoning       string          `json:"reasoning"`
+	Remediation     *remediation    `json:"remediation,omitempty"`
 	UnknownReason   string          `json:"unknownReason,omitempty"`
+}
+
+type remediation struct {
+	Guidance      string `json:"guidance,omitempty"`
+	SuggestedYAML string `json:"suggestedYAML,omitempty"`
 }
 
 type resourceRef struct {
@@ -342,7 +340,9 @@ type scores struct {
 }
 
 type scoreCategory struct {
-	Category string   `json:"category"`
-	Grade    string   `json:"grade"`
-	PassRate *float64 `json:"passRate"`
+	Category  string   `json:"category"`
+	Grade     string   `json:"grade"`
+	PassRate  *float64 `json:"passRate"`
+	Evaluated int      `json:"evaluated,omitempty"`
+	Unknown   int      `json:"unknown,omitempty"`
 }

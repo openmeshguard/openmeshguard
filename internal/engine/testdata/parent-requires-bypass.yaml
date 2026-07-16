@@ -1,0 +1,18 @@
+apiVersion: openmeshguard.io/v1alpha1
+kind: ControlPack
+metadata:
+  name: parent-requires-bypass
+  version: 1.0.0
+controls:
+  - id: ACME-MTLS-001
+    title: Parent requires cannot hide unknown children
+    category: mtls
+    severity: high
+    evidenceType: config
+    scope: workload
+    requires: [workload.mtls]
+    applicability: 'true'
+    expression: 'has(workload.mtls.effective)'
+    message: Effective posture is missing.
+    remediation:
+      guidance: Restore posture evidence.

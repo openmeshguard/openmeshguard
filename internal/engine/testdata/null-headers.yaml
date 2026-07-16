@@ -1,0 +1,18 @@
+apiVersion: null
+kind: null
+metadata:
+  name: null-headers
+  version: 1.0.0
+controls:
+  - id: ACME-MTLS-001
+    title: Null headers must be rejected
+    category: mtls
+    severity: high
+    evidenceType: config
+    scope: workload
+    requires: [mtls.effective]
+    applicability: 'true'
+    expression: 'workload.mtls.effective == "strict"'
+    message: Invalid pack.
+    remediation:
+      guidance: Fix the pack headers.

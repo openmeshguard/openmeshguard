@@ -4,131 +4,147 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/openmeshguard/openmeshguard/internal/engine"
 	"github.com/openmeshguard/openmeshguard/internal/resolver"
 )
 
-func TestProvisionalFindings(t *testing.T) {
+func TestEngineFindingsReplaceProvisionalPathEndToEnd(t *testing.T) {
+	packs, err := engine.LoadBuiltins()
+	if err != nil {
+		t.Fatalf("load built-ins: %v", err)
+	}
+
 	tests := []struct {
-		name              string
-		workload          resolver.WorkloadResult
-		wantFindings      int
-		wantStatus        string
-		wantConfidence    string
-		wantUnknownReason string
+		name         string
+		workload     engine.WorkloadInput
+		wantCount    int
+		wantStatuses map[string]string
 	}{
 		{
-			name: "permissive mTLS with unknown data plane emits unknown finding",
-			workload: resolver.WorkloadResult{
-				Ref:  resolver.WorkloadRef{Namespace: "payments", Name: "api", Kind: "Deployment"},
-				Mode: resolver.ModeUnknown,
-				MTLS: resolver.MTLSResult{
-					Effective:              resolver.MTLSPermissive,
-					ClientTLSContradiction: false,
-					Chain:                  []resolver.Step{{Order: 1, Kind: "MeshConfigDefault", Effect: "default"}},
+			name: "mixed by port produces explicit open findings",
+			workload: engine.WorkloadInput{
+				Posture: workloadPosture(
+					resolver.ModeSidecar,
+					resolver.MTLSMixedByPort,
+					map[int32]resolver.MTLSEffective{8080: resolver.MTLSStrict, 9090: resolver.MTLSDisabled},
+				),
+				Namespace: engine.NamespaceInput{Name: "payments"},
+				Availability: map[string]engine.Availability{
+					"mtls.clientTLSContradiction": {Available: true},
 				},
 			},
-			wantFindings:      1,
-			wantStatus:        "unknown",
-			wantConfidence:    "unavailable",
-			wantUnknownReason: "data plane membership unavailable",
+			wantCount: 2,
+			wantStatuses: map[string]string{
+				"MG-MTLS-001": "open",
+				"MG-MTLS-002": "open",
+			},
 		},
 		{
-			name: "unknown mTLS emits unknown finding",
-			workload: resolver.WorkloadResult{
-				Ref:  resolver.WorkloadRef{Namespace: "payments", Name: "api", Kind: "Deployment"},
-				Mode: resolver.ModeSidecar,
-				MTLS: resolver.MTLSResult{
-					Effective:     resolver.MTLSUnknown,
-					UnknownReason: "PeerAuthentication resources unavailable",
-					Chain:         []resolver.Step{},
-				},
+			name: "not in mesh produces only not-applicable findings",
+			workload: engine.WorkloadInput{
+				Posture:   workloadPosture(resolver.ModeNotApplicable, resolver.MTLSNotInMesh, nil),
+				Namespace: engine.NamespaceInput{Name: "payments"},
 			},
-			wantFindings:      1,
-			wantStatus:        "unknown",
-			wantConfidence:    "unavailable",
-			wantUnknownReason: "PeerAuthentication resources unavailable",
+			wantCount: 3,
+			wantStatuses: map[string]string{
+				"MG-MTLS-001": "not-applicable",
+				"MG-MTLS-002": "not-applicable",
+				"MG-MTLS-003": "not-applicable",
+			},
 		},
 		{
-			name: "disabled mTLS emits open finding",
-			workload: resolver.WorkloadResult{
-				Ref:  resolver.WorkloadRef{Namespace: "payments", Name: "api", Kind: "Deployment"},
-				Mode: resolver.ModeSidecar,
-				MTLS: resolver.MTLSResult{
-					Effective: resolver.MTLSDisabled,
-					Chain:     []resolver.Step{{Order: 1, Kind: "PeerAuthentication", Effect: "sets DISABLE"}},
-				},
+			name: "confirmed disabled posture retains critical finding without unwired producers",
+			workload: engine.WorkloadInput{
+				Posture:   workloadPosture(resolver.ModeSidecar, resolver.MTLSDisabled, nil),
+				Namespace: engine.NamespaceInput{Name: "payments"},
 			},
-			wantFindings:   1,
-			wantStatus:     "open",
-			wantConfidence: "resolved",
-		},
-		{
-			name: "strict mTLS emits no provisional permissive finding",
-			workload: resolver.WorkloadResult{
-				Ref:  resolver.WorkloadRef{Namespace: "payments", Name: "api", Kind: "Deployment"},
-				Mode: resolver.ModeSidecar,
-				MTLS: resolver.MTLSResult{
-					Effective: resolver.MTLSStrict,
-					Chain:     []resolver.Step{{Order: 1, Kind: "PeerAuthentication", Effect: "sets STRICT"}},
-				},
+			wantCount: 3,
+			wantStatuses: map[string]string{
+				"MG-MTLS-001": "open",
+				"MG-MTLS-002": "unknown",
+				"MG-MTLS-003": "open",
 			},
-			wantFindings: 0,
-		},
-		{
-			name: "strict mTLS with unknown data plane emits unknown finding",
-			workload: resolver.WorkloadResult{
-				Ref:  resolver.WorkloadRef{Namespace: "payments", Name: "api", Kind: "Deployment"},
-				Mode: resolver.ModeUnknown,
-				MTLS: resolver.MTLSResult{
-					Effective: resolver.MTLSStrict,
-					Chain:     []resolver.Step{{Order: 1, Kind: "PeerAuthentication", Effect: "sets STRICT"}},
-				},
-			},
-			wantFindings:      1,
-			wantStatus:        "unknown",
-			wantConfidence:    "unavailable",
-			wantUnknownReason: "data plane membership unavailable",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			evaluated, err := engine.Evaluate(packs, engine.Input{Workloads: []engine.WorkloadInput{tt.workload}})
+			if err != nil {
+				t.Fatalf("evaluate controls: %v", err)
+			}
 			report := buildReport(ScanInput{
-				ScannerVersion:  "dev",
-				ResolverVersion: resolver.New().Version(),
-				ClusterContext:  "fixture",
-				Scope:           ScanScope{AllNamespaces: true},
-				WorkloadPostures: []resolver.WorkloadResult{{
-					Ref:   tt.workload.Ref,
-					Mode:  tt.workload.Mode,
-					MTLS:  tt.workload.MTLS,
-					Authz: resolver.New().ResolveAuthz(resolver.WorkloadInput{}),
-				}},
-			})
-
-			if len(report.Findings) != tt.wantFindings {
-				t.Fatalf("findings = %d, want %d", len(report.Findings), tt.wantFindings)
+				ScannerVersion: "dev", ResolverVersion: resolver.New().Version(),
+				ClusterContext: "fixture", Scope: ScanScope{AllNamespaces: true},
+				WorkloadPostures: []resolver.WorkloadResult{tt.workload.Posture},
+			}, packs, evaluated)
+			if len(report.Findings) != tt.wantCount {
+				t.Fatalf("findings = %d, want %d: %#v", len(report.Findings), tt.wantCount, report.Findings)
 			}
-			if tt.wantFindings == 0 {
-				return
-			}
-
-			finding := report.Findings[0]
-			if finding.Status != tt.wantStatus {
-				t.Fatalf("status = %q, want %q", finding.Status, tt.wantStatus)
-			}
-			if finding.Confidence != tt.wantConfidence {
-				t.Fatalf("confidence = %q, want %q", finding.Confidence, tt.wantConfidence)
-			}
-			if tt.wantUnknownReason == "" {
-				if finding.UnknownReason != "" {
-					t.Fatalf("unknownReason = %q, want empty", finding.UnknownReason)
+			for _, finding := range report.Findings {
+				if finding.Status != tt.wantStatuses[finding.ControlID] {
+					t.Fatalf("%s status = %q, want %q", finding.ControlID, finding.Status, tt.wantStatuses[finding.ControlID])
 				}
-				return
-			}
-			if !strings.Contains(finding.UnknownReason, tt.wantUnknownReason) {
-				t.Fatalf("unknownReason = %q, want to contain %q", finding.UnknownReason, tt.wantUnknownReason)
+				if !strings.HasPrefix(finding.ID, finding.ControlID+"-") {
+					t.Fatalf("engine finding ID = %q, want control prefix", finding.ID)
+				}
+				if finding.Status == "unknown" && tt.wantStatuses[finding.ControlID] != "unknown" {
+					t.Fatalf("unexpected contradictory unknown finding: %#v", finding)
+				}
+				if finding.Status == "unknown" && finding.UnknownReason == "" {
+					t.Fatalf("unknown finding missing reason: %#v", finding)
+				}
+				if finding.ControlID == "MG-MTLS-001" && finding.Status == "open" {
+					if finding.Remediation == nil || !strings.Contains(finding.Remediation.SuggestedYAML, "namespace: payments") {
+						t.Fatalf("MG-MTLS-001 remediation = %#v, want rendered suggested YAML", finding.Remediation)
+					}
+				}
 			}
 		})
+	}
+}
+
+func TestDefaultOutputMakesUnwiredEvidenceUnknown(t *testing.T) {
+	posture := workloadPosture(resolver.ModeSidecar, resolver.MTLSPermissive, nil)
+	packs, err := engine.LoadBuiltins()
+	if err != nil {
+		t.Fatalf("load built-ins: %v", err)
+	}
+	evaluated, err := engine.Evaluate(packs, defaultEngineInput(ScanInput{WorkloadPostures: []resolver.WorkloadResult{posture}}))
+	if err != nil {
+		t.Fatalf("evaluate controls: %v", err)
+	}
+	report := buildReport(ScanInput{WorkloadPostures: []resolver.WorkloadResult{posture}}, packs, evaluated)
+	statuses := map[string]string{}
+	unknownReasons := map[string]string{}
+	for _, finding := range report.Findings {
+		statuses[finding.ControlID] = finding.Status
+		unknownReasons[finding.ControlID] = finding.UnknownReason
+	}
+	if statuses["MG-MTLS-001"] != "open" {
+		t.Fatalf("MG-MTLS-001 status = %q, want open", statuses["MG-MTLS-001"])
+	}
+	if statuses["MG-MTLS-002"] != "unknown" || unknownReasons["MG-MTLS-002"] == "" {
+		t.Fatalf("MG-MTLS-002 status/reason = %q/%q, want unknown with reason", statuses["MG-MTLS-002"], unknownReasons["MG-MTLS-002"])
+	}
+	if _, exists := statuses["MG-MTLS-003"]; exists {
+		t.Fatalf("MG-MTLS-003 status = %q, want no finding for known non-disabled posture", statuses["MG-MTLS-003"])
+	}
+}
+
+func workloadPosture(mode resolver.DataPlaneMode, effective resolver.MTLSEffective, byPort map[int32]resolver.MTLSEffective) resolver.WorkloadResult {
+	return resolver.WorkloadResult{
+		Ref:  resolver.WorkloadRef{Cluster: "cluster-a", Namespace: "payments", Name: "api", Kind: "Deployment"},
+		Mode: mode,
+		MTLS: resolver.MTLSResult{
+			Effective: effective,
+			ByPort:    byPort,
+			Chain:     []resolver.Step{{Order: 1, Kind: "PeerAuthentication", Namespace: "payments", Name: "default", Effect: "sets effective mTLS"}},
+		},
+		Authz: resolver.AuthzResult{
+			Effective:     resolver.AuthzUnknown,
+			Chain:         []resolver.Step{},
+			UnknownReason: "authorization resolver not yet implemented (M5)",
+		},
 	}
 }

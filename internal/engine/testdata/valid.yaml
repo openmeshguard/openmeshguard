@@ -1,0 +1,24 @@
+apiVersion: openmeshguard.io/v1alpha1
+kind: ControlPack
+metadata:
+  name: valid-user-pack
+  version: 1.0.0
+params:
+  requiredPrefix: prod-
+controls:
+  - id: ACME-GW-001
+    title: Gateway names must use the approved prefix
+    category: exposure
+    severity: medium
+    evidenceType: config
+    scope: resource
+    environments: []
+    match:
+      apiGroups: [gateway.networking.k8s.io]
+      kinds: [Gateway]
+    requires: [resource.name, params.requiredPrefix]
+    applicability: 'resource.kind == "Gateway"'
+    expression: 'resource.name.lowerAscii().startsWith(params.requiredPrefix)'
+    message: 'Gateway {{ .Resource }} does not use the approved prefix.'
+    remediation:
+      guidance: Rename the gateway to use the approved prefix.

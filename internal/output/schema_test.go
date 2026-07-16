@@ -2,12 +2,15 @@ package output
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/openmeshguard/openmeshguard/internal/collect"
+	"github.com/openmeshguard/openmeshguard/internal/engine"
 	"github.com/openmeshguard/openmeshguard/internal/normalize"
 	"github.com/openmeshguard/openmeshguard/internal/resolver"
 	"github.com/santhosh-tekuri/jsonschema/v6"
@@ -122,18 +125,110 @@ func TestGeneratedScanOutputMatchesSchema(t *testing.T) {
 			Mode:  workload.DataPlaneMode,
 			MTLS:  resolved.ResolveMTLS(workload),
 			Authz: resolved.ResolveAuthz(workload),
+		}, {
+			Ref: resolver.WorkloadRef{
+				Cluster: "cluster-a", Namespace: "legacy", Name: "outside-mesh", Kind: "Deployment",
+			},
+			Mode: resolver.ModeNotApplicable,
+			MTLS: resolver.MTLSResult{
+				Effective: resolver.MTLSNotInMesh,
+				Chain:     []resolver.Step{{Order: 1, Kind: "DataPlane", Effect: "workload is not enrolled"}},
+			},
+			Authz: resolved.ResolveAuthz(resolver.WorkloadInput{}),
 		}},
 	})
 	if err != nil {
 		t.Fatalf("write generated scan output: %v", err)
 	}
 
-	report, err := jsonschema.UnmarshalJSON(bytes.NewReader(output.Bytes()))
+	rawReport, err := jsonschema.UnmarshalJSON(bytes.NewReader(output.Bytes()))
 	if err != nil {
 		t.Fatalf("decode generated report: %v", err)
 	}
-	if err := schema.Validate(report); err != nil {
+	if err := schema.Validate(rawReport); err != nil {
 		t.Fatalf("generated report should match canonical schema: %v\n%s", err, output.String())
+	}
+
+	var generated report
+	if err := json.Unmarshal(output.Bytes(), &generated); err != nil {
+		t.Fatalf("decode generated report into output model: %v", err)
+	}
+	if len(generated.Findings) == 0 {
+		t.Fatal("generated report has no engine findings")
+	}
+	seenUnknown := false
+	seenNotApplicable := false
+	seenSuggestedYAML := false
+	for _, finding := range generated.Findings {
+		if !strings.HasPrefix(finding.ID, finding.ControlID+"-") {
+			t.Fatalf("finding ID %q does not use engine control prefix %q", finding.ID, finding.ControlID)
+		}
+		switch finding.Status {
+		case "unknown":
+			seenUnknown = true
+			if finding.UnknownReason == "" {
+				t.Fatalf("unknown finding %s missing unknownReason", finding.ID)
+			}
+		case "not-applicable":
+			seenNotApplicable = true
+		}
+		if finding.ControlID == "MG-MTLS-001" && finding.Remediation != nil && strings.Contains(finding.Remediation.SuggestedYAML, "kind: PeerAuthentication") {
+			seenSuggestedYAML = true
+		}
+	}
+	if !seenUnknown || !seenNotApplicable {
+		t.Fatalf("generated findings missing required shapes: unknown=%t not-applicable=%t", seenUnknown, seenNotApplicable)
+	}
+	if !seenSuggestedYAML {
+		t.Fatal("generated findings missing rendered suggestedYAML remediation")
+	}
+	if len(generated.Scores.Categories) != 1 {
+		t.Fatalf("score categories = %#v, want one mTLS category", generated.Scores.Categories)
+	}
+	category := generated.Scores.Categories[0]
+	if category.Category != "mtls" || category.Grade != "F" || category.PassRate == nil || *category.PassRate != 0.5 {
+		t.Fatalf("generated category score = %#v, want real mtls F grade at 50%% pass rate", category)
+	}
+}
+
+func TestClientTLSContradictionOutputTracksDestinationRuleAvailability(t *testing.T) {
+	knownFalse := false
+	workloads := []resolver.WorkloadResult{
+		{
+			Ref:   resolver.WorkloadRef{Namespace: "payments", Name: "unavailable", Kind: "Deployment"},
+			Mode:  resolver.ModeSidecar,
+			MTLS:  resolver.MTLSResult{Effective: resolver.MTLSStrict, Chain: []resolver.Step{}},
+			Authz: resolver.AuthzResult{Effective: resolver.AuthzUnknown, Chain: []resolver.Step{}, UnknownReason: "not implemented"},
+		},
+		{
+			Ref:   resolver.WorkloadRef{Namespace: "payments", Name: "collected", Kind: "Deployment"},
+			Mode:  resolver.ModeSidecar,
+			MTLS:  resolver.MTLSResult{Effective: resolver.MTLSStrict, ClientTLSContradiction: &knownFalse, Chain: []resolver.Step{}},
+			Authz: resolver.AuthzResult{Effective: resolver.AuthzUnknown, Chain: []resolver.Step{}, UnknownReason: "not implemented"},
+		},
+	}
+	reportJSON, err := json.Marshal(buildReport(ScanInput{
+		ScannerVersion: "dev", ResolverVersion: resolver.New().Version(), ClusterContext: "fixture",
+		Scope: ScanScope{AllNamespaces: true}, Inventory: normalize.Inventory{Counts: map[string]int{}}, WorkloadPostures: workloads,
+	}, nil, engine.Result{}))
+	if err != nil {
+		t.Fatalf("marshal report: %v", err)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(reportJSON, &decoded); err != nil {
+		t.Fatalf("decode report: %v", err)
+	}
+	postures := decoded["workloadPostures"].([]any)
+	unavailableMTLS := postures[0].(map[string]any)["mtls"].(map[string]any)
+	if _, exists := unavailableMTLS["clientTLSContradiction"]; exists {
+		t.Fatalf("unavailable DestinationRule evidence emitted clientTLSContradiction: %#v", unavailableMTLS)
+	}
+	collectedMTLS := postures[1].(map[string]any)["mtls"].(map[string]any)
+	if value, exists := collectedMTLS["clientTLSContradiction"]; !exists || value != false {
+		t.Fatalf("collected DestinationRule evidence = %#v, want explicit false contradiction", collectedMTLS)
+	}
+	if err := compileSchemaForTest(t).Validate(decoded); err != nil {
+		t.Fatalf("availability-shaped report should match canonical schema: %v", err)
 	}
 }
 

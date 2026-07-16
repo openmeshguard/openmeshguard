@@ -4,7 +4,7 @@
 // resolver. Move it to internal/resolver/ during M0 scaffolding; from then on,
 // changes to exported types in this file require human approval.
 //
-// The current mTLS semantics tag is mtls/v1. Bump it whenever mTLS
+// The current mTLS semantics tag is mtls/v2. Bump it whenever mTLS
 // precedence, inheritance, contradiction, or unknown propagation semantics
 // change, and add or update table coverage for the changed behavior.
 //
@@ -80,9 +80,12 @@ type WorkloadInput struct {
 	MeshDefaults  MeshDefaults
 	PeerAuthN     []PeerAuthenticationView // all PAs whose scope includes this workload
 	DestRules     []DestinationRuleView    // DRs whose host selection targets this workload's services
-	AuthzPolicies []AuthorizationPolicyView
-	Waypoint      *WaypointView // nil when no waypoint serves this workload
-	ZtunnelOnNode Tristate      // ambient: ztunnel health on the workload's node(s)
+	// DestinationRulesKnown distinguishes a completed collection with no
+	// matching DestinationRules from unavailable DestinationRule evidence.
+	DestinationRulesKnown bool
+	AuthzPolicies         []AuthorizationPolicyView
+	Waypoint              *WaypointView // nil when no waypoint serves this workload
+	ZtunnelOnNode         Tristate      // ambient: ztunnel health on the workload's node(s)
 }
 
 type WorkloadRef struct {
@@ -154,7 +157,7 @@ type WaypointView struct {
 type MTLSResult struct {
 	Effective              MTLSEffective           `json:"effective"`
 	ByPort                 map[int32]MTLSEffective `json:"byPort,omitempty"`
-	ClientTLSContradiction bool                    `json:"clientTLSContradiction"`
+	ClientTLSContradiction *bool                   `json:"clientTLSContradiction,omitempty"`
 	Chain                  []Step                  `json:"chain"`
 	UnknownReason          string                  `json:"unknownReason,omitempty"` // required when Effective == unknown
 }

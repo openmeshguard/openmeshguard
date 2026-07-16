@@ -371,6 +371,30 @@ func TestListPagesReturnsRepeatedExpiredContinueToken(t *testing.T) {
 	}
 }
 
+func TestPermissionMetadataDoesNotEmbedControlCatalog(t *testing.T) {
+	tests := []struct {
+		name string
+		meta resourceMeta
+	}{
+		{name: "namespaces", meta: namespaceMeta},
+		{name: "pods", meta: podMeta},
+		{name: "services", meta: serviceMeta},
+		{name: "deployments", meta: deploymentMeta},
+		{name: "replicasets", meta: replicaSetMeta},
+		{name: "statefulsets", meta: statefulSetMeta},
+		{name: "daemonsets", meta: daemonSetMeta},
+		{name: "peerauthentications", meta: peerAuthenticationMeta},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			permission := tt.meta.permissionForScope(false, "cluster")
+			if len(permission.AffectedControls) != 0 {
+				t.Fatalf("affected controls = %#v, want scan-time derivation", permission.AffectedControls)
+			}
+		})
+	}
+}
+
 func assertPermission(t *testing.T, permissions []Permission, apiGroup, resource string, granted bool) {
 	t.Helper()
 

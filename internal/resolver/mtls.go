@@ -8,7 +8,7 @@ import (
 )
 
 const (
-	mtlsVersion = "mtls/v1"
+	mtlsVersion = "mtls/v2"
 
 	authzNotImplementedReason             = "authorization resolver not yet implemented (M5)"
 	dataPlaneUnknownReason                = "data plane membership unavailable"
@@ -20,19 +20,19 @@ const (
 	ambientDisableUnsupportedReason       = "ambient PeerAuthentication DISABLE mode is unsupported by Istio"
 )
 
-// ResolverV1 implements the mtls/v1 effective mTLS semantics.
-type ResolverV1 struct{}
+// ResolverV2 implements the mtls/v2 effective mTLS semantics.
+type ResolverV2 struct{}
 
 // New returns the current resolver implementation.
-func New() ResolverV1 {
-	return ResolverV1{}
+func New() ResolverV2 {
+	return ResolverV2{}
 }
 
-func (ResolverV1) Version() string {
+func (ResolverV2) Version() string {
 	return mtlsVersion
 }
 
-func (ResolverV1) ResolveMTLS(in WorkloadInput) MTLSResult {
+func (ResolverV2) ResolveMTLS(in WorkloadInput) MTLSResult {
 	if !in.MeshDefaults.Known {
 		return unknownMTLS(peerAuthenticationUnavailableReason)
 	}
@@ -97,9 +97,14 @@ func (ResolverV1) ResolveMTLS(in WorkloadInput) MTLSResult {
 		return unknownMTLS(ambientDisableUnsupportedReason)
 	}
 
-	chain, contradiction, err := applyDestinationRules(chain, effective, byPort, in.Ports, in.DestRules)
-	if err != nil {
-		return unknownMTLS(err.Error())
+	var contradiction *bool
+	if in.DestinationRulesKnown {
+		resolvedChain, resolvedContradiction, err := applyDestinationRules(chain, effective, byPort, in.Ports, in.DestRules)
+		if err != nil {
+			return unknownMTLS(err.Error())
+		}
+		chain = resolvedChain
+		contradiction = &resolvedContradiction
 	}
 
 	return MTLSResult{
@@ -110,7 +115,7 @@ func (ResolverV1) ResolveMTLS(in WorkloadInput) MTLSResult {
 	}
 }
 
-func (ResolverV1) ResolveAuthz(WorkloadInput) AuthzResult {
+func (ResolverV2) ResolveAuthz(WorkloadInput) AuthzResult {
 	return AuthzResult{
 		Effective:     AuthzUnknown,
 		Chain:         []Step{},
@@ -585,9 +590,8 @@ func orderChain(chain []Step) []Step {
 
 func unknownMTLS(reason string) MTLSResult {
 	return MTLSResult{
-		Effective:              MTLSUnknown,
-		ClientTLSContradiction: false,
-		Chain:                  []Step{},
-		UnknownReason:          reason,
+		Effective:     MTLSUnknown,
+		Chain:         []Step{},
+		UnknownReason: reason,
 	}
 }
