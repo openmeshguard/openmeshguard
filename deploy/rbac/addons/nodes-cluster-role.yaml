@@ -1,0 +1,9 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: openmeshguard-evidence-nodes
+rules:
+  # Why: optional node evidence corroborates data-plane placement and topology signals.
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get", "list"]

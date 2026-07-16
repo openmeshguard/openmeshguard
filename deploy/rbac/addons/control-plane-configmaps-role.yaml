@@ -1,0 +1,9 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: openmeshguard-evidence-control-plane-configmaps
+rules:
+  # Why: optional control-plane ConfigMaps expose non-secret mesh defaults and metadata.
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "list"]

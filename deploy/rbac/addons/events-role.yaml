@@ -1,0 +1,9 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: openmeshguard-evidence-events
+rules:
+  # Why: optional Events explain recent policy or data-plane rollout failures.
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["get", "list"]
