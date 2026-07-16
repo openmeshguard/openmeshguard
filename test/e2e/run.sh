@@ -110,7 +110,6 @@ scan_fixture() {
 	normalize_report "$raw" "$results/$name.json"
 	OPENMESHGUARD_SCHEMA_REPORT="$results/$name.json" \
 		go test ./internal/output -run '^TestExternalScanOutputMatchesSchema$' -count=1 >/dev/null
-	compare_golden "$name"
 }
 
 echo "e2e: bootstrap distinct fixture-manager and scanner identities"
@@ -207,6 +206,10 @@ jq -s -e \
 	  .responseStatus.code == 403
 	)
 ' "$results/audit.jsonl" >/dev/null
+
+for name in strict permissive port-level-override dr-contradiction not-in-mesh unclassified namespace-role-degraded; do
+	compare_golden "$name"
+done
 
 events=$(jq -s 'length' "$results/audit.jsonl")
 finished=$(date +%s)

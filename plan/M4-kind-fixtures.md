@@ -53,11 +53,13 @@ Ambient fixtures (M6), multi-cluster fixtures (post-v1 per SPEC §11), managed-c
 - M3's workload-port and DestinationRule collection deferrals remain intact. The corresponding live fixture evidence is unknown/unavailable, not synthesized from manifests.
 - The pinned version matrix unblocks M2's deferred version-specific root-namespace selector analysis, but implementing that behavior remains deferred and was not silently wired in M4.
 - The first generated unlabeled-workload golden included a stale ReplicaSet from an in-place fixture correction. A fresh-cluster run exposed the count mismatch; the golden was reset to the clean-cluster value and the full lifecycle was rerun successfully.
+- Structured `autoreview` was attempted against `origin/main`, but environment policy rejected transmitting the local branch bundle to an external review service. The local-only adversarial fallback accepted and fixed three issues: stale cached tool binaries after a version pin change, golden updates occurring before semantic guards, and incomplete recursive/sensitive-subresource coverage in the RBAC safety test.
 
 ### Verification
 
-- Exact clean lifecycle: `make kind-up e2e kind-down` green with durations 43s, 19s, and 1s respectively.
+- Exact clean lifecycle after closeout fixes: `make kind-up e2e kind-down` green with durations 41s, 21s, and 0s respectively.
 - Exact versions: Kind v0.31.0; `kindest/node:v1.35.0@sha256:452d707d4862f52530247495d180205e029056831160e22870e37e3f6c1ac31f`; Istio 1.30.2.
 - Two consecutive ordinary `make e2e` runs matched every golden in 15s each. The final fresh-cluster run also matched all goldens.
 - Each E2E run schema-validated all seven reports. The audit proof contained 63 scanner events, all `get`/`list`, including the namespace scanner's expected `403` on root-namespace PeerAuthentications.
 - Final local `make build`, `make test`, `make lint`, and `make schema-test`: green in one combined closeout run; lint reported zero issues.
+- Final local-only adversarial review after the three closeout fixes found no remaining accepted or actionable issues; the clean-cluster actual reports still matched every checked-in golden byte for byte.

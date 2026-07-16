@@ -63,7 +63,7 @@ kind_binary() {
 	require_command curl
 	mkdir -p "$E2E_STATE_DIR/bin"
 	bin="$E2E_STATE_DIR/bin/kind"
-	if [ ! -x "$bin" ]; then
+	if [ ! -x "$bin" ] || [ "$($bin version 2>/dev/null | awk '{print $2}')" != "$want" ]; then
 		os=$(host_os)
 		arch=$(host_arch)
 		echo "Downloading Kind $want for $os/$arch" >&2
@@ -88,7 +88,7 @@ istioctl_binary() {
 	require_command tar
 	mkdir -p "$E2E_STATE_DIR/bin"
 	bin="$E2E_STATE_DIR/bin/istioctl"
-	if [ ! -x "$bin" ]; then
+	if [ ! -x "$bin" ] || [ "$($bin version --remote=false 2>/dev/null | awk '/client version:/ {print $3}')" != "$want" ]; then
 		os=$(release_os)
 		arch=$(host_arch)
 		archive="$E2E_STATE_DIR/istioctl-$want-$os-$arch.tar.gz"

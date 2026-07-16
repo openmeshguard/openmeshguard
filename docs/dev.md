@@ -97,14 +97,17 @@ The final clean lifecycle was:
 
 | Target | Duration | Result |
 |---|---:|---|
-| `make kind-up` | 43s | green |
-| `make e2e` | 19s | seven schema-valid goldens matched; 63 audited events, all get/list |
-| `make kind-down` | 1s | green |
+| `make kind-up` | 41s | green |
+| `make e2e` | 21s | seven schema-valid goldens matched; 63 audited events, all get/list |
+| `make kind-down` | 0s | green |
 
 Before the final clean lifecycle, two consecutive ordinary `make e2e` runs on
 the same cluster completed in 15s each with identical goldens and the same 63
 get/list-only audit events. A separate fresh-cluster comparison also matched,
 which prevents stale workload-controller objects from entering the goldens.
+
+The same exact clean lifecycle was rerun after the closeout review changed the
+harness, producing the 41s/21s/0s result above.
 
 The pinned Istio minor now provides the version input needed by the M2 deferred
 root-namespace-selector decision. M4 does not change that resolver behavior;

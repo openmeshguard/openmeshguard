@@ -2,6 +2,7 @@ package rbac_test
 
 import (
 	"bytes"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -63,19 +64,29 @@ func TestPublishedProfilesMatchSPECSection13(t *testing.T) {
 func TestEveryPublishedRuleIsReadOnlyAndExplained(t *testing.T) {
 	t.Parallel()
 
-	paths, err := filepath.Glob(filepath.Join("**", "*.yaml"))
+	var paths []string
+	err := filepath.WalkDir(".", func(path string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if !entry.IsDir() && filepath.Ext(path) == ".yaml" {
+			paths = append(paths, path)
+		}
+		return nil
+	})
 	if err != nil {
-		t.Fatalf("glob RBAC manifests: %v", err)
+		t.Fatalf("walk RBAC manifests: %v", err)
 	}
-	paths = append(paths, "cluster-role.yaml", "namespace-role.yaml")
 	sort.Strings(paths)
 
-	seen := map[string]struct{}{}
+	forbiddenResources := map[string]struct{}{
+		"pods/attach":           {},
+		"pods/exec":             {},
+		"pods/portforward":      {},
+		"secrets":               {},
+		"serviceaccounts/token": {},
+	}
 	for _, path := range paths {
-		if _, duplicate := seen[path]; duplicate {
-			continue
-		}
-		seen[path] = struct{}{}
 		raw, err := os.ReadFile(path)
 		if err != nil {
 			t.Fatalf("read %s: %v", path, err)
@@ -90,8 +101,9 @@ func TestEveryPublishedRuleIsReadOnlyAndExplained(t *testing.T) {
 				t.Errorf("%s rule %v verbs = %v, want exactly get/list", path, rule.Resources, rule.Verbs)
 			}
 			for _, resource := range rule.Resources {
-				if resource == "secrets" || strings.HasPrefix(resource, "secrets/") {
-					t.Errorf("%s grants forbidden Secrets access", path)
+				_, forbidden := forbiddenResources[resource]
+				if forbidden || strings.HasPrefix(resource, "secrets/") {
+					t.Errorf("%s grants forbidden resource %s", path, resource)
 				}
 			}
 		}
