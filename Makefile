@@ -40,10 +40,10 @@ resolver-purity:
 	$(GOLANGCI_LINT) run --enable-only depguard ./internal/resolver/...
 
 kind-up:
-	@echo "kind-up is deferred until M4"
+	./test/e2e/kind-up.sh
 
 e2e:
-	@echo "e2e is deferred until M4"
+	./test/e2e/run.sh
 
 kind-down:
-	@echo "kind-down is deferred until M4"
+	./test/e2e/kind-down.sh

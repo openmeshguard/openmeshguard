@@ -1,0 +1,309 @@
+apiVersion: security.istio.io/v1
+kind: PeerAuthentication
+metadata:
+  name: default
+  namespace: istio-system
+spec:
+  mtls:
+    mode: STRICT
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: omg-strict
+  labels:
+    istio-injection: enabled
+---
+apiVersion: security.istio.io/v1
+kind: PeerAuthentication
+metadata:
+  name: default
+  namespace: omg-strict
+spec:
+  mtls:
+    mode: STRICT
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: strict-api
+  namespace: omg-strict
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: strict-api}
+  template:
+    metadata:
+      labels: {app: strict-api}
+    spec:
+      containers:
+        - name: app
+          image: registry.k8s.io/pause:3.10
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: strict-api
+  namespace: omg-strict
+spec:
+  selector: {app: strict-api}
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8080
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: omg-permissive
+  labels:
+    istio-injection: enabled
+---
+apiVersion: security.istio.io/v1
+kind: PeerAuthentication
+metadata:
+  name: default
+  namespace: omg-permissive
+spec:
+  mtls:
+    mode: PERMISSIVE
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: permissive-api
+  namespace: omg-permissive
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: permissive-api}
+  template:
+    metadata:
+      labels: {app: permissive-api}
+    spec:
+      containers:
+        - name: app
+          image: registry.k8s.io/pause:3.10
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: permissive-api
+  namespace: omg-permissive
+spec:
+  selector: {app: permissive-api}
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8080
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: omg-port-override
+  labels:
+    istio-injection: enabled
+---
+apiVersion: security.istio.io/v1
+kind: PeerAuthentication
+metadata:
+  name: default
+  namespace: omg-port-override
+spec:
+  mtls:
+    mode: STRICT
+---
+apiVersion: security.istio.io/v1
+kind: PeerAuthentication
+metadata:
+  name: port-override
+  namespace: omg-port-override
+spec:
+  selector:
+    matchLabels: {app: port-api}
+  mtls:
+    mode: STRICT
+  portLevelMtls:
+    "8080":
+      mode: DISABLE
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: port-api
+  namespace: omg-port-override
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: port-api}
+  template:
+    metadata:
+      labels: {app: port-api}
+    spec:
+      containers:
+        - name: app
+          image: registry.k8s.io/pause:3.10
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: port-api
+  namespace: omg-port-override
+spec:
+  selector: {app: port-api}
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8080
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: omg-dr-contradiction
+  labels:
+    istio-injection: enabled
+---
+apiVersion: security.istio.io/v1
+kind: PeerAuthentication
+metadata:
+  name: default
+  namespace: omg-dr-contradiction
+spec:
+  mtls:
+    mode: STRICT
+---
+apiVersion: networking.istio.io/v1
+kind: DestinationRule
+metadata:
+  name: dr-api
+  namespace: omg-dr-contradiction
+spec:
+  host: dr-api.omg-dr-contradiction.svc.cluster.local
+  trafficPolicy:
+    tls:
+      mode: DISABLE
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dr-api
+  namespace: omg-dr-contradiction
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: dr-api}
+  template:
+    metadata:
+      labels: {app: dr-api}
+    spec:
+      containers:
+        - name: app
+          image: registry.k8s.io/pause:3.10
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dr-api
+  namespace: omg-dr-contradiction
+spec:
+  selector: {app: dr-api}
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8080
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: omg-not-in-mesh
+  labels:
+    istio-injection: disabled
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: outside-api
+  namespace: omg-not-in-mesh
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: outside-api}
+  template:
+    metadata:
+      labels: {app: outside-api}
+    spec:
+      containers:
+        - name: app
+          image: registry.k8s.io/pause:3.10
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: outside-api
+  namespace: omg-not-in-mesh
+spec:
+  selector: {app: outside-api}
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8080
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: omg-unclassified
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: unclassified-api
+  namespace: omg-unclassified
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: unclassified-api}
+  template:
+    metadata:
+      labels: {app: unclassified-api}
+      annotations:
+        sidecar.istio.io/inject: "true"
+    spec:
+      containers:
+        - name: app
+          image: registry.k8s.io/pause:3.10
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: unclassified-api
+  namespace: omg-unclassified
+spec:
+  selector: {app: unclassified-api}
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8080

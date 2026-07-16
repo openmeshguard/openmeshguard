@@ -1,0 +1,26 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: openmeshguard-e2e-cluster-scan
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: openmeshguard-cluster-scan
+subjects:
+  - kind: ServiceAccount
+    name: scanner-cluster
+    namespace: openmeshguard-e2e
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: openmeshguard-e2e-namespace-scan
+  namespace: omg-strict
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: openmeshguard-namespace-scan
+subjects:
+  - kind: ServiceAccount
+    name: scanner-namespace
+    namespace: openmeshguard-e2e
