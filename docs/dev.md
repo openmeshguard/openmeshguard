@@ -3,17 +3,18 @@
 ## Local prerequisites
 
 The unit gates need Go. The M4 acceptance harness additionally needs Docker,
-`kubectl`, `curl`, `tar`, and `jq`. A matching Kind or istioctl binary is reused
-when installed; otherwise the harness downloads the exact versions declared in
-`versions.yaml` into the ignored `.e2e/bin` directory.
+`kubectl`, `curl`, `tar`, and `jq`. A matching system Kind or istioctl binary
+is reused. Otherwise the harness downloads the declared release into the
+ignored `.e2e/bin` directory with bounded retries and timeouts, then verifies
+its platform-specific SHA-256 before execution.
 
 `versions.yaml` is the only version source for:
 
-- the Kind CLI;
+- the Kind CLI and its platform checksums;
 - the digest-pinned Kind node image (and therefore Kubernetes version); and
-- istioctl plus the installed Istio control plane/data plane.
+- istioctl, its platform checksums, and the installed Istio control/data plane.
 
-Do not copy those values into scripts or workflows. Updating the file is the
+Do not copy those values into scripts or workflows. Updating this file is the
 future version-matrix automation hook.
 
 ## Kind lifecycle
@@ -25,9 +26,15 @@ make kind-up e2e kind-down
 ```
 
 `kind-up` refuses to reuse an existing `openmeshguard-e2e` cluster. `e2e`
-builds the scanner, applies the sidecar fixtures, scans with both published RBAC
-profiles, schema-validates and diffs seven scrubbed canonical reports, and
-checks the API-server audit proof. `kind-down` deletes the disposable cluster.
+always rebuilds `bin/openmeshguard`, resets the fixture namespaces, runs eight
+small golden scans plus one all-namespaces ClusterRole scan, schema-validates
+all nine reports, and executes the RBAC/audit proofs. `kind-down` deletes the
+disposable cluster.
+
+A failed local E2E run intentionally leaves the cluster available for
+inspection; collect what you need and run `make kind-down`. In CI, one failure
+step owns diagnostics collection and the always-step then tears the cluster
+down, so evidence is captured before deletion and is not overwritten.
 
 Set `UPDATE_GOLDEN=1` only when intentionally reviewing a behavior change:
 
@@ -35,53 +42,78 @@ Set `UPDATE_GOLDEN=1` only when intentionally reviewing a behavior change:
 UPDATE_GOLDEN=1 make e2e
 ```
 
-The comparison replaces `generatedAt` and the kubeconfig context with fixed
-values. Workloads, permission entries, postures, findings, chains, and scores
-remain untouched. The Go output path and engine already sort their slices and
-map keys deterministically; no posture evidence is normalized away.
+Update mode runs every schema and semantic assertion before copying. Those
+guards require non-empty workload/finding sets, the expected live precedence
+chain, the critical disabled-mTLS finding, and non-vacuous namespace-RBAC
+degradation. The comparison replaces only `generatedAt` and the kubeconfig
+context, after first proving both fields were emitted by the raw scanner
+output. No posture evidence is normalized away.
+
+`OPENMESHGUARD_E2E_STATE_DIR` may be absolute or relative to the repository.
+Relative overrides are canonicalized before report paths are passed to Go
+schema tests.
+
+## Fixture coverage boundary
+
+The live scanner resolves mesh/namespace STRICT, namespace PERMISSIVE, and a
+namespace-STRICT versus workload-DISABLE precedence conflict. The
+port-level-override and DestinationRule-contradiction manifests are also
+verified to exist live, but their goldens intentionally retain current
+unavailable evidence: workload ports and DestinationRule collection have no
+producers yet. Injection-disabled membership remains unknown until M6 owns
+ambient enrollment detection. M4 does not silently wire any of those deferred
+inputs.
 
 ## RBAC identities and proof
 
-The harness keeps three identities visibly separate:
+The harness keeps four identities visibly separate:
 
 - `fixture-manager` is an ephemeral setup ServiceAccount bound to the
-  disposable cluster's existing `cluster-admin` role. It applies fixtures,
-  published profiles, and bindings, and is never used to scan.
-- `scanner-cluster` has exactly one explicit binding, to
-  `openmeshguard-cluster-scan`.
-- `scanner-namespace` has exactly one explicit binding, to
-  `openmeshguard-namespace-scan` in `omg-strict`.
+  disposable cluster's existing `cluster-admin` role. It applies and resets
+  fixtures and is never used to scan.
+- `scanner-cluster` is bound to `openmeshguard-cluster-scan`.
+- `scanner-namespace` is bound to `openmeshguard-namespace-scan` only in
+  `omg-strict`.
+- `audit-probe` has no RBAC binding. Its one denied ConfigMap create is the
+  positive control for the API-server audit path, never a scanner call.
 
-The harness asserts those scanner bindings before issuing scanner tokens. The
-namespace scanner can read its workload namespace but cannot list the
+Before scanning, the harness compares each referenced live Role/ClusterRole
+proof shape to the published manifest, including rules and `aggregationRule`,
+and rejects any direct, User, or service-account-group resource binding beyond
+the expected profile. Kubernetes' built-in authenticated/non-resource
+discovery bindings are excluded by their fixed role names; an added
+resource-authorizing binding through those groups still fails.
+
+The namespace scanner can read its workload namespace but cannot list the
 cluster-scoped Namespace object or root-namespace PeerAuthentication. Its
-golden therefore contains denied permission-summary entries and unknown mTLS
+golden contains denied permission-summary entries and three unknown mTLS
 findings instead of a failed scan.
 
-The setup identity requests short-lived ServiceAccount tokens; the scanner only
-receives the finished kubeconfigs and never requests a token or impersonates a
-user.
+All ServiceAccount tokens last ten minutes. Kubeconfigs are created as mode
+0600 inside a mode-0700 random directory and deleted by an exit trap. The
+scanner identities never request tokens or impersonate users.
 
 ## No-write audit choice
 
-M4 uses kube-apiserver audit logging inside Kind, rather than an auditing proxy.
-This proves what the API server actually received after authentication and
-authorization, including the namespace Role's denied root-namespace request.
-The Kind kubeadm patch mounts `test/e2e/audit-policy.yaml` and a writable audit
-directory into the API server.
+M4 uses kube-apiserver audit logging inside Kind rather than an auditing proxy.
+This observes authenticated requests at the API server. The API server uses
+`blocking-strict` audit mode so a successful response cannot outrun the proof
+log. The metadata-only policy records the scanner identities and the separate
+unbound audit probe.
 
-The policy records metadata only for the two scanner ServiceAccounts. After all
-fixture setup and token issuance, the harness truncates the audit log, runs the
-scans, and asserts:
+After setup and RBAC propagation checks, the harness truncates the log. It
+first requires the probe's denied write event, then runs the scanners and
+asserts:
 
 - both scanner identities produced events;
-- every received verb was `get` or `list`;
-- the namespace scanner received a `403` when listing PeerAuthentications in
-  `istio-system`; and
-- no other scanner verb occurred.
+- every scanner event was `get` or `list` for a SPEC section 13 resource;
+- no scanner event targeted Secrets or any subresource;
+- the namespace scanner received a 403 for root-namespace
+  PeerAuthentications; and
+- the separate probe's ConfigMap create was recorded and denied.
 
-The most recent audit artifact is `.e2e/results/audit.jsonl`. CI uploads the
-results directory on failure.
+The latest audit artifact is `.e2e/results/audit.jsonl`. CI also retains pod,
+event, control-plane, Kind, and audit diagnostics on failure.
 
 ## Recorded M4 proof
 
@@ -93,22 +125,19 @@ Recorded locally on 2026-07-15 (America/Chicago):
 | Kubernetes node | `kindest/node:v1.35.0@sha256:452d707d4862f52530247495d180205e029056831160e22870e37e3f6c1ac31f` |
 | Istio | 1.30.2 |
 
-The final clean lifecycle was:
+The final clean lifecycle and determinism proof was:
 
 | Target | Duration | Result |
 |---|---:|---|
-| `make kind-up` | 41s | green |
-| `make e2e` | 21s | seven schema-valid goldens matched; 63 audited events, all get/list |
+| `make kind-up` | 46s | green |
+| first `make e2e` | 37s | eight goldens matched; nine reports schema-valid; RBAC/audit proofs green |
+| second `make e2e` | 37s | identical goldens and 80 approved scanner API events |
 | `make kind-down` | 0s | green |
 
-Before the final clean lifecycle, two consecutive ordinary `make e2e` runs on
-the same cluster completed in 15s each with identical goldens and the same 63
-get/list-only audit events. A separate fresh-cluster comparison also matched,
-which prevents stale workload-controller objects from entering the goldens.
-
-The same exact clean lifecycle was rerun after the closeout review changed the
-harness, producing the 41s/21s/0s result above.
+The audit contained 71 cluster-scanner list events, nine namespace-scanner
+list events, and exactly one separate audit-probe create event with a 403.
+No token-bearing kubeconfig remained after either run.
 
 The pinned Istio minor now provides the version input needed by the M2 deferred
 root-namespace-selector decision. M4 does not change that resolver behavior;
-the version-specific semantics remain a follow-up.
+the version-specific semantics remain deferred.
