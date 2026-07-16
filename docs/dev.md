@@ -129,10 +129,13 @@ The final clean lifecycle and determinism proof was:
 
 | Target | Duration | Result |
 |---|---:|---|
-| `make kind-up` | 46s | green |
-| first `make e2e` | 37s | eight goldens matched; nine reports schema-valid; RBAC/audit proofs green |
-| second `make e2e` | 37s | identical goldens and 80 approved scanner API events |
-| `make kind-down` | 0s | green |
+| `make kind-up` | 43s | green in the exact combined lifecycle |
+| `make e2e` | 25s | eight goldens matched; nine reports schema-valid; RBAC/audit proofs green |
+| `make kind-down` | 1s | green in the exact combined lifecycle |
+
+Before that final combined invocation, two consecutive ordinary `make e2e`
+runs on the same cluster completed in 37s each with identical goldens and the
+same 80 approved scanner API events.
 
 The audit contained 71 cluster-scanner list events, nine namespace-scanner
 list events, and exactly one separate audit-probe create event with a 403.

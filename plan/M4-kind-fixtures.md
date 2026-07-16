@@ -57,7 +57,7 @@ Ambient fixtures (M6), multi-cluster fixtures (post-v1 per SPEC §11), managed-c
 
 ### Verification
 
-- Final clean sequence from no Kind clusters: `make kind-up` 46s; first ordinary `make e2e` 37s; second ordinary `make e2e` 37s; `make kind-down` 0s.
+- Exact committed-branch `make kind-up e2e kind-down` from no Kind clusters: 43s, 25s, and 1s. Before that final combined invocation, two consecutive ordinary `make e2e` runs completed in 37s each with identical goldens and audit results.
 - Exact versions: Kind v0.31.0; `kindest/node:v1.35.0@sha256:452d707d4862f52530247495d180205e029056831160e22870e37e3f6c1ac31f`; Istio 1.30.2. All eight upstream Kind/istioctl platform checksums were pinned from their official release assets.
 - Both ordinary E2E runs matched all eight goldens and schema-validated nine reports. The final audit contained 71 cluster-scanner list events, nine namespace-scanner list events, and one separate denied audit-probe create event.
 - The namespace Role report contained the expected Namespace and root-PeerAuthentication denials plus three unknown findings. The workload-conflict report retained the workload policy chain and open critical MG-MTLS-003 finding.
