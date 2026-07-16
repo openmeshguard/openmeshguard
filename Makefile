@@ -42,7 +42,7 @@ resolver-purity:
 kind-up:
 	./test/e2e/kind-up.sh
 
-e2e:
+e2e: build
 	./test/e2e/run.sh
 
 kind-down:

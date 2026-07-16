@@ -32,6 +32,7 @@ nodes:
         apiServer:
           extraArgs:
             audit-log-path: /var/log/kubernetes/audit.log
+            audit-log-mode: blocking-strict
             audit-policy-file: /etc/kubernetes/policies/audit-policy.yaml
           extraVolumes:
             - name: audit-policies

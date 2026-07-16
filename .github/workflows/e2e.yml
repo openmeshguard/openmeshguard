@@ -11,6 +11,7 @@ jobs:
   kind-e2e:
     name: Kind, Istio, RBAC, and no-write proofs
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -18,7 +19,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.24.x"
+          go-version-file: go.mod
           cache: true
 
       - name: Create pinned Kind and Istio cluster
@@ -26,6 +27,10 @@ jobs:
 
       - name: Run acceptance and audit proofs
         run: make e2e
+
+      - name: Collect failure diagnostics
+        if: failure()
+        run: ./test/e2e/collect-diagnostics.sh
 
       - name: Upload failure evidence
         if: failure()
