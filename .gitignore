@@ -6,6 +6,7 @@ node_modules/
 dist/
 coverage/
 bin/
+.e2e/
 .playwright-mcp/
 openmeshguard-*.png
 openmeshguard-*-snapshot.md

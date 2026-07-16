@@ -1,0 +1,11 @@
+apiVersion: audit.k8s.io/v1
+kind: Policy
+omitStages:
+  - RequestReceived
+rules:
+  # The proof log contains only requests authenticated as the two scanner SAs.
+  - level: Metadata
+    users:
+      - system:serviceaccount:openmeshguard-e2e:scanner-cluster
+      - system:serviceaccount:openmeshguard-e2e:scanner-namespace
+  - level: None
