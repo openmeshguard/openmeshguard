@@ -1,0 +1,261 @@
+{
+  "schemaVersion": "v1alpha1",
+  "generatedAt": "2000-01-01T00:00:00Z",
+  "scanner": {
+    "version": "dev",
+    "resolverVersion": "mtls/v2",
+    "controlPacks": [
+      {
+        "name": "builtin-mtls",
+        "version": "0.1.0",
+        "source": "builtin"
+      }
+    ]
+  },
+  "scan": {
+    "clusterContext": "openmeshguard-e2e",
+    "scope": {
+      "allNamespaces": false,
+      "namespaces": [
+        "omg-strict"
+      ]
+    },
+    "dataSources": {
+      "kubernetesAPI": true,
+      "prometheus": {
+        "enabled": false
+      }
+    }
+  },
+  "permissionSummary": [
+    {
+      "apiGroup": "",
+      "resource": "namespaces",
+      "verbs": [
+        "list"
+      ],
+      "granted": false,
+      "impact": "namespace labels and environment/data-plane inference may be unavailable; denied scope(s): cluster"
+    },
+    {
+      "apiGroup": "",
+      "resource": "pods",
+      "verbs": [
+        "list"
+      ],
+      "granted": true,
+      "impact": "sidecar detection from running pods may be unavailable",
+      "affectedControls": [
+        "MG-MTLS-001",
+        "MG-MTLS-002",
+        "MG-MTLS-003"
+      ]
+    },
+    {
+      "apiGroup": "",
+      "resource": "services",
+      "verbs": [
+        "list"
+      ],
+      "granted": true,
+      "impact": "service inventory and multi-cluster gateway signals may be unavailable"
+    },
+    {
+      "apiGroup": "apps",
+      "resource": "daemonsets",
+      "verbs": [
+        "list"
+      ],
+      "granted": true,
+      "impact": "DaemonSet workload posture may be unavailable",
+      "affectedControls": [
+        "MG-MTLS-001",
+        "MG-MTLS-002",
+        "MG-MTLS-003"
+      ]
+    },
+    {
+      "apiGroup": "apps",
+      "resource": "deployments",
+      "verbs": [
+        "list"
+      ],
+      "granted": true,
+      "impact": "deployment workload posture may be unavailable",
+      "affectedControls": [
+        "MG-MTLS-001",
+        "MG-MTLS-002",
+        "MG-MTLS-003"
+      ]
+    },
+    {
+      "apiGroup": "apps",
+      "resource": "replicasets",
+      "verbs": [
+        "list"
+      ],
+      "granted": true,
+      "impact": "standalone ReplicaSet workload posture may be unavailable",
+      "affectedControls": [
+        "MG-MTLS-001",
+        "MG-MTLS-002",
+        "MG-MTLS-003"
+      ]
+    },
+    {
+      "apiGroup": "apps",
+      "resource": "statefulsets",
+      "verbs": [
+        "list"
+      ],
+      "granted": true,
+      "impact": "StatefulSet workload posture may be unavailable",
+      "affectedControls": [
+        "MG-MTLS-001",
+        "MG-MTLS-002",
+        "MG-MTLS-003"
+      ]
+    },
+    {
+      "apiGroup": "security.istio.io",
+      "resource": "peerauthentications",
+      "verbs": [
+        "list"
+      ],
+      "granted": false,
+      "impact": "effective mTLS posture resolves to unknown without PeerAuthentication evidence; denied scope(s): namespace/istio-system",
+      "affectedControls": [
+        "MG-MTLS-001",
+        "MG-MTLS-002",
+        "MG-MTLS-003"
+      ]
+    }
+  ],
+  "inventory": {
+    "counts": {
+      "daemonsets": 0,
+      "deployments": 1,
+      "namespaces": 0,
+      "peerAuthentications": 1,
+      "pods": 1,
+      "replicasets": 1,
+      "services": 1,
+      "statefulsets": 0
+    },
+    "dataPlane": {
+      "mode": "sidecar"
+    },
+    "multiCluster": {
+      "participationDetected": false,
+      "evaluated": false
+    }
+  },
+  "workloadPostures": [
+    {
+      "workload": {
+        "namespace": "omg-strict",
+        "name": "strict-api",
+        "kind": "Deployment"
+      },
+      "dataPlaneMode": "sidecar",
+      "mtls": {
+        "effective": "unknown",
+        "chain": [],
+        "unknownReason": "PeerAuthentication resources unavailable"
+      },
+      "authorization": {
+        "effective": "unknown",
+        "chain": [],
+        "unknownReason": "authorization resolver not yet implemented (M5)"
+      }
+    }
+  ],
+  "findings": [
+    {
+      "id": "MG-MTLS-001-e80e3a041279",
+      "controlId": "MG-MTLS-001",
+      "title": "Mesh-managed workloads must resolve to strict mTLS",
+      "severity": "high",
+      "evidenceType": "config",
+      "status": "unknown",
+      "confidence": "unavailable",
+      "dataPlaneMode": "sidecar",
+      "evidenceSources": [
+        "kubernetes-api"
+      ],
+      "resources": [
+        {
+          "kind": "Deployment",
+          "namespace": "omg-strict",
+          "name": "strict-api"
+        }
+      ],
+      "reasoning": "Control MG-MTLS-001 could not be evaluated for omg-strict/strict-api: mtls.effective unavailable: PeerAuthentication resources unavailable.",
+      "remediation": {
+        "guidance": "Apply or correct PeerAuthentication so the workload resolves to STRICT, then inspect the attached resolution chain."
+      },
+      "unknownReason": "mtls.effective unavailable: PeerAuthentication resources unavailable"
+    },
+    {
+      "id": "MG-MTLS-002-45e72b2025d5",
+      "controlId": "MG-MTLS-002",
+      "title": "Declared workload ports must resolve to strict mTLS",
+      "severity": "high",
+      "evidenceType": "config",
+      "status": "unknown",
+      "confidence": "unavailable",
+      "dataPlaneMode": "sidecar",
+      "evidenceSources": [
+        "kubernetes-api"
+      ],
+      "resources": [
+        {
+          "kind": "Deployment",
+          "namespace": "omg-strict",
+          "name": "strict-api"
+        }
+      ],
+      "reasoning": "Control MG-MTLS-002 could not be evaluated for omg-strict/strict-api: mtls.byPort unavailable: workload ports unavailable.",
+      "remediation": {
+        "guidance": "Correct workload-level port mTLS overrides so every declared, Service-bound workload port resolves to STRICT."
+      },
+      "unknownReason": "mtls.byPort unavailable: workload ports unavailable"
+    },
+    {
+      "id": "MG-MTLS-003-7e5f001f42f1",
+      "controlId": "MG-MTLS-003",
+      "title": "Workloads must never resolve to globally disabled mTLS",
+      "severity": "critical",
+      "evidenceType": "config",
+      "status": "unknown",
+      "confidence": "unavailable",
+      "dataPlaneMode": "sidecar",
+      "evidenceSources": [
+        "kubernetes-api"
+      ],
+      "resources": [
+        {
+          "kind": "Deployment",
+          "namespace": "omg-strict",
+          "name": "strict-api"
+        }
+      ],
+      "reasoning": "Control MG-MTLS-003 could not be evaluated for omg-strict/strict-api: mtls.effective unavailable: PeerAuthentication resources unavailable.",
+      "remediation": {
+        "guidance": "Apply or correct PeerAuthentication so the workload no longer resolves to DISABLE, then inspect the attached resolution chain."
+      },
+      "unknownReason": "mtls.effective unavailable: PeerAuthentication resources unavailable"
+    }
+  ],
+  "scores": {
+    "overall": null,
+    "categories": [
+      {
+        "category": "mtls",
+        "grade": "unknown",
+        "passRate": null,
+        "unknown": 3
+      }
+    ]
+  }
+}

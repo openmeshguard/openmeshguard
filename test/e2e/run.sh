@@ -50,7 +50,7 @@ fixture_kubectl() {
 
 assert_scanner_bindings() {
 	bindings=$(fixture_kubectl get clusterrolebindings,rolebindings -A -o json)
-	echo "$bindings" | jq -e \
+	printf '%s\n' "$bindings" | jq -e \
 		--arg namespace "$E2E_HARNESS_NAMESPACE" \
 		--arg name "$E2E_CLUSTER_SCANNER" '
 		[
@@ -62,7 +62,7 @@ assert_scanner_bindings() {
 		.[0].roleRef.kind == "ClusterRole" and
 		.[0].roleRef.name == "openmeshguard-cluster-scan"
 	' >/dev/null
-	echo "$bindings" | jq -e \
+	printf '%s\n' "$bindings" | jq -e \
 		--arg namespace "$E2E_HARNESS_NAMESPACE" \
 		--arg name "$E2E_NAMESPACE_SCANNER" '
 		[
@@ -113,27 +113,41 @@ scan_fixture() {
 	compare_golden "$name"
 }
 
+echo "e2e: bootstrap distinct fixture-manager and scanner identities"
 admin_kubectl apply -f "$E2E_ROOT/test/e2e/harness-bootstrap.yaml" >/dev/null
 make_sa_kubeconfig "$E2E_FIXTURE_MANAGER" "$kubeconfigs/fixture-manager.yaml"
 
+echo "e2e: apply sidecar fixtures and published RBAC profiles"
 fixture_kubectl apply -f "$E2E_ROOT/test/fixtures/sidecar-basic/manifests.yaml" >/dev/null
 fixture_kubectl apply -f "$E2E_ROOT/deploy/rbac/cluster-role.yaml" >/dev/null
 fixture_kubectl -n omg-strict apply -f "$E2E_ROOT/deploy/rbac/namespace-role.yaml" >/dev/null
 fixture_kubectl apply -f "$E2E_ROOT/test/e2e/scanner-bindings.yaml" >/dev/null
 
-for namespace in omg-strict omg-permissive omg-port-override omg-dr-contradiction omg-not-in-mesh omg-unclassified; do
-	fixture_kubectl -n "$namespace" wait --for=condition=Available deployment --all --timeout=300s >/dev/null
+echo "e2e: wait for fixture workloads"
+for fixture in \
+	"omg-strict strict-api" \
+	"omg-permissive permissive-api" \
+	"omg-port-override port-api" \
+	"omg-dr-contradiction dr-api" \
+	"omg-not-in-mesh outside-api" \
+	"omg-unclassified unclassified-api"
+do
+	set -- $fixture
+	fixture_kubectl -n "$1" rollout status "deployment/$2" --timeout=300s >/dev/null
 done
 
 for namespace in omg-strict omg-permissive omg-port-override omg-dr-contradiction omg-unclassified; do
 	fixture_kubectl -n "$namespace" get pods -o json | jq -e '
-		.items | length == 1 and all(.[]; any(.spec.containers[]; .name == "istio-proxy"))
+		.items | length == 1 and
+		all(.[]; ([.spec.containers[], .spec.initContainers[]?] | any(.name == "istio-proxy")))
 	' >/dev/null
 done
 fixture_kubectl -n omg-not-in-mesh get pods -o json | jq -e '
-	.items | length == 1 and all(.[]; all(.spec.containers[]; .name != "istio-proxy"))
+	.items | length == 1 and
+	all(.[]; ([.spec.containers[], .spec.initContainers[]?] | all(.name != "istio-proxy")))
 ' >/dev/null
 
+echo "e2e: prove each scanner has only its published RBAC binding"
 assert_scanner_bindings
 make_sa_kubeconfig "$E2E_CLUSTER_SCANNER" "$kubeconfigs/scanner-cluster.yaml" "$kubeconfigs/fixture-manager.yaml"
 make_sa_kubeconfig "$E2E_NAMESPACE_SCANNER" "$kubeconfigs/scanner-namespace.yaml" "$kubeconfigs/fixture-manager.yaml"
@@ -142,6 +156,7 @@ make_sa_kubeconfig "$E2E_NAMESPACE_SCANNER" "$kubeconfigs/scanner-namespace.yaml
 # truncating here makes the proof artifact visibly scoped to scanner runs.
 docker exec "$E2E_CLUSTER_NAME-control-plane" sh -c ': > /var/log/kubernetes/audit.log'
 
+echo "e2e: scan fixtures and compare canonical JSON goldens"
 scan_fixture strict omg-strict "$kubeconfigs/scanner-cluster.yaml"
 scan_fixture permissive omg-permissive "$kubeconfigs/scanner-cluster.yaml"
 scan_fixture port-level-override omg-port-override "$kubeconfigs/scanner-cluster.yaml"
@@ -174,6 +189,7 @@ jq -e '
 ' "$results/namespace-role-degraded.json" >/dev/null
 
 docker exec "$E2E_CLUSTER_NAME-control-plane" cat /var/log/kubernetes/audit.log >"$results/audit.jsonl"
+echo "e2e: prove API-server audit saw only get/list from scanner identities"
 jq -s -e \
 	--arg cluster_user "system:serviceaccount:$E2E_HARNESS_NAMESPACE:$E2E_CLUSTER_SCANNER" \
 	--arg namespace_user "system:serviceaccount:$E2E_HARNESS_NAMESPACE:$E2E_NAMESPACE_SCANNER" '

@@ -1,0 +1,261 @@
+{
+  "schemaVersion": "v1alpha1",
+  "generatedAt": "2000-01-01T00:00:00Z",
+  "scanner": {
+    "version": "dev",
+    "resolverVersion": "mtls/v2",
+    "controlPacks": [
+      {
+        "name": "builtin-mtls",
+        "version": "0.1.0",
+        "source": "builtin"
+      }
+    ]
+  },
+  "scan": {
+    "clusterContext": "openmeshguard-e2e",
+    "scope": {
+      "allNamespaces": false,
+      "namespaces": [
+        "omg-not-in-mesh"
+      ]
+    },
+    "dataSources": {
+      "kubernetesAPI": true,
+      "prometheus": {
+        "enabled": false
+      }
+    }
+  },
+  "permissionSummary": [
+    {
+      "apiGroup": "",
+      "resource": "namespaces",
+      "verbs": [
+        "list"
+      ],
+      "granted": true,
+      "impact": "namespace labels and environment/data-plane inference may be unavailable"
+    },
+    {
+      "apiGroup": "",
+      "resource": "pods",
+      "verbs": [
+        "list"
+      ],
+      "granted": true,
+      "impact": "sidecar detection from running pods may be unavailable",
+      "affectedControls": [
+        "MG-MTLS-001",
+        "MG-MTLS-002",
+        "MG-MTLS-003"
+      ]
+    },
+    {
+      "apiGroup": "",
+      "resource": "services",
+      "verbs": [
+        "list"
+      ],
+      "granted": true,
+      "impact": "service inventory and multi-cluster gateway signals may be unavailable"
+    },
+    {
+      "apiGroup": "apps",
+      "resource": "daemonsets",
+      "verbs": [
+        "list"
+      ],
+      "granted": true,
+      "impact": "DaemonSet workload posture may be unavailable",
+      "affectedControls": [
+        "MG-MTLS-001",
+        "MG-MTLS-002",
+        "MG-MTLS-003"
+      ]
+    },
+    {
+      "apiGroup": "apps",
+      "resource": "deployments",
+      "verbs": [
+        "list"
+      ],
+      "granted": true,
+      "impact": "deployment workload posture may be unavailable",
+      "affectedControls": [
+        "MG-MTLS-001",
+        "MG-MTLS-002",
+        "MG-MTLS-003"
+      ]
+    },
+    {
+      "apiGroup": "apps",
+      "resource": "replicasets",
+      "verbs": [
+        "list"
+      ],
+      "granted": true,
+      "impact": "standalone ReplicaSet workload posture may be unavailable",
+      "affectedControls": [
+        "MG-MTLS-001",
+        "MG-MTLS-002",
+        "MG-MTLS-003"
+      ]
+    },
+    {
+      "apiGroup": "apps",
+      "resource": "statefulsets",
+      "verbs": [
+        "list"
+      ],
+      "granted": true,
+      "impact": "StatefulSet workload posture may be unavailable",
+      "affectedControls": [
+        "MG-MTLS-001",
+        "MG-MTLS-002",
+        "MG-MTLS-003"
+      ]
+    },
+    {
+      "apiGroup": "security.istio.io",
+      "resource": "peerauthentications",
+      "verbs": [
+        "list"
+      ],
+      "granted": true,
+      "impact": "effective mTLS posture resolves to unknown without PeerAuthentication evidence",
+      "affectedControls": [
+        "MG-MTLS-001",
+        "MG-MTLS-002",
+        "MG-MTLS-003"
+      ]
+    }
+  ],
+  "inventory": {
+    "counts": {
+      "daemonsets": 0,
+      "deployments": 1,
+      "namespaces": 1,
+      "peerAuthentications": 1,
+      "pods": 1,
+      "replicasets": 1,
+      "services": 1,
+      "statefulsets": 0
+    },
+    "dataPlane": {
+      "mode": "unknown"
+    },
+    "multiCluster": {
+      "participationDetected": false,
+      "evaluated": false
+    }
+  },
+  "workloadPostures": [
+    {
+      "workload": {
+        "namespace": "omg-not-in-mesh",
+        "name": "outside-api",
+        "kind": "Deployment"
+      },
+      "dataPlaneMode": "unknown",
+      "mtls": {
+        "effective": "unknown",
+        "chain": [],
+        "unknownReason": "data plane membership unavailable"
+      },
+      "authorization": {
+        "effective": "unknown",
+        "chain": [],
+        "unknownReason": "authorization resolver not yet implemented (M5)"
+      }
+    }
+  ],
+  "findings": [
+    {
+      "id": "MG-MTLS-001-26bc57d2a79a",
+      "controlId": "MG-MTLS-001",
+      "title": "Mesh-managed workloads must resolve to strict mTLS",
+      "severity": "high",
+      "evidenceType": "config",
+      "status": "unknown",
+      "confidence": "unavailable",
+      "dataPlaneMode": "unknown",
+      "evidenceSources": [
+        "kubernetes-api"
+      ],
+      "resources": [
+        {
+          "kind": "Deployment",
+          "namespace": "omg-not-in-mesh",
+          "name": "outside-api"
+        }
+      ],
+      "reasoning": "Control MG-MTLS-001 could not determine applicability for omg-not-in-mesh/outside-api: dataPlaneMode unavailable: data plane mode unavailable.",
+      "remediation": {
+        "guidance": "Apply or correct PeerAuthentication so the workload resolves to STRICT, then inspect the attached resolution chain."
+      },
+      "unknownReason": "dataPlaneMode unavailable: data plane mode unavailable"
+    },
+    {
+      "id": "MG-MTLS-002-19984e1bc564",
+      "controlId": "MG-MTLS-002",
+      "title": "Declared workload ports must resolve to strict mTLS",
+      "severity": "high",
+      "evidenceType": "config",
+      "status": "unknown",
+      "confidence": "unavailable",
+      "dataPlaneMode": "unknown",
+      "evidenceSources": [
+        "kubernetes-api"
+      ],
+      "resources": [
+        {
+          "kind": "Deployment",
+          "namespace": "omg-not-in-mesh",
+          "name": "outside-api"
+        }
+      ],
+      "reasoning": "Control MG-MTLS-002 could not determine applicability for omg-not-in-mesh/outside-api: dataPlaneMode unavailable: data plane mode unavailable.",
+      "remediation": {
+        "guidance": "Correct workload-level port mTLS overrides so every declared, Service-bound workload port resolves to STRICT."
+      },
+      "unknownReason": "dataPlaneMode unavailable: data plane mode unavailable"
+    },
+    {
+      "id": "MG-MTLS-003-ceb425cbfb9a",
+      "controlId": "MG-MTLS-003",
+      "title": "Workloads must never resolve to globally disabled mTLS",
+      "severity": "critical",
+      "evidenceType": "config",
+      "status": "unknown",
+      "confidence": "unavailable",
+      "dataPlaneMode": "unknown",
+      "evidenceSources": [
+        "kubernetes-api"
+      ],
+      "resources": [
+        {
+          "kind": "Deployment",
+          "namespace": "omg-not-in-mesh",
+          "name": "outside-api"
+        }
+      ],
+      "reasoning": "Control MG-MTLS-003 could not determine applicability for omg-not-in-mesh/outside-api: dataPlaneMode unavailable: data plane mode unavailable.",
+      "remediation": {
+        "guidance": "Apply or correct PeerAuthentication so the workload no longer resolves to DISABLE, then inspect the attached resolution chain."
+      },
+      "unknownReason": "dataPlaneMode unavailable: data plane mode unavailable"
+    }
+  ],
+  "scores": {
+    "overall": null,
+    "categories": [
+      {
+        "category": "mtls",
+        "grade": "unknown",
+        "passRate": null,
+        "unknown": 3
+      }
+    ]
+  }
+}

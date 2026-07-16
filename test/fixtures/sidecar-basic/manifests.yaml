@@ -284,8 +284,8 @@ spec:
     matchLabels: {app: unclassified-api}
   template:
     metadata:
-      labels: {app: unclassified-api}
-      annotations:
+      labels:
+        app: unclassified-api
         sidecar.istio.io/inject: "true"
     spec:
       containers:
