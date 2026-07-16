@@ -3,9 +3,10 @@ kind: Policy
 omitStages:
   - RequestReceived
 rules:
-  # The proof log contains only requests authenticated as the two scanner SAs.
+  # Scanner requests plus one unprivileged audit-positive-control identity.
   - level: Metadata
     users:
       - system:serviceaccount:openmeshguard-e2e:scanner-cluster
       - system:serviceaccount:openmeshguard-e2e:scanner-namespace
+      - system:serviceaccount:openmeshguard-e2e:audit-probe
   - level: None

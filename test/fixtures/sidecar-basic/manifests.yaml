@@ -231,6 +231,66 @@ spec:
 apiVersion: v1
 kind: Namespace
 metadata:
+  name: omg-workload-conflict
+  labels:
+    istio-injection: enabled
+---
+apiVersion: security.istio.io/v1
+kind: PeerAuthentication
+metadata:
+  name: default
+  namespace: omg-workload-conflict
+spec:
+  mtls:
+    mode: STRICT
+---
+apiVersion: security.istio.io/v1
+kind: PeerAuthentication
+metadata:
+  name: conflict-api
+  namespace: omg-workload-conflict
+spec:
+  selector:
+    matchLabels: {app: conflict-api}
+  mtls:
+    mode: DISABLE
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: conflict-api
+  namespace: omg-workload-conflict
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: conflict-api}
+  template:
+    metadata:
+      labels: {app: conflict-api}
+    spec:
+      containers:
+        - name: app
+          image: registry.k8s.io/pause:3.10
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: conflict-api
+  namespace: omg-workload-conflict
+spec:
+  selector: {app: conflict-api}
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8080
+---
+apiVersion: v1
+kind: Namespace
+metadata:
   name: omg-not-in-mesh
   labels:
     istio-injection: disabled
