@@ -163,11 +163,11 @@ The final clean lifecycle and determinism proof was:
 
 | Target | Duration | Result |
 |---|---:|---|
-| `make kind-up` | 45s | green in the exact combined lifecycle |
+| `make kind-up` | 47s | green in the exact combined lifecycle |
 | `make e2e` | 25s | eight goldens matched; nine reports schema-valid; RBAC/audit proofs green |
 | `make kind-down` | 0s | green in the exact combined lifecycle |
 
-On a second fresh cluster, setup took 41s. The first E2E used
+On a second fresh cluster, setup took 43s. The first E2E used
 `BINARY=/tmp/openmeshguard-m4-determinism/openmeshguard` and completed in 25s;
 the second used the default binary and completed in 37s. All eight normalized
 report SHA-256 values were identical, and both runs recorded the same 80
