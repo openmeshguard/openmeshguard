@@ -4,6 +4,7 @@ set -eu
 umask 077
 
 . "$(dirname -- "$0")/lib.sh"
+. "$(dirname -- "$0")/audit-assertions.sh"
 . "$(dirname -- "$0")/report-assertions.sh"
 
 cd "$E2E_ROOT"
@@ -17,10 +18,22 @@ if ! "$KIND" get clusters 2>/dev/null | grep -Fx "$E2E_CLUSTER_NAME" >/dev/null;
 	echo "Kind cluster $E2E_CLUSTER_NAME does not exist; run make kind-up first" >&2
 	exit 1
 fi
-if [ ! -x "$E2E_ROOT/bin/openmeshguard" ]; then
-	echo "scanner binary not found: $E2E_ROOT/bin/openmeshguard; run make build" >&2
+scanner_binary=${OPENMESHGUARD_E2E_BINARY:-"$E2E_ROOT/bin/openmeshguard"}
+case "$scanner_binary" in
+	/*) ;;
+	*) scanner_binary="$E2E_ROOT/$scanner_binary" ;;
+esac
+if [ ! -x "$scanner_binary" ]; then
+	echo "scanner binary not found: $scanner_binary; run make build" >&2
 	exit 1
 fi
+
+# E2E deletes this credential on every exit, so repeated runs against one Kind
+# cluster begin by exporting a fresh protected harness-only administrator file.
+trap 'rm -f "$E2E_ADMIN_KUBECONFIG"' EXIT
+trap 'exit 130' HUP INT TERM
+"$KIND" export kubeconfig --name "$E2E_CLUSTER_NAME" --kubeconfig "$E2E_ADMIN_KUBECONFIG" >/dev/null
+chmod 600 "$E2E_ADMIN_KUBECONFIG"
 
 started=$(date +%s)
 results="$E2E_STATE_DIR/results"
@@ -30,11 +43,15 @@ mkdir -p "$results"
 find "$results" -mindepth 1 -delete
 kubeconfigs=$(mktemp -d "$E2E_STATE_DIR/kubeconfigs.XXXXXX")
 chmod 700 "$kubeconfigs"
+scanner_home="$kubeconfigs/scanner-home"
+mkdir "$scanner_home"
+chmod 700 "$scanner_home"
 tab=$(printf '\t')
 
 cleanup_credentials() {
 	find "$kubeconfigs" -type f -delete 2>/dev/null || true
-	rmdir "$kubeconfigs" 2>/dev/null || true
+	find "$kubeconfigs" -depth -type d -exec rmdir {} \; 2>/dev/null || true
+	rm -f "$E2E_ADMIN_KUBECONFIG"
 }
 trap cleanup_credentials EXIT
 trap 'exit 130' HUP INT TERM
@@ -50,18 +67,28 @@ assert_json() {
 }
 
 make_sa_kubeconfig() {
-	service_account=$1
-	output=$2
-	manager_kubeconfig=$3
-	if [ -n "$manager_kubeconfig" ]; then
-		token=$(kubectl --kubeconfig "$manager_kubeconfig" -n "$E2E_HARNESS_NAMESPACE" create token "$service_account" --duration=10m)
+	kubeconfig_service_account=$1
+	kubeconfig_output=$2
+	kubeconfig_manager=$3
+	kubeconfig_token=$(mktemp "$kubeconfigs/token.XXXXXX")
+	if [ -n "$kubeconfig_manager" ]; then
+		kubectl --kubeconfig "$kubeconfig_manager" -n "$E2E_HARNESS_NAMESPACE" \
+			create token "$kubeconfig_service_account" --duration=10m >"$kubeconfig_token"
 	else
-		token=$(admin_kubectl -n "$E2E_HARNESS_NAMESPACE" create token "$service_account" --duration=10m)
+		admin_kubectl -n "$E2E_HARNESS_NAMESPACE" \
+			create token "$kubeconfig_service_account" --duration=10m >"$kubeconfig_token"
 	fi
-	temporary="$output.tmp"
+	kubeconfig_compact_token="$kubeconfig_token.compact"
+	tr -d '\r\n' <"$kubeconfig_token" >"$kubeconfig_compact_token"
+	mv "$kubeconfig_compact_token" "$kubeconfig_token"
+	if [ ! -s "$kubeconfig_token" ]; then
+		echo "empty ServiceAccount token for $kubeconfig_service_account" >&2
+		return 1
+	fi
+	kubeconfig_temporary="$kubeconfig_output.tmp"
 	admin_kubectl config view --raw --minify --flatten -o json | jq \
-		--arg token "$token" \
-		--arg user "$service_account" '
+		--rawfile token "$kubeconfig_token" \
+		--arg user "$kubeconfig_service_account" '
 		.clusters[0].name = "openmeshguard-e2e" |
 		.contexts = [{
 		  "name": "openmeshguard-e2e",
@@ -69,9 +96,10 @@ make_sa_kubeconfig() {
 		}] |
 		.users = [{"name": $user, "user": {"token": $token}}] |
 		."current-context" = "openmeshguard-e2e"
-	' >"$temporary"
-	chmod 600 "$temporary"
-	mv "$temporary" "$output"
+	' >"$kubeconfig_temporary"
+	chmod 600 "$kubeconfig_temporary"
+	mv "$kubeconfig_temporary" "$kubeconfig_output"
+	rm -f "$kubeconfig_token"
 }
 
 fixture_kubectl() {
@@ -244,12 +272,16 @@ compare_golden() {
 	fi
 }
 
+run_scanner() {
+	env -i HOME="$scanner_home" "$scanner_binary" "$@"
+}
+
 scan_fixture() {
 	name=$1
 	namespace=$2
 	kubeconfig=$3
 	raw="$results/$name.raw.json"
-	"$E2E_ROOT/bin/openmeshguard" scan \
+	run_scanner scan \
 		--kubeconfig "$kubeconfig" \
 		--namespace "$namespace" >"$raw"
 	normalize_report "$raw" "$results/$name.json"
@@ -258,7 +290,7 @@ scan_fixture() {
 
 scan_cluster() {
 	raw="$results/cluster-scan.raw.json"
-	"$E2E_ROOT/bin/openmeshguard" scan \
+	run_scanner scan \
 		--kubeconfig "$kubeconfigs/scanner-cluster.yaml" \
 		--all-namespaces >"$raw"
 	normalize_report "$raw" "$results/cluster-scan.json"
@@ -266,10 +298,12 @@ scan_cluster() {
 }
 
 capture_audit() {
-	docker exec "$E2E_CLUSTER_NAME-control-plane" cat /var/log/kubernetes/audit.log >"$results/audit.jsonl"
+	audit_output=${1:-"$results/audit.jsonl"}
+	docker exec "$E2E_CLUSTER_NAME-control-plane" cat /var/log/kubernetes/audit.log >"$audit_output"
 }
 
 assert_schema_test_available
+assert_golden_case_bijection "$cases" "$goldens"
 
 echo "e2e: bootstrap distinct fixture-manager, scanner, and audit-probe identities"
 admin_kubectl apply -f "$E2E_ROOT/test/e2e/harness-bootstrap.yaml" >/dev/null
@@ -354,8 +388,62 @@ do
 	sleep 1
 done
 
-# Discard setup and RBAC-settle activity. The audit policy retains only the
-# scanners plus the deliberately unprivileged positive-control identity.
+# The namespace credential was created only to prove RBAC propagation. Remove
+# it before the cluster-scanner phase; it will be minted again between phases.
+rm -f "$kubeconfigs/scanner-namespace.yaml"
+if [ -e "$kubeconfigs/scanner-namespace.yaml" ]; then
+	echo "namespace-scanner kubeconfig remained during cluster-scanner phase" >&2
+	exit 1
+fi
+
+# Discard setup and RBAC-settle activity, then prove the policy records both
+# available privileged credential classes before removing the manager file.
+docker exec "$E2E_CLUSTER_NAME-control-plane" sh -c ': > /var/log/kubernetes/audit.log'
+
+echo "e2e: prove audit coverage for privileged fixture-manager and Kind administrator identities"
+fixture_kubectl get namespace omg-strict >/dev/null
+admin_kubectl get namespace omg-strict >/dev/null
+attempt=0
+while :; do
+	capture_audit "$results/audit-positive-controls.jsonl"
+	if jq -s -e \
+		--arg fixture_manager_user "system:serviceaccount:$E2E_HARNESS_NAMESPACE:$E2E_FIXTURE_MANAGER" '
+		any(.[];
+		  .user.username == $fixture_manager_user and
+		  .verb == "get" and
+		  .objectRef.resource == "namespaces" and
+		  .responseStatus.code < 400
+		) and
+		any(.[];
+		  .user.username == "kubernetes-admin" and
+		  .verb == "get" and
+		  .objectRef.resource == "namespaces" and
+		  .responseStatus.code < 400
+		)
+	' "$results/audit-positive-controls.jsonl" >/dev/null; then
+		break
+	fi
+	attempt=$((attempt + 1))
+	if [ "$attempt" -ge 30 ]; then
+		echo "privileged audit positive controls were not recorded within 30s" >&2
+		exit 1
+	fi
+	sleep 1
+done
+
+rm -f "$kubeconfigs/fixture-manager.yaml"
+if [ -e "$kubeconfigs/fixture-manager.yaml" ]; then
+	echo "privileged fixture-manager kubeconfig remained before scanner execution" >&2
+	exit 1
+fi
+rm -f "$E2E_ADMIN_KUBECONFIG"
+if [ -e "$E2E_ADMIN_KUBECONFIG" ]; then
+	echo "Kind administrator kubeconfig remained before scanner execution" >&2
+	exit 1
+fi
+
+# This is the proof boundary: setup credentials are no longer available to the
+# scanner child, and any inherited Kind-admin use will be recorded and rejected.
 docker exec "$E2E_CLUSTER_NAME-control-plane" sh -c ': > /var/log/kubernetes/audit.log'
 
 echo "e2e: prove the API-server audit path records a denied write positive control"
@@ -367,7 +455,7 @@ then
 fi
 attempt=0
 while :; do
-	capture_audit
+	capture_audit "$results/audit-cluster.jsonl"
 	if jq -s -e \
 		--arg user "system:serviceaccount:$E2E_HARNESS_NAMESPACE:audit-probe" '
 		any(.[];
@@ -377,7 +465,7 @@ while :; do
 		  .objectRef.resource == "configmaps" and
 		  .responseStatus.code == 403
 		)
-	' "$results/audit.jsonl" >/dev/null; then
+	' "$results/audit-cluster.jsonl" >/dev/null; then
 		break
 	fi
 	attempt=$((attempt + 1))
@@ -388,11 +476,16 @@ while :; do
 	sleep 1
 done
 
+rm -f "$kubeconfigs/audit-probe.yaml"
+if [ -e "$kubeconfigs/audit-probe.yaml" ]; then
+	echo "audit-probe kubeconfig remained during scanner execution" >&2
+	exit 1
+fi
+
 echo "e2e: scan namespace fixtures and compare canonical JSON goldens"
 while IFS="$tab" read -r name namespace deployment proxy expected_findings; do
 	scan_fixture "$name" "$namespace" "$kubeconfigs/scanner-cluster.yaml"
 done <"$cases"
-scan_fixture namespace-role-degraded omg-strict "$kubeconfigs/scanner-namespace.yaml"
 
 echo "e2e: exercise the published ClusterRole with an all-namespaces scan"
 scan_cluster
@@ -412,6 +505,41 @@ while IFS="$tab" read -r name namespace deployment proxy expected_findings; do
 		exit 1
 	fi
 done <"$cases"
+
+capture_audit "$results/audit-cluster.jsonl"
+rm -f "$kubeconfigs/scanner-cluster.yaml"
+if [ -e "$kubeconfigs/scanner-cluster.yaml" ]; then
+	echo "cluster-scanner kubeconfig remained during namespace-scanner phase" >&2
+	exit 1
+fi
+
+echo "e2e: mint the isolated namespace-scanner credential between proof phases"
+"$KIND" export kubeconfig --name "$E2E_CLUSTER_NAME" --kubeconfig "$E2E_ADMIN_KUBECONFIG"
+chmod 600 "$E2E_ADMIN_KUBECONFIG"
+make_sa_kubeconfig "$E2E_NAMESPACE_SCANNER" "$kubeconfigs/scanner-namespace.yaml" ""
+attempt=0
+while ! kubectl --kubeconfig "$kubeconfigs/scanner-namespace.yaml" --request-timeout=5s -n omg-strict get pods >/dev/null 2>&1
+do
+	attempt=$((attempt + 1))
+	if [ "$attempt" -ge 20 ]; then
+		echo "namespace scanner RBAC binding did not become observable within 20s" >&2
+		exit 1
+	fi
+	sleep 1
+done
+rm -f "$E2E_ADMIN_KUBECONFIG"
+if [ -e "$E2E_ADMIN_KUBECONFIG" ]; then
+	echo "Kind administrator kubeconfig remained during namespace-scanner phase" >&2
+	exit 1
+fi
+
+# Exclude the administrator token request and RBAC settle GET. Any privileged
+# request after this boundary is a namespace-scanner proof failure.
+docker exec "$E2E_CLUSTER_NAME-control-plane" sh -c ': > /var/log/kubernetes/audit.log'
+scan_fixture namespace-role-degraded omg-strict "$kubeconfigs/scanner-namespace.yaml"
+capture_audit "$results/audit-namespace.jsonl"
+rm -f "$kubeconfigs/scanner-namespace.yaml"
+awk '1' "$results/audit-cluster.jsonl" "$results/audit-namespace.jsonl" >"$results/audit.jsonl"
 
 while IFS="$tab" read -r name namespace deployment proxy expected_findings; do
 	assert_json "$name emits one workload posture and at least one finding" "$results/$name.json" '
@@ -473,56 +601,8 @@ assert_json "namespace Role degrades denied root policy evidence" "$results/name
 	all(.findings[]; .status == "unknown")
 '
 
-capture_audit
-echo "e2e: prove API-server audit saw only approved get/list resource calls from scanner identities"
-if ! jq -s -e \
-	--arg cluster_user "system:serviceaccount:$E2E_HARNESS_NAMESPACE:$E2E_CLUSTER_SCANNER" \
-	--arg namespace_user "system:serviceaccount:$E2E_HARNESS_NAMESPACE:$E2E_NAMESPACE_SCANNER" \
-	--arg probe_user "system:serviceaccount:$E2E_HARNESS_NAMESPACE:audit-probe" '
-	def allowed_resource:
-	  (.objectRef.apiGroup // "") as $group |
-	  .objectRef.resource as $resource |
-	  if $group == "" then
-	    ["namespaces", "pods", "services"] | index($resource) != null
-	  elif $group == "apps" then
-	    ["daemonsets", "deployments", "replicasets", "statefulsets"] | index($resource) != null
-	  elif $group == "discovery.k8s.io" then
-	    ["endpointslices"] | index($resource) != null
-	  elif $group == "networking.istio.io" then
-	    ["destinationrules", "envoyfilters", "gateways", "proxyconfigs", "serviceentries", "sidecars", "virtualservices", "workloadentries", "workloadgroups"] | index($resource) != null
-	  elif $group == "security.istio.io" then
-	    ["authorizationpolicies", "peerauthentications", "requestauthentications"] | index($resource) != null
-	  elif $group == "telemetry.istio.io" then
-	    $resource == "telemetries"
-	  elif $group == "gateway.networking.k8s.io" then
-	    ["backendtlspolicies", "gatewayclasses", "gateways", "grpcroutes", "httproutes", "referencegrants", "tcproutes", "tlsroutes", "udproutes"] | index($resource) != null
-	  else false
-	  end;
-	map(select(.user.username == $cluster_user or .user.username == $namespace_user)) as $events |
-	($events | length > 0) and
-	all($events[];
-	  (.verb == "get" or .verb == "list") and
-	  ((.objectRef.subresource // "") == "") and
-	  allowed_resource
-	) and
-	any($events[]; .user.username == $cluster_user) and
-	any($events[]; .user.username == $namespace_user) and
-	any($events[];
-	  .user.username == $namespace_user and
-	  .verb == "list" and
-	  .objectRef.apiGroup == "security.istio.io" and
-	  .objectRef.resource == "peerauthentications" and
-	  .objectRef.namespace == "istio-system" and
-	  .responseStatus.code == 403
-	) and
-	any(.[];
-	  .user.username == $probe_user and
-	  .verb == "create" and
-	  (.objectRef.apiGroup // "") == "" and
-	  .objectRef.resource == "configmaps" and
-	  .responseStatus.code == 403
-	)
-' "$results/audit.jsonl" >/dev/null; then
+echo "e2e: prove API-server audit saw only approved list calls and no privileged credential use"
+if ! assert_scanner_audit "$results/audit.jsonl"; then
 	echo "audit proof failed; inspect $results/audit.jsonl" >&2
 	exit 1
 fi
@@ -538,5 +618,5 @@ events=$(jq -s \
 	[.[] | select(.user.username == $cluster_user or .user.username == $namespace_user)] | length
 ' "$results/audit.jsonl")
 finished=$(date +%s)
-echo "RBAC proofs passed; scanner audit contains $events approved get/list events and no other calls"
+echo "RBAC proofs passed; scanner audit contains $events approved list events and no other calls"
 echo "e2e duration: $((finished - started))s"

@@ -1,5 +1,30 @@
 #!/bin/sh
 
+assert_golden_case_bijection() {
+	report_guard_cases=$1
+	report_guard_goldens=$2
+	report_guard_declared=$(
+		{
+			awk -F '\t' 'NF > 0 {print $1}' "$report_guard_cases"
+			printf '%s\n' namespace-role-degraded
+		} | LC_ALL=C sort
+	)
+	report_guard_actual=$(
+		for report_guard_golden in "$report_guard_goldens"/*.json; do
+			[ -f "$report_guard_golden" ] || continue
+			basename "$report_guard_golden" .json
+		done | LC_ALL=C sort
+	)
+	if [ "$report_guard_declared" != "$report_guard_actual" ]; then
+		echo "fixture cases and golden files are not an exact bijection" >&2
+		echo "declared:" >&2
+		printf '%s\n' "$report_guard_declared" >&2
+		echo "goldens:" >&2
+		printf '%s\n' "$report_guard_actual" >&2
+		return 1
+	fi
+}
+
 assert_report_update_guard() {
 	report_guard_name=$1
 	report_guard_file=$2

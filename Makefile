@@ -6,12 +6,15 @@ GOLANGCI_LINT ?= $(GO) run github.com/golangci/golangci-lint/v2/cmd/golangci-lin
 .PHONY: build test lint schema-test kind-up e2e kind-down fmt-check resolver-purity
 
 build:
-	@mkdir -p bin
-	$(GO) build -o $(BINARY) ./cmd/openmeshguard
+	@mkdir -p "$(dir $(BINARY))"
+	$(GO) build -o "$(BINARY)" ./cmd/openmeshguard
 
 test:
 	$(GO) test ./...
 	sh ./test/e2e/lib_test.sh
+	sh ./test/e2e/audit_assertions_test.sh
+	sh ./test/e2e/harness_security_test.sh
+	sh ./test/e2e/makefile_test.sh
 	sh ./test/e2e/report_assertions_test.sh
 
 lint: fmt-check
@@ -45,7 +48,7 @@ kind-up:
 	./test/e2e/kind-up.sh
 
 e2e: build
-	./test/e2e/run.sh
+	OPENMESHGUARD_E2E_BINARY="$(abspath $(BINARY))" ./test/e2e/run.sh
 
 kind-down:
 	./test/e2e/kind-down.sh

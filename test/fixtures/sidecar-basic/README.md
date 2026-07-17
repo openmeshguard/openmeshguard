@@ -25,4 +25,5 @@ likewise remains unknown until M6 owns ambient enrollment detection.
 
 `cases.tsv` also declares each fixture's exact expected `controlId=status`
 set. E2E verifies that set and all required resolution chains before golden
-update mode can copy a report.
+update mode can copy a report. A permanent bijection check rejects any stale
+golden without a live case and any declared case without a golden.

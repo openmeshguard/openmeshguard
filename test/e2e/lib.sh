@@ -14,6 +14,7 @@ E2E_HARNESS_NAMESPACE=openmeshguard-e2e
 E2E_FIXTURE_MANAGER=fixture-manager
 E2E_CLUSTER_SCANNER=scanner-cluster
 E2E_NAMESPACE_SCANNER=scanner-namespace
+E2E_ADMIN_KUBECONFIG="$E2E_STATE_DIR/admin.kubeconfig"
 
 version_value() {
 	version_key=$1
@@ -207,5 +208,5 @@ istioctl_binary() {
 }
 
 admin_kubectl() {
-	kubectl --context "$E2E_CONTEXT" "$@"
+	kubectl --kubeconfig "$E2E_ADMIN_KUBECONFIG" --context "$E2E_CONTEXT" "$@"
 }
