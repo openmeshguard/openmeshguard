@@ -2,11 +2,12 @@
 
 ## Local prerequisites
 
-The unit gates need Go. The M4 acceptance harness additionally needs Docker,
-`kubectl`, `curl`, `tar`, and `jq`. A matching system Kind or istioctl binary
-is reused. Otherwise the harness downloads the declared release into the
-ignored `.e2e/bin` directory with bounded retries and timeouts, then verifies
-its platform-specific SHA-256 before execution.
+The unit gates need Go, a POSIX shell, `tar`, `jq`, and either `shasum` or
+`sha256sum`. The M4 acceptance harness additionally needs Docker, `kubectl`,
+and `curl`. A matching system Kind or istioctl binary is reused. Otherwise the
+harness downloads the declared release into the ignored `.e2e/bin` directory
+with bounded retries and timeouts, then verifies its platform-specific SHA-256
+before execution.
 
 `versions.yaml` is the only version source for:
 
@@ -43,15 +44,19 @@ UPDATE_GOLDEN=1 make e2e
 ```
 
 Update mode runs every schema and semantic assertion before copying. Those
-guards require non-empty workload/finding sets, the expected live precedence
-chain, the critical disabled-mTLS finding, and non-vacuous namespace-RBAC
-degradation. The comparison replaces only `generatedAt` and the kubeconfig
-context, after first proving both fields were emitted by the raw scanner
-output. No posture evidence is normalized away.
+guards require the exact control/status set declared for each fixture,
+non-empty chains for every resolved posture and its findings, the expected
+live precedence chain, the critical disabled-mTLS finding, and non-vacuous
+namespace-RBAC degradation. Mutation tests prove that a missing control,
+posture chain, or finding chain is rejected before update mode can copy. The
+comparison replaces only `generatedAt` and the kubeconfig context, after first
+proving both fields were emitted by the raw scanner output. No posture evidence
+is normalized away.
 
 `OPENMESHGUARD_E2E_STATE_DIR` may be absolute or relative to the repository.
 Relative overrides are canonicalized before report paths are passed to Go
-schema tests.
+schema tests. Host paths are emitted as quoted YAML scalars in the generated
+Kind configuration, preserving spaces, `#`, and apostrophes.
 
 ## Fixture coverage boundary
 
@@ -80,9 +85,14 @@ The harness keeps four identities visibly separate:
 Before scanning, the harness compares each referenced live Role/ClusterRole
 proof shape to the published manifest, including rules and `aggregationRule`,
 and rejects any direct, User, or service-account-group resource binding beyond
-the expected profile. Kubernetes' built-in authenticated/non-resource
-discovery bindings are excluded by their fixed role names; an added
-resource-authorizing binding through those groups still fails.
+the expected profile. `kind-up` removes Kubernetes' default
+`system:basic-user` binding because that role grants `create` on self-review
+resources to every authenticated ServiceAccount. E2E fails if the binding
+reappears. The only allowed authenticated-group exceptions are
+`system:discovery`, `system:public-info-viewer`, and
+`system:service-account-issuer-discovery`; their live ClusterRoles must contain
+only non-resource `get` rules with no API groups or resources. Any other
+binding, or a widened default discovery role, fails the proof.
 
 The namespace scanner can read its workload namespace but cannot list the
 cluster-scoped Namespace object or root-namespace PeerAuthentication. Its
@@ -117,7 +127,7 @@ event, control-plane, Kind, and audit diagnostics on failure.
 
 ## Recorded M4 proof
 
-Recorded locally on 2026-07-15 (America/Chicago):
+Recorded locally on 2026-07-16 (America/Chicago):
 
 | Component | Exact version |
 |---|---|
@@ -129,17 +139,19 @@ The final clean lifecycle and determinism proof was:
 
 | Target | Duration | Result |
 |---|---:|---|
-| `make kind-up` | 43s | green in the exact combined lifecycle |
-| `make e2e` | 25s | eight goldens matched; nine reports schema-valid; RBAC/audit proofs green |
-| `make kind-down` | 1s | green in the exact combined lifecycle |
+| `make kind-up` | 46s | green in the exact combined lifecycle using `/tmp/openmeshguard review # state` |
+| `make e2e` | 27s | eight goldens matched; nine reports schema-valid; RBAC/audit proofs green |
+| `make kind-down` | 0s | green in the exact combined lifecycle |
 
-Before that final combined invocation, two consecutive ordinary `make e2e`
-runs on the same cluster completed in 37s each with identical goldens and the
-same 80 approved scanner API events.
+On a second fresh cluster, setup took 43s and two consecutive ordinary
+`make e2e` runs completed in 24s and 35s with identical goldens and the same 80
+approved scanner API events. Teardown took 0s.
 
 The audit contained 71 cluster-scanner list events, nine namespace-scanner
 list events, and exactly one separate audit-probe create event with a 403.
-No token-bearing kubeconfig remained after either run.
+The `system:basic-user` binding remained absent, and all three allowed default
+roles were verified as non-resource `get` only. No token-bearing kubeconfig
+remained after any run.
 
 The pinned Istio minor now provides the version input needed by the M2 deferred
 root-namespace-selector decision. M4 does not change that resolver behavior;

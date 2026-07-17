@@ -12,6 +12,7 @@ build:
 test:
 	$(GO) test ./...
 	sh ./test/e2e/lib_test.sh
+	sh ./test/e2e/report_assertions_test.sh
 
 lint: fmt-check
 	$(GOLANGCI_LINT) run

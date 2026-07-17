@@ -4,6 +4,7 @@ set -eu
 umask 077
 
 . "$(dirname -- "$0")/lib.sh"
+. "$(dirname -- "$0")/report-assertions.sh"
 
 cd "$E2E_ROOT"
 
@@ -131,15 +132,18 @@ assert_scanner_binding() {
 		      .name == "system:authenticated"
 		    ))
 		  );
+		def verified_nonresource_default:
+		  .kind == "ClusterRoleBinding" and
+		  .roleRef.kind == "ClusterRole" and
+		  (
+		    .roleRef.name == "system:discovery" or
+		    .roleRef.name == "system:public-info-viewer" or
+		    .roleRef.name == "system:service-account-issuer-discovery"
+		  );
 		[
 		  .items[] |
 		  select(affects_scanner) |
-		  select(
-		    .roleRef.name != "system:basic-user" and
-		    .roleRef.name != "system:discovery" and
-		    .roleRef.name != "system:public-info-viewer" and
-		    .roleRef.name != "system:service-account-issuer-discovery"
-		  )
+		  select(verified_nonresource_default | not)
 		] |
 		length == 1 and
 		.[0].kind == $expected_kind and
@@ -150,6 +154,36 @@ assert_scanner_binding() {
 		echo "scanner $name has a resource-authorizing binding beyond its published profile; inspect $results/scanner-bindings.json" >&2
 		return 1
 	fi
+}
+
+assert_nonresource_default_role() {
+	default_role_name=$1
+	default_role_file="$results/$default_role_name.json"
+	fixture_kubectl get clusterrole "$default_role_name" -o json >"$default_role_file"
+	if ! jq -e '
+		(.aggregationRule == null) and
+		(.rules | length) > 0 and
+		all(.rules[];
+		  (.verbs == ["get"]) and
+		  ((.nonResourceURLs // []) | length) > 0 and
+		  ((.apiGroups // []) | length) == 0 and
+		  ((.resources // []) | length) == 0 and
+		  ((.resourceNames // []) | length) == 0
+		)
+	' "$default_role_file" >/dev/null; then
+		echo "Kubernetes default role $default_role_name is not limited to non-resource get access; inspect $default_role_file" >&2
+		return 1
+	fi
+}
+
+assert_default_rbac_isolation() {
+	if fixture_kubectl get clusterrolebinding system:basic-user >/dev/null 2>&1; then
+		echo "system:basic-user must be unbound in the disposable proof cluster" >&2
+		return 1
+	fi
+	assert_nonresource_default_role system:discovery
+	assert_nonresource_default_role system:public-info-viewer
+	assert_nonresource_default_role system:service-account-issuer-discovery
 }
 
 assert_scanner_bindings() {
@@ -242,13 +276,13 @@ admin_kubectl apply -f "$E2E_ROOT/test/e2e/harness-bootstrap.yaml" >/dev/null
 make_sa_kubeconfig "$E2E_FIXTURE_MANAGER" "$kubeconfigs/fixture-manager.yaml" ""
 
 echo "e2e: reset and apply sidecar fixtures and published RBAC profiles"
-while IFS="$tab" read -r name namespace deployment proxy; do
+while IFS="$tab" read -r name namespace deployment proxy expected_findings; do
 	fixture_kubectl delete namespace "$namespace" --ignore-not-found --wait=false >/dev/null
 done <"$cases"
 attempt=0
 while :; do
 	remaining=0
-	while IFS="$tab" read -r name namespace deployment proxy; do
+	while IFS="$tab" read -r name namespace deployment proxy expected_findings; do
 		if fixture_kubectl get namespace "$namespace" >/dev/null 2>&1; then
 			remaining=1
 		fi
@@ -269,7 +303,7 @@ fixture_kubectl -n omg-strict apply -f "$E2E_ROOT/deploy/rbac/namespace-role.yam
 fixture_kubectl apply -f "$E2E_ROOT/test/e2e/scanner-bindings.yaml" >/dev/null
 
 echo "e2e: wait for fixture workloads and verify sidecar enrollment"
-while IFS="$tab" read -r name namespace deployment proxy; do
+while IFS="$tab" read -r name namespace deployment proxy expected_findings; do
 	fixture_kubectl -n "$namespace" rollout status "deployment/$deployment" --timeout=300s >/dev/null
 	pods="$kubeconfigs/$name-pods.json"
 	fixture_kubectl -n "$namespace" get pods -o json >"$pods"
@@ -300,6 +334,7 @@ assert_json "live workload policy overrides namespace STRICT with DISABLE" "$kub
 '
 
 echo "e2e: prove each scanner has only its published resource-authorizing RBAC binding"
+assert_default_rbac_isolation
 assert_live_profile cluster-role "$E2E_ROOT/deploy/rbac/cluster-role.yaml" "" clusterrole/openmeshguard-cluster-scan
 assert_live_profile namespace-role "$E2E_ROOT/deploy/rbac/namespace-role.yaml" omg-strict role/openmeshguard-namespace-scan
 assert_scanner_bindings
@@ -354,7 +389,7 @@ while :; do
 done
 
 echo "e2e: scan namespace fixtures and compare canonical JSON goldens"
-while IFS="$tab" read -r name namespace deployment proxy; do
+while IFS="$tab" read -r name namespace deployment proxy expected_findings; do
 	scan_fixture "$name" "$namespace" "$kubeconfigs/scanner-cluster.yaml"
 done <"$cases"
 scan_fixture namespace-role-degraded omg-strict "$kubeconfigs/scanner-namespace.yaml"
@@ -365,7 +400,7 @@ assert_json "cluster scan workload targets are globally ordered" "$results/clust
 	[.workloadPostures[].workload | "\(.namespace)/\(.kind)/\(.name)"] as $targets |
 	$targets == ($targets | sort)
 '
-while IFS="$tab" read -r name namespace deployment proxy; do
+while IFS="$tab" read -r name namespace deployment proxy expected_findings; do
 	if ! jq -e --arg namespace "$namespace" --arg deployment "$deployment" '
 		any(.workloadPostures[];
 		  .workload.namespace == $namespace and
@@ -378,16 +413,19 @@ while IFS="$tab" read -r name namespace deployment proxy; do
 	fi
 done <"$cases"
 
-while IFS="$tab" read -r name namespace deployment proxy; do
+while IFS="$tab" read -r name namespace deployment proxy expected_findings; do
 	assert_json "$name emits one workload posture and at least one finding" "$results/$name.json" '
 		(.workloadPostures | length) == 1 and
 		(.findings | length) > 0
 	'
+	assert_report_update_guard "$name" "$results/$name.json" "$expected_findings"
 done <"$cases"
 assert_json "namespace Role scan emits one workload posture and all three built-in findings" "$results/namespace-role-degraded.json" '
 	(.workloadPostures | length) == 1 and
 	(.findings | length) == 3
 '
+assert_report_update_guard namespace-role-degraded "$results/namespace-role-degraded.json" \
+	"MG-MTLS-001=unknown,MG-MTLS-002=unknown,MG-MTLS-003=unknown"
 
 assert_json "strict namespace resolves strict" "$results/strict.json" '
 	.workloadPostures | length == 1 and .[0].mtls.effective == "strict"
@@ -489,7 +527,7 @@ if ! jq -s -e \
 	exit 1
 fi
 
-while IFS="$tab" read -r name namespace deployment proxy; do
+while IFS="$tab" read -r name namespace deployment proxy expected_findings; do
 	compare_golden "$name"
 done <"$cases"
 compare_golden namespace-role-degraded

@@ -102,6 +102,48 @@ download() {
 	curl -fsSL --retry 3 --retry-all-errors --connect-timeout 15 --max-time 180 "$download_url" -o "$download_output"
 }
 
+yaml_quote() {
+	yaml_value=$1
+	jq -Rn --arg value "$yaml_value" '$value'
+}
+
+write_kind_config() {
+	kind_config_output=$1
+	kind_config_audit_policy=$(yaml_quote "$2")
+	kind_config_audit_dir=$(yaml_quote "$3")
+	cat >"$kind_config_output" <<EOF
+apiVersion: kind.x-k8s.io/v1alpha4
+kind: Cluster
+nodes:
+  - role: control-plane
+    kubeadmConfigPatches:
+      - |
+        kind: ClusterConfiguration
+        apiServer:
+          extraArgs:
+            audit-log-path: /var/log/kubernetes/audit.log
+            audit-log-mode: blocking-strict
+            audit-policy-file: /etc/kubernetes/policies/audit-policy.yaml
+          extraVolumes:
+            - name: audit-policies
+              hostPath: /etc/kubernetes/policies
+              mountPath: /etc/kubernetes/policies
+              readOnly: true
+              pathType: DirectoryOrCreate
+            - name: audit-logs
+              hostPath: /var/log/kubernetes
+              mountPath: /var/log/kubernetes
+              readOnly: false
+              pathType: DirectoryOrCreate
+    extraMounts:
+      - hostPath: $kind_config_audit_policy
+        containerPath: /etc/kubernetes/policies/audit-policy.yaml
+        readOnly: true
+      - hostPath: $kind_config_audit_dir
+        containerPath: /var/log/kubernetes
+EOF
+}
+
 kind_binary() {
 	kind_version=$(version_value kind)
 	if command -v kind >/dev/null 2>&1 && [ "$(kind version 2>/dev/null | awk '{print $2}')" = "$kind_version" ]; then

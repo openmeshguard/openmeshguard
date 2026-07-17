@@ -22,3 +22,7 @@ The port and DestinationRule unavailable-evidence goldens have same-basename
 `.note.md` files. They are acceptance constraints, not future expected values:
 M4 does not wire the M3-deferred producers. The injection-disabled case
 likewise remains unknown until M6 owns ambient enrollment detection.
+
+`cases.tsv` also declares each fixture's exact expected `controlId=status`
+set. E2E verifies that set and all required resolution chains before golden
+update mode can copy a report.

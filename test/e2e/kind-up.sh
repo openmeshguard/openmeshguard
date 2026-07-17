@@ -5,6 +5,7 @@ set -eu
 . "$(dirname -- "$0")/lib.sh"
 
 require_command docker
+require_command jq
 require_command kubectl
 
 KIND=$(kind_binary)
@@ -20,38 +21,7 @@ fi
 mkdir -p "$E2E_STATE_DIR/audit" "$E2E_STATE_DIR/results"
 audit_policy="$E2E_ROOT/test/e2e/audit-policy.yaml"
 kind_config="$E2E_STATE_DIR/kind-config.yaml"
-
-cat >"$kind_config" <<EOF
-apiVersion: kind.x-k8s.io/v1alpha4
-kind: Cluster
-nodes:
-  - role: control-plane
-    kubeadmConfigPatches:
-      - |
-        kind: ClusterConfiguration
-        apiServer:
-          extraArgs:
-            audit-log-path: /var/log/kubernetes/audit.log
-            audit-log-mode: blocking-strict
-            audit-policy-file: /etc/kubernetes/policies/audit-policy.yaml
-          extraVolumes:
-            - name: audit-policies
-              hostPath: /etc/kubernetes/policies
-              mountPath: /etc/kubernetes/policies
-              readOnly: true
-              pathType: DirectoryOrCreate
-            - name: audit-logs
-              hostPath: /var/log/kubernetes
-              mountPath: /var/log/kubernetes
-              readOnly: false
-              pathType: DirectoryOrCreate
-    extraMounts:
-      - hostPath: $audit_policy
-        containerPath: /etc/kubernetes/policies/audit-policy.yaml
-        readOnly: true
-      - hostPath: $E2E_STATE_DIR/audit
-        containerPath: /var/log/kubernetes
-EOF
+write_kind_config "$kind_config" "$audit_policy" "$E2E_STATE_DIR/audit"
 
 started=$(date +%s)
 "$KIND" create cluster \
@@ -59,6 +29,11 @@ started=$(date +%s)
 	--image "$KIND_NODE_IMAGE" \
 	--config "$kind_config" \
 	--wait 180s
+
+# ServiceAccounts are automatically members of system:authenticated. The
+# default system:basic-user binding grants create on self-review resources, so
+# remove it from this disposable cluster before proving exclusive scanner RBAC.
+admin_kubectl delete clusterrolebinding system:basic-user --ignore-not-found >/dev/null
 
 "$ISTIOCTL" install \
 	--context "$E2E_CONTEXT" \
