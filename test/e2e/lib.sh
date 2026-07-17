@@ -16,8 +16,8 @@ E2E_CLUSTER_SCANNER=scanner-cluster
 E2E_NAMESPACE_SCANNER=scanner-namespace
 
 version_value() {
-	key=$1
-	value=$(awk -v key="$key" '
+	version_key=$1
+	version_result=$(awk -v key="$version_key" '
 		$0 ~ "^[[:space:]]*" key ":[[:space:]]*" {
 			sub("^[[:space:]]*" key ":[[:space:]]*", "")
 			gsub(/^['\"']|['\"']$/, "")
@@ -25,11 +25,11 @@ version_value() {
 			exit
 		}
 	' "$E2E_ROOT/versions.yaml")
-	if [ -z "$value" ]; then
-		echo "versions.yaml missing required key: $key" >&2
+	if [ -z "$version_result" ]; then
+		echo "versions.yaml missing required key: $version_key" >&2
 		return 1
 	fi
-	printf '%s\n' "$value"
+	printf '%s\n' "$version_result"
 }
 
 require_command() {
@@ -63,10 +63,10 @@ host_arch() {
 }
 
 checksum_key() {
-	prefix=$1
-	os=$2
-	arch=$3
-	case "$prefix:$os:$arch" in
+	checksum_prefix=$1
+	checksum_os=$2
+	checksum_arch=$3
+	case "$checksum_prefix:$checksum_os:$checksum_arch" in
 		kind:darwin:amd64) echo kindSHA256DarwinAMD64 ;;
 		kind:darwin:arm64) echo kindSHA256DarwinARM64 ;;
 		kind:linux:amd64) echo kindSHA256LinuxAMD64 ;;
@@ -75,66 +75,66 @@ checksum_key() {
 		istioctl:osx:arm64) echo istioctlSHA256OSXARM64 ;;
 		istioctl:linux:amd64) echo istioctlSHA256LinuxAMD64 ;;
 		istioctl:linux:arm64) echo istioctlSHA256LinuxARM64 ;;
-		*) echo "unsupported checksum platform: $prefix $os/$arch" >&2; return 1 ;;
+		*) echo "unsupported checksum platform: $checksum_prefix $checksum_os/$checksum_arch" >&2; return 1 ;;
 	esac
 }
 
 verify_sha256() {
-	path=$1
-	want=$2
+	sha_path=$1
+	sha_expected=$2
 	if command -v shasum >/dev/null 2>&1; then
-		got=$(shasum -a 256 "$path" | awk '{print $1}')
+		sha_actual=$(shasum -a 256 "$sha_path" | awk '{print $1}')
 	elif command -v sha256sum >/dev/null 2>&1; then
-		got=$(sha256sum "$path" | awk '{print $1}')
+		sha_actual=$(sha256sum "$sha_path" | awk '{print $1}')
 	else
 		echo "required command not found: shasum or sha256sum" >&2
 		return 1
 	fi
-	if [ "$got" != "$want" ]; then
-		echo "SHA-256 mismatch for $path: got $got, want $want" >&2
+	if [ "$sha_actual" != "$sha_expected" ]; then
+		echo "SHA-256 mismatch for $sha_path: got $sha_actual, want $sha_expected" >&2
 		return 1
 	fi
 }
 
 download() {
-	url=$1
-	output=$2
-	curl -fsSL --retry 3 --retry-all-errors --connect-timeout 15 --max-time 180 "$url" -o "$output"
+	download_url=$1
+	download_output=$2
+	curl -fsSL --retry 3 --retry-all-errors --connect-timeout 15 --max-time 180 "$download_url" -o "$download_output"
 }
 
 kind_binary() {
-	want=$(version_value kind)
-	if command -v kind >/dev/null 2>&1 && [ "$(kind version 2>/dev/null | awk '{print $2}')" = "$want" ]; then
+	kind_version=$(version_value kind)
+	if command -v kind >/dev/null 2>&1 && [ "$(kind version 2>/dev/null | awk '{print $2}')" = "$kind_version" ]; then
 		command -v kind
 		return
 	fi
 
 	require_command curl
 	mkdir -p "$E2E_STATE_DIR/bin"
-	bin="$E2E_STATE_DIR/bin/kind"
-	os=$(host_os)
-	arch=$(host_arch)
-	checksum=$(version_value "$(checksum_key kind "$os" "$arch")")
-	if [ ! -x "$bin" ] || ! verify_sha256 "$bin" "$checksum" ||
-		[ "$($bin version 2>/dev/null | awk '{print $2}')" != "$want" ]
+	kind_path="$E2E_STATE_DIR/bin/kind"
+	kind_os=$(host_os)
+	kind_arch=$(host_arch)
+	kind_checksum=$(version_value "$(checksum_key kind "$kind_os" "$kind_arch")")
+	if [ ! -x "$kind_path" ] || ! verify_sha256 "$kind_path" "$kind_checksum" ||
+		[ "$("$kind_path" version 2>/dev/null | awk '{print $2}')" != "$kind_version" ]
 	then
-		temporary="$bin.download"
-		echo "Downloading Kind $want for $os/$arch" >&2
-		download "https://kind.sigs.k8s.io/dl/$want/kind-$os-$arch" "$temporary"
-		verify_sha256 "$temporary" "$checksum"
-		mv "$temporary" "$bin"
-		chmod +x "$bin"
+		kind_temporary="$kind_path.download"
+		echo "Downloading Kind $kind_version for $kind_os/$kind_arch" >&2
+		download "https://kind.sigs.k8s.io/dl/$kind_version/kind-$kind_os-$kind_arch" "$kind_temporary"
+		verify_sha256 "$kind_temporary" "$kind_checksum"
+		mv "$kind_temporary" "$kind_path"
+		chmod +x "$kind_path"
 	fi
-	if [ "$($bin version 2>/dev/null | awk '{print $2}')" != "$want" ]; then
-		echo "downloaded Kind does not match versions.yaml: $bin" >&2
+	if [ "$("$kind_path" version 2>/dev/null | awk '{print $2}')" != "$kind_version" ]; then
+		echo "downloaded Kind does not match versions.yaml: $kind_path" >&2
 		exit 1
 	fi
-	echo "$bin"
+	echo "$kind_path"
 }
 
 istioctl_binary() {
-	want=$(version_value istio)
-	if command -v istioctl >/dev/null 2>&1 && [ "$(istioctl version --remote=false 2>/dev/null | awk '/client version:/ {print $3}')" = "$want" ]; then
+	istio_version=$(version_value istio)
+	if command -v istioctl >/dev/null 2>&1 && [ "$(istioctl version --remote=false 2>/dev/null | awk '/client version:/ {print $3}')" = "$istio_version" ]; then
 		command -v istioctl
 		return
 	fi
@@ -142,26 +142,26 @@ istioctl_binary() {
 	require_command curl
 	require_command tar
 	mkdir -p "$E2E_STATE_DIR/bin"
-	bin="$E2E_STATE_DIR/bin/istioctl"
-	os=$(release_os)
-	arch=$(host_arch)
-	archive="$E2E_STATE_DIR/istioctl-$want-$os-$arch.tar.gz"
-	checksum=$(version_value "$(checksum_key istioctl "$os" "$arch")")
-	if [ ! -f "$archive" ] || ! verify_sha256 "$archive" "$checksum"; then
-		temporary="$archive.download"
-		echo "Downloading istioctl $want for $os/$arch" >&2
-		download "https://github.com/istio/istio/releases/download/$want/istioctl-$want-$os-$arch.tar.gz" "$temporary"
-		verify_sha256 "$temporary" "$checksum"
-		mv "$temporary" "$archive"
+	istio_path="$E2E_STATE_DIR/bin/istioctl"
+	istio_os=$(release_os)
+	istio_arch=$(host_arch)
+	istio_archive="$E2E_STATE_DIR/istioctl-$istio_version-$istio_os-$istio_arch.tar.gz"
+	istio_checksum=$(version_value "$(checksum_key istioctl "$istio_os" "$istio_arch")")
+	if [ ! -f "$istio_archive" ] || ! verify_sha256 "$istio_archive" "$istio_checksum"; then
+		istio_temporary="$istio_archive.download"
+		echo "Downloading istioctl $istio_version for $istio_os/$istio_arch" >&2
+		download "https://github.com/istio/istio/releases/download/$istio_version/istioctl-$istio_version-$istio_os-$istio_arch.tar.gz" "$istio_temporary"
+		verify_sha256 "$istio_temporary" "$istio_checksum"
+		mv "$istio_temporary" "$istio_archive"
 	fi
 	# Re-extract every cached download before execution so a modified binary
 	# cannot self-attest by printing the pinned version.
-	tar -xzf "$archive" -C "$E2E_STATE_DIR/bin" istioctl
-	if [ "$($bin version --remote=false 2>/dev/null | awk '/client version:/ {print $3}')" != "$want" ]; then
-		echo "downloaded istioctl does not match versions.yaml: $bin" >&2
+	tar -xzf "$istio_archive" -C "$E2E_STATE_DIR/bin" istioctl
+	if [ "$("$istio_path" version --remote=false 2>/dev/null | awk '/client version:/ {print $3}')" != "$istio_version" ]; then
+		echo "downloaded istioctl does not match versions.yaml: $istio_path" >&2
 		exit 1
 	fi
-	echo "$bin"
+	echo "$istio_path"
 }
 
 admin_kubectl() {

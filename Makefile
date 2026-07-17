@@ -11,6 +11,7 @@ build:
 
 test:
 	$(GO) test ./...
+	sh ./test/e2e/lib_test.sh
 
 lint: fmt-check
 	$(GOLANGCI_LINT) run
