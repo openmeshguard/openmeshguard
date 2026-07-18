@@ -217,6 +217,19 @@ func TestBuildPolicyInputs(t *testing.T) {
 			},
 		},
 		{
+			name: "selectorless Service Pod denial is unavailable rather than empty",
+			mutate: func(snapshot *collect.Snapshot) {
+				configureSelectorlessServiceCase(snapshot, &corev1.ObjectReference{Kind: "Pod", Namespace: "payments", Name: "api-1"})
+				snapshot.PodAvailability = scopedAvailability("payments")
+				snapshot.PodAvailability.Namespaces["payments"] = false
+			},
+			assert: func(t *testing.T, workload resolver.WorkloadInput) {
+				if workload.Ports != nil || workload.DestinationRulesKnown {
+					t.Fatalf("policy evidence = ports %#v, destinationRulesKnown %t; want unavailable after Pod denial", workload.Ports, workload.DestinationRulesKnown)
+				}
+			},
+		},
+		{
 			name: "marks service port evidence unavailable after collection denial",
 			mutate: func(snapshot *collect.Snapshot) {
 				snapshot.ServiceAvailability.Namespaces["payments"] = false

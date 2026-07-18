@@ -132,7 +132,7 @@ func (b *workloadBuilder) selectedServices(namespace string, labelSets []map[str
 }
 
 func (b *workloadBuilder) selectorlessServiceMatches(service corev1.Service, podNames []string) (bool, bool) {
-	if !b.endpointSlicesKnown(service.Namespace) {
+	if !b.endpointSlicesKnown(service.Namespace) || !b.podsAvailable(service.Namespace) {
 		return false, false
 	}
 	pods := map[string]struct{}{}

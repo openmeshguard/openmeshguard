@@ -343,6 +343,8 @@ func permissionEvidenceImpact(permission collect.Permission) ([]string, []string
 		return paths, []string{"workload", "namespace"}
 	case "/services":
 		paths = append(paths, "workload.mtls.byPort", "workload.mtls.clientTLSContradiction", "workload.authorization")
+	case "discovery.k8s.io/endpointslices":
+		paths = append(paths, "workload.mtls.byPort", "workload.mtls.clientTLSContradiction", "workload.authorization")
 	case "apps/deployments", "apps/replicasets", "apps/statefulsets", "apps/daemonsets":
 		return paths, []string{"workload"}
 	case "security.istio.io/peerauthentications":
@@ -360,6 +362,7 @@ func inventoryPathsForResource(apiGroup, resource string) []string {
 		"/namespaces":                             "counts.namespaces",
 		"/pods":                                   "counts.pods",
 		"/services":                               "counts.services",
+		"discovery.k8s.io/endpointslices":         "counts.endpointSlices",
 		"apps/deployments":                        "counts.deployments",
 		"apps/replicasets":                        "counts.replicasets",
 		"apps/statefulsets":                       "counts.statefulsets",
