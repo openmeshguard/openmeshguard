@@ -64,7 +64,7 @@ func Build(snapshot collect.Snapshot) Result {
 			return snapshot.DestinationRulesAvailableFor(namespace, rootNamespace)
 		},
 		sidecarsAvailableFor: func(namespace string) bool {
-			return snapshot.SidecarsAvailableFor(namespace)
+			return snapshot.SidecarsAvailableFor(namespace, rootNamespace)
 		},
 		authorizationPoliciesAvailableFor: func(namespace string) bool {
 			return snapshot.AuthorizationPoliciesAvailableFor(namespace, rootNamespace)
@@ -185,14 +185,25 @@ func (b *workloadBuilder) addController(kind, namespace, name string, template c
 	pods := podsMatching(b.pods, namespace, kind, name, selector, b.replicaSetOwners)
 	labelSets := []map[string]string{labels}
 	peerAuthentications := b.peerAuthenticationsFor(namespace, labelSets)
+	var observedPolicyInputs *workloadPolicyInputs
 	if len(pods) > 0 {
 		podPeerAuthentications := make([][]resolver.PeerAuthenticationView, len(pods))
 		podAuthorizationPolicies := make([][]resolver.AuthorizationPolicyView, len(pods))
+		podPolicyInputs := make([]workloadPolicyInputs, len(pods))
 		for i, pod := range pods {
 			podPeerAuthentications[i] = b.peerAuthenticationsFor(namespace, []map[string]string{pod.Labels})
-			podAuthorizationPolicies[i] = b.authorizationPoliciesFor(namespace, []map[string]string{pod.Labels}, b.selectedServices(namespace, []map[string]string{pod.Labels}), b.waypointFor(namespace, pod.Labels, nsLabels, b.selectedServices(namespace, []map[string]string{pod.Labels})))
+			podPolicyInputs[i] = b.policyInputs(
+				namespace,
+				[]map[string]string{pod.Labels},
+				[]corev1.PodSpec{pod.Spec},
+				pod.Labels,
+				nsLabels,
+			)
+			podAuthorizationPolicies[i] = podPolicyInputs[i].authorizationPolicies
 		}
-		if !uniformPeerAuthenticationSets(podPeerAuthentications) || !uniformAuthorizationPolicySets(podAuthorizationPolicies) {
+		if !uniformPeerAuthenticationSets(podPeerAuthentications) ||
+			!uniformAuthorizationPolicySets(podAuthorizationPolicies) ||
+			!uniformWorkloadPolicyInputs(podPolicyInputs) {
 			for _, pod := range pods {
 				b.coverPod(pod)
 				b.addPod(pod)
@@ -200,15 +211,17 @@ func (b *workloadBuilder) addController(kind, namespace, name string, template c
 			return
 		}
 		peerAuthentications = podPeerAuthentications[0]
-		for _, pod := range pods {
-			labelSets = append(labelSets, pod.Labels)
-		}
+		selected := podPolicyInputs[0]
+		observedPolicyInputs = &selected
 	}
 	for _, pod := range pods {
 		b.coverPod(pod)
 	}
 	mode := detectDataPlaneMode(nsLabels, template.Labels, template.Annotations, template.Spec, pods, b.controllerPodEvidenceAvailable(kind, namespace))
-	policyInputs := b.policyInputs(namespace, labelSets, appendPodSpecs(template.Spec, pods), labels, nsLabels)
+	policyInputs := b.policyInputs(namespace, labelSets, []corev1.PodSpec{template.Spec}, labels, nsLabels)
+	if observedPolicyInputs != nil {
+		policyInputs = *observedPolicyInputs
+	}
 
 	b.workloads = append(b.workloads, resolver.WorkloadInput{
 		Ref: resolver.WorkloadRef{

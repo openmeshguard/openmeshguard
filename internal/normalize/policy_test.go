@@ -55,6 +55,28 @@ func TestBuildPolicyInputs(t *testing.T) {
 			},
 		},
 		{
+			name: "preserves a port-level DestinationRule override without TLS settings",
+			mutate: func(snapshot *collect.Snapshot) {
+				snapshot.Services = []corev1.Service{serviceForWorkload("payments", "api", "api", "http")}
+				rule := destinationRule("payments", "api-client-tls", "api", nil, nil, networkingapi.ClientTLSSettings_DISABLE)
+				rule.Spec.TrafficPolicy.PortLevelSettings = []*networkingapi.TrafficPolicy_PortTrafficPolicy{{
+					Port: &networkingapi.PortSelector{Number: 8080},
+				}}
+				snapshot.DestinationRules = []*istionetworkingv1.DestinationRule{rule}
+			},
+			assert: func(t *testing.T, workload resolver.WorkloadInput) {
+				wantPortModes := map[int32]string{8080: ""}
+				if len(workload.DestRules) != 1 || !reflect.DeepEqual(workload.DestRules[0].PortTLSModes, wantPortModes) {
+					t.Fatalf("DestinationRule port TLS modes = %#v, want %#v", workload.DestRules, wantPortModes)
+				}
+
+				result := resolver.New().ResolveMTLS(workload)
+				if result.ClientTLSContradiction == nil || *result.ClientTLSContradiction {
+					t.Fatalf("client TLS contradiction = %#v, want false", result.ClientTLSContradiction)
+				}
+			},
+		},
+		{
 			name: "preserves an observed empty port set",
 			assert: func(t *testing.T, workload resolver.WorkloadInput) {
 				if workload.Ports == nil || len(workload.Ports) != 0 {
@@ -96,6 +118,54 @@ func TestBuildPolicyInputs(t *testing.T) {
 			assert: func(t *testing.T, workload resolver.WorkloadInput) {
 				if len(workload.DestRules) != 1 || workload.DestRules[0].Name != "visible" {
 					t.Fatalf("DestinationRules = %#v, want only payments/visible", workload.DestRules)
+				}
+			},
+		},
+		{
+			name: "applies the root namespace Sidecar default",
+			mutate: func(snapshot *collect.Snapshot) {
+				snapshot.Services = []corev1.Service{serviceForWorkload("payments", "api", "api", "http")}
+				snapshot.DestinationRules = []*istionetworkingv1.DestinationRule{
+					destinationRule("payments", "api-client-tls", "api", nil, nil, networkingapi.ClientTLSSettings_ISTIO_MUTUAL),
+				}
+				snapshot.Sidecars = []*istionetworkingv1.Sidecar{{
+					ObjectMeta: metav1.ObjectMeta{Name: "global-default", Namespace: "istio-system"},
+					Spec: networkingapi.Sidecar{
+						Egress: []*networkingapi.IstioEgressListener{{Hosts: []string{"payments/other"}}},
+					},
+				}}
+			},
+			assert: func(t *testing.T, workload resolver.WorkloadInput) {
+				if !workload.DestinationRulesKnown || workload.DestRules == nil || len(workload.DestRules) != 0 {
+					t.Fatalf("DestinationRules = known %t, %#v; want known empty after root Sidecar scoping", workload.DestinationRulesKnown, workload.DestRules)
+				}
+			},
+		},
+		{
+			name: "prefers a namespace Sidecar default over the root default",
+			mutate: func(snapshot *collect.Snapshot) {
+				snapshot.Services = []corev1.Service{serviceForWorkload("payments", "api", "api", "http")}
+				snapshot.DestinationRules = []*istionetworkingv1.DestinationRule{
+					destinationRule("payments", "api-client-tls", "api", nil, nil, networkingapi.ClientTLSSettings_ISTIO_MUTUAL),
+				}
+				snapshot.Sidecars = []*istionetworkingv1.Sidecar{
+					{
+						ObjectMeta: metav1.ObjectMeta{Name: "global-default", Namespace: "istio-system"},
+						Spec: networkingapi.Sidecar{
+							Egress: []*networkingapi.IstioEgressListener{{Hosts: []string{"payments/other"}}},
+						},
+					},
+					{
+						ObjectMeta: metav1.ObjectMeta{Name: "namespace-default", Namespace: "payments"},
+						Spec: networkingapi.Sidecar{
+							Egress: []*networkingapi.IstioEgressListener{{Hosts: []string{"./api"}}},
+						},
+					},
+				}
+			},
+			assert: func(t *testing.T, workload resolver.WorkloadInput) {
+				if len(workload.DestRules) != 1 || workload.DestRules[0].Name != "api-client-tls" {
+					t.Fatalf("DestinationRules = %#v, want namespace Sidecar to expose api-client-tls", workload.DestRules)
 				}
 			},
 		},
@@ -211,6 +281,53 @@ func TestBuildPolicyInputs(t *testing.T) {
 	}
 }
 
+func TestBuildSplitsControllerWhenPolicyInputsDifferAcrossPods(t *testing.T) {
+	snapshot := policySnapshot()
+	snapshot.ReplicaSets = []appsv1.ReplicaSet{
+		deploymentReplicaSet("payments", "api-old", "api"),
+		deploymentReplicaSet("payments", "api-new", "api"),
+	}
+	snapshot.Pods = []corev1.Pod{
+		podForReplicaSet("payments", "api-old-1", "api-old", map[string]string{"app": "api", "track": "old"}, corev1.PodSpec{
+			Containers: []corev1.Container{
+				{Name: "api", Ports: []corev1.ContainerPort{{Name: "http", ContainerPort: 8080}}},
+				{Name: "istio-proxy"},
+			},
+		}),
+		podForReplicaSet("payments", "api-new-1", "api-new", map[string]string{"app": "api", "track": "new"}, corev1.PodSpec{
+			Containers: []corev1.Container{
+				{Name: "api", Ports: []corev1.ContainerPort{{Name: "http", ContainerPort: 9090}}},
+				{Name: "istio-proxy"},
+			},
+		}),
+	}
+	snapshot.Services = []corev1.Service{{
+		ObjectMeta: metav1.ObjectMeta{Name: "api", Namespace: "payments"},
+		Spec: corev1.ServiceSpec{
+			Selector: map[string]string{"app": "api", "track": "old"},
+			Ports: []corev1.ServicePort{{
+				Name:       "http",
+				Port:       80,
+				TargetPort: intstr.FromString("http"),
+			}},
+		},
+	}}
+
+	workloads := workloadsByKindName(Build(snapshot))
+	if len(workloads) != 2 {
+		t.Fatalf("workloads = %#v, want two pod-level workloads", workloads)
+	}
+	if _, ok := workloads["Deployment/api"]; ok {
+		t.Fatalf("workloads = %#v, do not want aggregate Deployment/api", workloads)
+	}
+	if got := workloads["Pod/api-old-1"].Ports; !reflect.DeepEqual(got, []int32{8080}) {
+		t.Fatalf("old pod ports = %#v, want service-bound port 8080", got)
+	}
+	if got := workloads["Pod/api-new-1"].Ports; got == nil || len(got) != 0 {
+		t.Fatalf("new pod ports = %#v, want observed empty set", got)
+	}
+}
+
 func policySnapshot() collect.Snapshot {
 	return collect.Snapshot{
 		Namespaces: []corev1.Namespace{
@@ -229,7 +346,7 @@ func policySnapshot() collect.Snapshot {
 		ServiceAvailability:             scopedAvailability("payments"),
 		PeerAuthAvailability:            scopedAvailability("payments", "istio-system"),
 		DestinationRuleAvailability:     scopedAvailability("payments", "istio-system"),
-		SidecarAvailability:             scopedAvailability("payments"),
+		SidecarAvailability:             scopedAvailability("payments", "istio-system"),
 		AuthorizationPolicyAvailability: scopedAvailability("payments", "istio-system"),
 		GatewayAvailability:             scopedAvailability("payments"),
 	}

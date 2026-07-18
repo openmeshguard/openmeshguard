@@ -314,11 +314,6 @@ func (c *Collector) Collect(ctx context.Context, scope Scope) (Snapshot, error) 
 				appendPermission(destinationRuleMeta.permissionForScope(true, permissionScopeName(ns)))
 				return nil
 			},
-		)
-	}
-	for _, namespace := range workloadNamespaces(scope) {
-		ns := namespace
-		tasks = append(tasks,
 			func(ctx context.Context) error {
 				items, err := listPages(ctx, func(ctx context.Context, opts metav1.ListOptions) ([]*istionetworkingv1.Sidecar, string, error) {
 					list, err := c.istio.NetworkingV1().Sidecars(ns).List(ctx, opts)
@@ -338,6 +333,11 @@ func (c *Collector) Collect(ctx context.Context, scope Scope) (Snapshot, error) 
 				appendPermission(sidecarMeta.permissionForScope(true, permissionScopeName(ns)))
 				return nil
 			},
+		)
+	}
+	for _, namespace := range workloadNamespaces(scope) {
+		ns := namespace
+		tasks = append(tasks,
 			func(ctx context.Context) error {
 				items, err := listPages(ctx, func(ctx context.Context, opts metav1.ListOptions) ([]gatewayv1.Gateway, string, error) {
 					list, err := c.gateway.GatewayV1().Gateways(ns).List(ctx, opts)

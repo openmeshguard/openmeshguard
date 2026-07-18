@@ -1,6 +1,7 @@
 package normalize
 
 import (
+	"reflect"
 	"sort"
 	"strings"
 
@@ -59,6 +60,15 @@ type gatewayProjection struct {
 	namespace string
 	scope     string
 	ready     bool
+}
+
+func uniformWorkloadPolicyInputs(inputs []workloadPolicyInputs) bool {
+	for i := 1; i < len(inputs); i++ {
+		if !reflect.DeepEqual(inputs[0], inputs[i]) {
+			return false
+		}
+	}
+	return true
 }
 
 func (b *workloadBuilder) policyInputs(
@@ -149,14 +159,6 @@ func resolveTargetPort(servicePort corev1.ServicePort, podSpecs []corev1.PodSpec
 	}
 }
 
-func appendPodSpecs(template corev1.PodSpec, pods []corev1.Pod) []corev1.PodSpec {
-	out := []corev1.PodSpec{template}
-	for _, pod := range pods {
-		out = append(out, pod.Spec)
-	}
-	return out
-}
-
 func (b *workloadBuilder) destinationRulesFor(
 	namespace string,
 	labelSets []map[string]string,
@@ -213,13 +215,17 @@ func projectDestinationRules(rules []*istionetworkingv1.DestinationRule) []desti
 		}
 		if trafficPolicy != nil {
 			for _, portPolicy := range trafficPolicy.GetPortLevelSettings() {
-				if portPolicy == nil || portPolicy.GetPort() == nil || portPolicy.GetTls() == nil {
+				if portPolicy == nil || portPolicy.GetPort() == nil || portPolicy.GetPort().GetNumber() == 0 {
 					continue
 				}
 				if view.PortTLSModes == nil {
 					view.PortTLSModes = map[int32]string{}
 				}
-				view.PortTLSModes[int32(portPolicy.GetPort().GetNumber())] = portPolicy.GetTls().GetMode().String()
+				mode := ""
+				if portPolicy.GetTls() != nil {
+					mode = portPolicy.GetTls().GetMode().String()
+				}
+				view.PortTLSModes[int32(portPolicy.GetPort().GetNumber())] = mode
 			}
 		}
 		selector := rule.Spec.GetWorkloadSelector()
@@ -307,14 +313,21 @@ func projectSidecars(sidecars []*istionetworkingv1.Sidecar) []sidecarProjection 
 }
 
 func (b *workloadBuilder) sidecarsFor(namespace string, labelSets []map[string]string) []sidecarProjection {
-	var defaults []sidecarProjection
+	var namespaceDefaults []sidecarProjection
+	var rootDefaults []sidecarProjection
 	var selected []sidecarProjection
 	for _, sidecar := range b.sidecars {
+		if sidecar.namespace == b.rootNamespace && sidecar.namespace != namespace {
+			if len(sidecar.selectorLabels) == 0 {
+				rootDefaults = append(rootDefaults, sidecar)
+			}
+			continue
+		}
 		if sidecar.namespace != namespace {
 			continue
 		}
 		if len(sidecar.selectorLabels) == 0 {
-			defaults = append(defaults, sidecar)
+			namespaceDefaults = append(namespaceDefaults, sidecar)
 			continue
 		}
 		if matchAnyLabels(sidecar.selectorLabels, labelSets) {
@@ -324,7 +337,10 @@ func (b *workloadBuilder) sidecarsFor(namespace string, labelSets []map[string]s
 	if len(selected) > 0 {
 		return selected
 	}
-	return defaults
+	if len(namespaceDefaults) > 0 {
+		return namespaceDefaults
+	}
+	return rootDefaults
 }
 
 func sidecarsAllowService(sidecars []sidecarProjection, workloadNamespace string, service corev1.Service) bool {

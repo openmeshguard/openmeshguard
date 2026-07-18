@@ -147,10 +147,18 @@ func (s Snapshot) DestinationRulesAvailableFor(namespace, rootNamespace string) 
 	)
 }
 
-// SidecarsAvailableFor reports whether Sidecar resource scoping evidence was
-// collected for the workload namespace.
-func (s Snapshot) SidecarsAvailableFor(namespace string) bool {
-	return s.scopedResourceAvailableFor(s.SidecarAvailability, []string{namespace}, "networking.istio.io", "sidecars")
+// SidecarsAvailableFor reports whether workload-namespace and mesh-root
+// Sidecar resource scoping evidence was collected.
+func (s Snapshot) SidecarsAvailableFor(namespace, rootNamespace string) bool {
+	if rootNamespace == "" {
+		rootNamespace = DefaultRootNamespace
+	}
+	return s.scopedResourceAvailableFor(
+		s.SidecarAvailability,
+		uniqueScopes(namespace, rootNamespace),
+		"networking.istio.io",
+		"sidecars",
+	)
 }
 
 // AuthorizationPoliciesAvailableFor reports whether mesh-root and workload

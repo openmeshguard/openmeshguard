@@ -196,7 +196,7 @@ func TestCollectorErrorsWhenScopedNamespaceIsMissing(t *testing.T) {
 	}
 }
 
-func TestCollectorScopedScanIncludesRootNamespacePeerAuthentications(t *testing.T) {
+func TestCollectorScopedScanIncludesRootNamespacePolicies(t *testing.T) {
 	rootNamespace := "istio-config"
 	kube := kubefake.NewSimpleClientset(
 		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "payments"}},
@@ -210,6 +210,18 @@ func TestCollectorScopedScanIncludesRootNamespacePeerAuthentications(t *testing.
 				Mtls: &securityapi.PeerAuthentication_MutualTLS{Mode: securityapi.PeerAuthentication_MutualTLS_STRICT},
 			},
 		},
+		&istiosecurityv1.AuthorizationPolicy{
+			ObjectMeta: metav1.ObjectMeta{Name: "default-deny", Namespace: rootNamespace},
+			Spec:       securityapi.AuthorizationPolicy{},
+		},
+		&istionetworkingv1.DestinationRule{
+			ObjectMeta: metav1.ObjectMeta{Name: "global-api", Namespace: rootNamespace},
+			Spec:       networkingapi.DestinationRule{Host: "api.payments.svc.cluster.local"},
+		},
+		&istionetworkingv1.Sidecar{
+			ObjectMeta: metav1.ObjectMeta{Name: "global-default", Namespace: rootNamespace},
+			Spec:       networkingapi.Sidecar{},
+		},
 	)
 
 	snapshot, err := newTestCollector(kube, istio).Collect(context.Background(), Scope{Namespaces: []string{"payments"}, RootNamespace: rootNamespace})
@@ -219,22 +231,43 @@ func TestCollectorScopedScanIncludesRootNamespacePeerAuthentications(t *testing.
 	if snapshot.RootNamespace != rootNamespace {
 		t.Fatalf("snapshot root namespace = %q, want %q", snapshot.RootNamespace, rootNamespace)
 	}
-	if len(snapshot.PeerAuthentications) != 1 {
-		t.Fatalf("peer authentications = %d, want root namespace policy", len(snapshot.PeerAuthentications))
+	if len(snapshot.PeerAuthentications) != 1 || len(snapshot.AuthorizationPolicies) != 1 ||
+		len(snapshot.DestinationRules) != 1 || len(snapshot.Sidecars) != 1 {
+		t.Fatalf(
+			"root policies = peerAuth %d, authz %d, destinationRules %d, sidecars %d; want one each",
+			len(snapshot.PeerAuthentications),
+			len(snapshot.AuthorizationPolicies),
+			len(snapshot.DestinationRules),
+			len(snapshot.Sidecars),
+		)
 	}
-	if got := snapshot.PeerAuthentications[0].Namespace; got != rootNamespace {
-		t.Fatalf("peer authentication namespace = %q, want %q", got, rootNamespace)
+	rootResources := map[string]string{
+		"peerauthentications":   snapshot.PeerAuthentications[0].Namespace,
+		"authorizationpolicies": snapshot.AuthorizationPolicies[0].Namespace,
+		"destinationrules":      snapshot.DestinationRules[0].Namespace,
+		"sidecars":              snapshot.Sidecars[0].Namespace,
 	}
-
-	paNamespaces := map[string]bool{}
-	for _, action := range istio.Actions() {
-		if action.GetResource().Resource == "peerauthentications" {
-			paNamespaces[action.GetNamespace()] = true
+	for resource, namespace := range rootResources {
+		if namespace != rootNamespace {
+			t.Fatalf("%s namespace = %q, want %q", resource, namespace, rootNamespace)
 		}
 	}
-	for _, namespace := range []string{"payments", rootNamespace} {
-		if !paNamespaces[namespace] {
-			t.Fatalf("missing peerauthentication list for namespace %q; saw %#v", namespace, paNamespaces)
+
+	listNamespaces := map[string]map[string]bool{}
+	for _, action := range istio.Actions() {
+		resource := action.GetResource().Resource
+		if _, ok := rootResources[resource]; ok {
+			if listNamespaces[resource] == nil {
+				listNamespaces[resource] = map[string]bool{}
+			}
+			listNamespaces[resource][action.GetNamespace()] = true
+		}
+	}
+	for resource := range rootResources {
+		for _, namespace := range []string{"payments", rootNamespace} {
+			if !listNamespaces[resource][namespace] {
+				t.Fatalf("missing %s list for namespace %q; saw %#v", resource, namespace, listNamespaces[resource])
+			}
 		}
 	}
 }
