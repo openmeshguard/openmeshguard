@@ -1,0 +1,7 @@
+strict	omg-strict	strict-api	sidecar	MG-MTLS-002=unknown
+permissive	omg-permissive	permissive-api	sidecar	MG-MTLS-001=open,MG-MTLS-002=unknown
+workload-conflict	omg-workload-conflict	conflict-api	sidecar	MG-MTLS-001=open,MG-MTLS-002=unknown,MG-MTLS-003=open
+port-level-override	omg-port-override	port-api	sidecar	MG-MTLS-001=unknown,MG-MTLS-002=unknown,MG-MTLS-003=unknown
+dr-contradiction	omg-dr-contradiction	dr-api	sidecar	MG-MTLS-002=unknown
+not-in-mesh	omg-not-in-mesh	outside-api	none	MG-MTLS-001=unknown,MG-MTLS-002=unknown,MG-MTLS-003=unknown
+unclassified	omg-unclassified	unclassified-api	sidecar	MG-MTLS-002=unknown

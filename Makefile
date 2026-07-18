@@ -6,11 +6,16 @@ GOLANGCI_LINT ?= $(GO) run github.com/golangci/golangci-lint/v2/cmd/golangci-lin
 .PHONY: build test lint schema-test kind-up e2e kind-down fmt-check resolver-purity
 
 build:
-	@mkdir -p bin
-	$(GO) build -o $(BINARY) ./cmd/openmeshguard
+	@mkdir -p "$(dir $(BINARY))"
+	$(GO) build -o "$(BINARY)" ./cmd/openmeshguard
 
 test:
 	$(GO) test ./...
+	sh ./test/e2e/lib_test.sh
+	sh ./test/e2e/audit_assertions_test.sh
+	sh ./test/e2e/harness_security_test.sh
+	sh ./test/e2e/makefile_test.sh
+	sh ./test/e2e/report_assertions_test.sh
 
 lint: fmt-check
 	$(GOLANGCI_LINT) run
@@ -40,10 +45,10 @@ resolver-purity:
 	$(GOLANGCI_LINT) run --enable-only depguard ./internal/resolver/...
 
 kind-up:
-	@echo "kind-up is deferred until M4"
+	./test/e2e/kind-up.sh
 
-e2e:
-	@echo "e2e is deferred until M4"
+e2e: build
+	OPENMESHGUARD_E2E_BINARY="$(abspath $(BINARY))" ./test/e2e/run.sh
 
 kind-down:
-	@echo "kind-down is deferred until M4"
+	./test/e2e/kind-down.sh

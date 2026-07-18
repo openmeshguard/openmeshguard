@@ -1,0 +1,50 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: openmeshguard-namespace-scan
+rules:
+  # Why: pods and Services identify in-namespace workloads, sidecars, and service targets.
+  - apiGroups: [""]
+    resources: ["pods", "services"]
+    verbs: ["get", "list"]
+  # Why: EndpointSlices map in-namespace Services to workload endpoints.
+  - apiGroups: ["discovery.k8s.io"]
+    resources: ["endpointslices"]
+    verbs: ["get", "list"]
+  # Why: workload controllers provide normalized workload identity and pod templates.
+  - apiGroups: ["apps"]
+    resources: ["deployments", "replicasets", "statefulsets", "daemonsets"]
+    verbs: ["get", "list"]
+  # Why: in-namespace Istio traffic policy determines client TLS and visibility scope.
+  - apiGroups: ["networking.istio.io"]
+    resources:
+      - destinationrules
+      - envoyfilters
+      - gateways
+      - proxyconfigs
+      - serviceentries
+      - sidecars
+      - virtualservices
+      - workloadentries
+      - workloadgroups
+    verbs: ["get", "list"]
+  # Why: in-namespace Istio security policy determines mTLS, authn, and authorization.
+  - apiGroups: ["security.istio.io"]
+    resources: ["authorizationpolicies", "peerauthentications", "requestauthentications"]
+    verbs: ["get", "list"]
+  # Why: in-namespace Istio Telemetry resources describe declared telemetry configuration.
+  - apiGroups: ["telemetry.istio.io"]
+    resources: ["telemetries"]
+    verbs: ["get", "list"]
+  # Why: namespaced Gateway API resources expose listeners, routes, references, and policy.
+  - apiGroups: ["gateway.networking.k8s.io"]
+    resources:
+      - gateways
+      - httproutes
+      - grpcroutes
+      - tlsroutes
+      - tcproutes
+      - udproutes
+      - referencegrants
+      - backendtlspolicies
+    verbs: ["get", "list"]

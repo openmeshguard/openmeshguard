@@ -76,6 +76,32 @@ func TestReportSchemaFixtures(t *testing.T) {
 			}
 		})
 	}
+
+	goldens, err := filepath.Glob(filepath.Join(root, "test", "fixtures", "sidecar-basic", "golden", "*.json"))
+	if err != nil {
+		t.Fatalf("glob M4 goldens: %v", err)
+	}
+	if len(goldens) == 0 {
+		t.Fatal("no M4 canonical JSON goldens discovered")
+	}
+	for _, golden := range goldens {
+		golden := golden
+		t.Run("M4 golden "+filepath.Base(golden), func(t *testing.T) {
+			file, err := os.Open(golden)
+			if err != nil {
+				t.Fatalf("open M4 golden: %v", err)
+			}
+			defer file.Close()
+
+			report, err := jsonschema.UnmarshalJSON(file)
+			if err != nil {
+				t.Fatalf("decode M4 golden: %v", err)
+			}
+			if err := schema.Validate(report); err != nil {
+				t.Fatalf("M4 golden should match canonical schema: %v", err)
+			}
+		})
+	}
 }
 
 func TestGeneratedScanOutputMatchesSchema(t *testing.T) {

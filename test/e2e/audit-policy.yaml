@@ -1,0 +1,16 @@
+apiVersion: audit.k8s.io/v1
+kind: Policy
+omitStages:
+  - RequestReceived
+rules:
+  # Scanner requests plus the unprivileged and privileged harness identities.
+  - level: Metadata
+    users:
+      - system:serviceaccount:openmeshguard-e2e:scanner-cluster
+      - system:serviceaccount:openmeshguard-e2e:scanner-namespace
+      - system:serviceaccount:openmeshguard-e2e:audit-probe
+      - system:serviceaccount:openmeshguard-e2e:fixture-manager
+      # Pinned Kind's dedicated administrator kubeconfig authenticates as this
+      # user; a live positive control verifies that identity before each scan.
+      - kubernetes-admin
+  - level: None

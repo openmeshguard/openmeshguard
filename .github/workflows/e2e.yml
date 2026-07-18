@@ -1,0 +1,44 @@
+name: Kind E2E (non-required)
+
+on:
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  kind-e2e:
+    name: Kind, Istio, RBAC, and no-write proofs
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Create pinned Kind and Istio cluster
+        run: make kind-up
+
+      - name: Run acceptance and audit proofs
+        run: make e2e
+
+      - name: Collect failure diagnostics
+        if: failure()
+        run: ./test/e2e/collect-diagnostics.sh
+
+      - name: Upload failure evidence
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: openmeshguard-e2e-evidence
+          path: .e2e/results/
+
+      - name: Delete Kind cluster
+        if: always()
+        run: make kind-down
