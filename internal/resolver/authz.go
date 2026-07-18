@@ -133,7 +133,10 @@ func (ResolverV2) ResolveAuthz(in WorkloadInput) AuthzResult {
 	policiesInScope = uniqueStrings(policiesInScope)
 	l7Unenforced = uniqueStrings(l7Unenforced)
 	knownBroadAllow := broadAllow
-	knownIdentityScoped := hasEmptyAllow || (hasExplicitAllow && identityScoped)
+	knownIdentityScoped := hasEmptyAllow
+	if hasExplicitAllow {
+		knownIdentityScoped = identityScoped
+	}
 
 	if unknownReason != "" {
 		return unknownAuthz(unknownReason, policiesInScope, chain, &knownBroadAllow, &knownIdentityScoped)

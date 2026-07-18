@@ -203,6 +203,22 @@ func TestResolverV2ResolveAuthz(t *testing.T) {
 			},
 		},
 		{
+			name: "default deny does not make a broad explicit allow identity scoped",
+			in: authzWorkload(ModeSidecar,
+				authzPolicy("payments", "default-deny", "ALLOW", false),
+				AuthorizationPolicyView{Name: "allow-all", Namespace: "payments", Action: "ALLOW", HasRules: true, BroadAllow: true},
+			),
+			wantEffective:  AuthzDefaultDenyExplicitAllow,
+			wantBroadAllow: &trueValue,
+			wantIdentity:   &falseValue,
+			wantPolicies:   []string{"payments/allow-all", "payments/default-deny"},
+			wantChain: []Step{
+				authzDefaultStep(1),
+				authzPolicyStepWant(2, "payments", "allow-all", "adds a structurally broad rule to the additive ALLOW union"),
+				authzPolicyStepWant(3, "payments", "default-deny", "adds an ALLOW policy with no rules; activates default deny for unmatched requests"),
+			},
+		},
+		{
 			name: "CUSTOM only remains explicit unknown",
 			in: authzWorkload(ModeSidecar,
 				authzPolicy("payments", "external-check", "CUSTOM", true),
