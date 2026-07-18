@@ -4,9 +4,10 @@
 // resolver. Move it to internal/resolver/ during M0 scaffolding; from then on,
 // changes to exported types in this file require human approval.
 //
-// The current mTLS semantics tag is mtls/v2. Bump it whenever mTLS
-// precedence, inheritance, contradiction, or unknown propagation semantics
-// change, and add or update table coverage for the changed behavior.
+// Resolver versions are a stable, comma-separated list of subsystem tags in
+// the order mTLS, authorization (for example, mtls/v2,authz/v1). Bump only the
+// tag whose precedence, interpretation, or unknown-propagation semantics
+// change, and add or update table coverage for that behavior.
 //
 // INVARIANTS (enforced by tests and lint):
 //  1. This package is PURE: no client-go imports, no I/O, no globals, no clock.
@@ -74,7 +75,7 @@ type Step struct {
 type WorkloadInput struct {
 	Ref           WorkloadRef
 	Labels        map[string]string
-	Ports         []int32
+	Ports         []int32 // nil when unavailable; non-nil empty when observed with no declared ports
 	DataPlaneMode DataPlaneMode
 	Namespace     NamespaceInput
 	MeshDefaults  MeshDefaults
@@ -83,9 +84,12 @@ type WorkloadInput struct {
 	// DestinationRulesKnown distinguishes a completed collection with no
 	// matching DestinationRules from unavailable DestinationRule evidence.
 	DestinationRulesKnown bool
-	AuthzPolicies         []AuthorizationPolicyView
-	Waypoint              *WaypointView // nil when no waypoint serves this workload
-	ZtunnelOnNode         Tristate      // ambient: ztunnel health on the workload's node(s)
+	AuthzPolicies         []AuthorizationPolicyView // nil when collection was unavailable
+	// Waypoint is nil when waypoint evidence was collected and no waypoint
+	// serves the workload. A non-nil view with Known=false records unavailable
+	// Gateway API evidence without inventing a missing waypoint conclusion.
+	Waypoint      *WaypointView
+	ZtunnelOnNode Tristate // ambient: ztunnel health on the workload's node(s)
 }
 
 type WorkloadRef struct {
@@ -102,7 +106,6 @@ type NamespaceInput struct {
 }
 
 type MeshDefaults struct {
-	MeshMTLSMode  string // resolved mesh-wide PA mode, "" if none
 	RootNamespace string // istio root config namespace (default istio-system)
 	TrustDomain   string
 	Known         bool // false when control-plane config was unreadable -> unknown propagation
@@ -139,15 +142,18 @@ type DestinationRuleView struct {
 type AuthorizationPolicyView struct {
 	Name, Namespace string
 	Action          string // ALLOW | DENY | CUSTOM | AUDIT
+	HasSelector     bool
 	SelectorMatch   bool
 	TargetsWaypoint bool // attached via targetRefs to a waypoint/Gateway
 	RequiresL7      bool // rule uses L7-only attributes (methods, paths, headers, request principals, ...)
-	BroadAllow      bool // empty rules / wildcard principals (precomputed hint; resolver may refine)
+	HasRules        bool // distinguishes spec: {} from rules: [{}]
+	BroadAllow      bool // unrestricted rule or wildcard source hint; ignored when HasRules is false
 	RootNamespace   bool // lives in the mesh root namespace
 }
 
 type WaypointView struct {
 	Name, Namespace string
+	Known           bool // false when Gateway API evidence was unavailable
 	Ready           bool
 	Scope           string // namespace | service | workload
 }
@@ -164,6 +170,7 @@ type MTLSResult struct {
 
 type AuthzResult struct {
 	Effective       AuthzEffective `json:"effective"`
+	BroadAllow      *bool          `json:"broadAllow,omitempty"`
 	PoliciesInScope []string       `json:"policiesInScope,omitempty"` // "namespace/name"
 	L7Unenforced    []string       `json:"l7Unenforced,omitempty"`
 	Chain           []Step         `json:"chain"`

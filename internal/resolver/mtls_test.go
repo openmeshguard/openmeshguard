@@ -7,8 +7,8 @@ import (
 )
 
 func TestResolverV2Version(t *testing.T) {
-	if got := New().Version(); got != "mtls/v2" {
-		t.Fatalf("Version() = %q, want mtls/v2", got)
+	if got := New().Version(); got != "mtls/v2,authz/v1" {
+		t.Fatalf("Version() = %q, want mtls/v2,authz/v1", got)
 	}
 }
 
@@ -375,19 +375,6 @@ func TestResolverV2OmitsClientTLSConclusionWhenDestinationRulesUnavailable(t *te
 		if step.Kind == "DestinationRule" {
 			t.Fatalf("resolution chain used unavailable DestinationRule evidence: %#v", result.Chain)
 		}
-	}
-}
-
-func TestResolverV2ResolveAuthz(t *testing.T) {
-	result := New().ResolveAuthz(WorkloadInput{})
-	if result.Effective != AuthzUnknown {
-		t.Fatalf("effective = %q, want %q", result.Effective, AuthzUnknown)
-	}
-	if result.UnknownReason != authzNotImplementedReason {
-		t.Fatalf("unknownReason = %q, want %q", result.UnknownReason, authzNotImplementedReason)
-	}
-	if len(result.Chain) != 0 {
-		t.Fatalf("chain = %#v, want empty", result.Chain)
 	}
 }
 

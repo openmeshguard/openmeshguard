@@ -8,9 +8,9 @@ import (
 )
 
 const (
-	mtlsVersion = "mtls/v2"
+	mtlsVersion  = "mtls/v2"
+	authzVersion = "authz/v1"
 
-	authzNotImplementedReason             = "authorization resolver not yet implemented (M5)"
 	dataPlaneUnknownReason                = "data plane membership unavailable"
 	peerAuthenticationUnavailableReason   = "PeerAuthentication resources unavailable"
 	ztunnelUnavailableReason              = "ztunnel availability unavailable"
@@ -20,7 +20,7 @@ const (
 	ambientDisableUnsupportedReason       = "ambient PeerAuthentication DISABLE mode is unsupported by Istio"
 )
 
-// ResolverV2 implements the mtls/v2 effective mTLS semantics.
+// ResolverV2 implements the current composite resolver semantics.
 type ResolverV2 struct{}
 
 // New returns the current resolver implementation.
@@ -29,7 +29,7 @@ func New() ResolverV2 {
 }
 
 func (ResolverV2) Version() string {
-	return mtlsVersion
+	return mtlsVersion + "," + authzVersion
 }
 
 func (ResolverV2) ResolveMTLS(in WorkloadInput) MTLSResult {
@@ -112,14 +112,6 @@ func (ResolverV2) ResolveMTLS(in WorkloadInput) MTLSResult {
 		ByPort:                 byPort,
 		ClientTLSContradiction: contradiction,
 		Chain:                  orderChain(chain),
-	}
-}
-
-func (ResolverV2) ResolveAuthz(WorkloadInput) AuthzResult {
-	return AuthzResult{
-		Effective:     AuthzUnknown,
-		Chain:         []Step{},
-		UnknownReason: authzNotImplementedReason,
 	}
 }
 
