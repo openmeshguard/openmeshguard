@@ -5,9 +5,14 @@ GOLANGCI_LINT ?= $(GO) run github.com/golangci/golangci-lint/v2/cmd/golangci-lin
 
 .PHONY: build test lint schema-test kind-up e2e kind-down fmt-check resolver-purity
 
+# VERSION is stamped into the binary; "dev" keeps make-built binaries (and the
+# e2e goldens that pin scanner.version) deterministic regardless of Go's VCS
+# stamping. Release builds override it: VERSION=v0.1.0 make build.
+VERSION ?= dev
+
 build:
 	@mkdir -p "$(dir $(BINARY))"
-	$(GO) build -o "$(BINARY)" ./cmd/openmeshguard
+	$(GO) build -ldflags "-X main.version=$(VERSION)" -o "$(BINARY)" ./cmd/openmeshguard
 
 test:
 	$(GO) test ./...
