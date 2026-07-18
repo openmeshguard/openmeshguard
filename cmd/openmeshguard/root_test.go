@@ -357,3 +357,26 @@ func executeForTest(t *testing.T, info versionInfo, args ...string) (string, str
 
 	return stdout.String(), stderr.String(), err
 }
+
+func TestScannerVersionResolutionOrder(t *testing.T) {
+	tests := []struct {
+		name          string
+		ldflagsValue  string
+		moduleVersion string
+		want          string
+	}{
+		{name: "ldflags wins over module version", ldflagsValue: "v0.2.0", moduleVersion: "v0.1.0", want: "v0.2.0"},
+		{name: "module version from go install", ldflagsValue: "", moduleVersion: "v0.1.0-alpha.1", want: "v0.1.0-alpha.1"},
+		{name: "local go build reports placeholder", ldflagsValue: "", moduleVersion: "(devel)", want: versionPlaceholder},
+		{name: "missing build info reports placeholder", ldflagsValue: "", moduleVersion: "", want: versionPlaceholder},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := scannerVersion(tt.ldflagsValue, func() string { return tt.moduleVersion })
+			if got != tt.want {
+				t.Fatalf("scannerVersion = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
