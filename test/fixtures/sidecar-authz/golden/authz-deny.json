@@ -3,7 +3,7 @@
   "generatedAt": "2000-01-01T00:00:00Z",
   "scanner": {
     "version": "dev",
-    "resolverVersion": "mtls/v2,authz/v1",
+    "resolverVersion": "mtls/v2,authz/v2",
     "controlPacks": [
       {
         "name": "builtin-authz",
@@ -173,6 +173,15 @@
       ]
     },
     {
+      "apiGroup": "discovery.k8s.io",
+      "resource": "endpointslices",
+      "verbs": [
+        "list"
+      ],
+      "granted": true,
+      "impact": "selectorless Service attachment and workload port evidence may be unavailable"
+    },
+    {
       "apiGroup": "gateway.networking.k8s.io",
       "resource": "gateways",
       "verbs": [
@@ -255,6 +264,7 @@
       "daemonsets": 0,
       "deployments": 1,
       "destinationRules": 0,
+      "endpointSlices": 1,
       "gateways": 0,
       "namespaces": 1,
       "peerAuthentications": 1,
@@ -306,6 +316,7 @@
       "authorization": {
         "effective": "deny-present",
         "broadAllow": false,
+        "identityScoped": true,
         "policiesInScope": [
           "omg-authz-deny/deny-blocked",
           "omg-authz-deny/allow-client"

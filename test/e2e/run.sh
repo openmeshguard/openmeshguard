@@ -600,6 +600,7 @@ assert_json "root default deny and local allow merge additively" "$results/authz
 	.workloadPostures | length == 1 and
 	.[0].authorization.effective == "default-deny-explicit-allow" and
 	.[0].authorization.broadAllow == false and
+	.[0].authorization.identityScoped == true and
 	.[0].authorization.policiesInScope == ["istio-system/authz-root-default-deny", "omg-authz-root-local/allow-client"] and
 	([.[0].authorization.chain[].kind] == ["AuthorizationDefault", "AuthorizationPolicy", "AuthorizationPolicy"]) and
 	(.[0].authorization.chain[1].effect | contains("no rules")) and
@@ -610,12 +611,14 @@ assert_json "empty allow rule is distinct from an empty default-deny policy" "$r
 	($report.workloadPostures | length) == 1 and
 	$report.workloadPostures[0].authorization.effective == "default-deny-explicit-allow" and
 	$report.workloadPostures[0].authorization.broadAllow == true and
+	$report.workloadPostures[0].authorization.identityScoped == false and
 	any($report.findings[]; .controlId == "MG-AUTHZ-003" and .status == "open") and
 	any($report.findings[]; .controlId == "MG-AUTHZ-004" and .status == "open")
 '
 assert_json "DENY remains additive ahead of ALLOW" "$results/authz-deny.json" '
 	.workloadPostures | length == 1 and
 	.[0].authorization.effective == "deny-present" and
+	.[0].authorization.identityScoped == true and
 	([.[0].authorization.chain[].kind] == ["AuthorizationDefault", "AuthorizationPolicy", "AuthorizationPolicy", "AuthorizationPolicy"]) and
 	(.[0].authorization.chain[1].effect | contains("DENY overrides")) and
 	(.[0].authorization.chain[2].effect | contains("excludes policy")) and
@@ -624,11 +627,13 @@ assert_json "DENY remains additive ahead of ALLOW" "$results/authz-deny.json" '
 assert_json "allow-only policy remains distinct from explicit default deny" "$results/authz-allow-only.json" '
 	.workloadPostures | length == 1 and
 	.[0].authorization.effective == "allow-only" and
-	.[0].authorization.broadAllow == false
+	.[0].authorization.broadAllow == false and
+	.[0].authorization.identityScoped == true
 '
 assert_json "selector mismatch is explicit in the authorization chain" "$results/authz-selector-mismatch.json" '
 	.workloadPostures | length == 1 and
 	.[0].authorization.effective == "no-policy" and
+	.[0].authorization.identityScoped == false and
 	((.[0].authorization.policiesInScope // []) == []) and
 	any(.[0].authorization.chain[]; .field == "spec.selector" and (.effect | contains("excludes policy")))
 '
