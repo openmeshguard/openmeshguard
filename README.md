@@ -13,10 +13,49 @@ OpenMeshGuard is a read-only CLI scanner that tells you what your mesh security 
 - **Honest about what it doesn't know.** Missing permissions, missing telemetry, and unclassified namespaces are reported as explicit unknowns — never silently passed or failed.
 - **Evidence you can hand to a security team.** Every finding carries its resolution chain: which resources, in which order, produced the conclusion.
 
-## Quickstart
+## Install
+
+With a Go 1.24+ toolchain:
 
 ```bash
-# Scan a cluster (read-only; see docs/rbac for the exact permissions)
+go install github.com/openmeshguard/openmeshguard/cmd/openmeshguard@latest
+
+openmeshguard version   # prints the module version for tagged builds, "dev" for local builds
+```
+
+Prebuilt release binaries will ship with the first tagged release. To build from a clone instead: `make build` (binary lands in `bin/openmeshguard`).
+
+## Try it today
+
+The scanner currently resolves **effective mTLS posture** end to end and evaluates the built-in mTLS control pack. Point it at any cluster where your kubeconfig has read access (or apply the least-privilege profiles in [`deploy/rbac/`](deploy/rbac/)):
+
+```bash
+# Scan one namespace (repeatable flag), or --all-namespaces
+openmeshguard scan --context my-cluster --namespace payments > report.json
+
+# Effective mTLS per workload, with the policies that produced each conclusion
+jq '.workloadPostures[] | {workload, dataPlaneMode, mtls: .mtls.effective}' report.json
+
+# Findings from the built-in control pack, each with its resolution chain
+jq '.findings[] | {controlId, status, severity, reasoning}' report.json
+
+# Category grades and pass rates
+jq '.scores' report.json
+```
+
+What to expect in the output:
+
+- **`workloadPostures`** — per-workload effective mTLS (`strict` / `permissive` / `disabled` / `mixed-by-port` / `unknown`) resolved through Istio's real precedence (mesh → namespace → workload → port), each with the ordered `chain` of resources that produced it.
+- **`findings`** — engine-evaluated controls (e.g. `MG-MTLS-001` when a workload resolves to permissive), with severity, evidence sources, and remediation. Evidence the scanner cannot obtain yields findings with status `unknown` and an explicit `unknownReason` — never a silent pass.
+- **`permissionSummary`** — exactly which access the scanner had, and what degraded without it.
+- **`scores`** — per-category pass rates and letter grades.
+
+The report is canonical JSON validating against [`docs/contracts/canonical-json-schema.json`](docs/contracts/canonical-json-schema.json). Authorization posture, HTML/SARIF reports, and runtime verification land in upcoming milestones (see [`plan/`](plan/)) — the commands below preview that surface.
+
+## Quickstart (full surface — in progress)
+
+```bash
+# Scan a cluster (read-only; see deploy/rbac for the exact permissions)
 openmeshguard scan --context my-cluster --all-namespaces
 
 # Include runtime verification from Istio telemetry
