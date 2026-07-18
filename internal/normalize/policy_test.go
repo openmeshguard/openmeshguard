@@ -60,7 +60,7 @@ func TestBuildPolicyInputs(t *testing.T) {
 				snapshot.Services = []corev1.Service{serviceForWorkload("payments", "api", "api", "http")}
 				rule := destinationRule("payments", "api-client-tls", "api", nil, nil, networkingapi.ClientTLSSettings_DISABLE)
 				rule.Spec.TrafficPolicy.PortLevelSettings = []*networkingapi.TrafficPolicy_PortTrafficPolicy{{
-					Port: &networkingapi.PortSelector{Number: 8080},
+					Port: &networkingapi.PortSelector{Number: 80},
 				}}
 				snapshot.DestinationRules = []*istionetworkingv1.DestinationRule{rule}
 			},
@@ -73,6 +73,92 @@ func TestBuildPolicyInputs(t *testing.T) {
 				result := resolver.New().ResolveMTLS(workload)
 				if result.ClientTLSContradiction == nil || *result.ClientTLSContradiction {
 					t.Fatalf("client TLS contradiction = %#v, want false", result.ClientTLSContradiction)
+				}
+			},
+		},
+		{
+			name: "matches DestinationRule selectors against client proxy labels",
+			mutate: func(snapshot *collect.Snapshot) {
+				addClientProxy(snapshot, "clients", map[string]string{"app": "caller"})
+				snapshot.Services = []corev1.Service{serviceForWorkload("payments", "api", "api", "http")}
+				snapshot.DestinationRules = []*istionetworkingv1.DestinationRule{
+					destinationRule("clients", "caller-plaintext", "api.payments.svc.cluster.local", nil, map[string]string{"app": "caller"}, networkingapi.ClientTLSSettings_DISABLE),
+				}
+			},
+			assert: func(t *testing.T, workload resolver.WorkloadInput) {
+				if len(workload.DestRules) != 1 || workload.DestRules[0].Name != "caller-plaintext" {
+					t.Fatalf("DestinationRules = %#v, want caller-selected rule", workload.DestRules)
+				}
+				result := resolver.New().ResolveMTLS(workload)
+				if result.ClientTLSContradiction == nil || !*result.ClientTLSContradiction {
+					t.Fatalf("client TLS contradiction = %#v, want true", result.ClientTLSContradiction)
+				}
+			},
+		},
+		{
+			name: "service namespace DestinationRule wins over root namespace rule",
+			mutate: func(snapshot *collect.Snapshot) {
+				addClientProxy(snapshot, "clients", map[string]string{"app": "caller"})
+				snapshot.Services = []corev1.Service{serviceForWorkload("payments", "api", "api", "http")}
+				snapshot.DestinationRules = []*istionetworkingv1.DestinationRule{
+					destinationRule("payments", "service-mutual", "api", nil, nil, networkingapi.ClientTLSSettings_ISTIO_MUTUAL),
+					destinationRule("istio-system", "root-plaintext", "api.payments.svc.cluster.local", nil, nil, networkingapi.ClientTLSSettings_DISABLE),
+				}
+			},
+			assert: func(t *testing.T, workload resolver.WorkloadInput) {
+				if len(workload.DestRules) != 1 || workload.DestRules[0].Name != "service-mutual" {
+					t.Fatalf("DestinationRules = %#v, want only service namespace winner", workload.DestRules)
+				}
+				result := resolver.New().ResolveMTLS(workload)
+				if result.ClientTLSContradiction == nil || *result.ClientTLSContradiction {
+					t.Fatalf("client TLS contradiction = %#v, want false", result.ClientTLSContradiction)
+				}
+			},
+		},
+		{
+			name: "client namespace DestinationRule wins before service and root namespaces",
+			mutate: func(snapshot *collect.Snapshot) {
+				addClientProxy(snapshot, "clients", map[string]string{"app": "caller"})
+				snapshot.Services = []corev1.Service{serviceForWorkload("payments", "api", "api", "http")}
+				snapshot.DestinationRules = []*istionetworkingv1.DestinationRule{
+					destinationRule("clients", "client-plaintext", "api.payments.svc.cluster.local", nil, nil, networkingapi.ClientTLSSettings_DISABLE),
+					destinationRule("payments", "service-mutual", "api", nil, nil, networkingapi.ClientTLSSettings_ISTIO_MUTUAL),
+					destinationRule("istio-system", "root-mutual", "api.payments.svc.cluster.local", nil, nil, networkingapi.ClientTLSSettings_ISTIO_MUTUAL),
+				}
+			},
+			assert: func(t *testing.T, workload resolver.WorkloadInput) {
+				names := map[string]bool{}
+				for _, rule := range workload.DestRules {
+					names[rule.Name] = true
+				}
+				if !names["client-plaintext"] || !names["service-mutual"] || names["root-mutual"] {
+					t.Fatalf("DestinationRules = %#v, want per-client lookup winners without root union", workload.DestRules)
+				}
+				result := resolver.New().ResolveMTLS(workload)
+				if result.ClientTLSContradiction == nil || !*result.ClientTLSContradiction {
+					t.Fatalf("client TLS contradiction = %#v, want true from client namespace winner", result.ClientTLSContradiction)
+				}
+			},
+		},
+		{
+			name: "translates DestinationRule service port override to workload port",
+			mutate: func(snapshot *collect.Snapshot) {
+				snapshot.Services = []corev1.Service{serviceForWorkload("payments", "api", "api", "http")}
+				rule := destinationRule("payments", "api-client-tls", "api", nil, nil, networkingapi.ClientTLSSettings_DISABLE)
+				rule.Spec.TrafficPolicy.PortLevelSettings = []*networkingapi.TrafficPolicy_PortTrafficPolicy{{
+					Port: &networkingapi.PortSelector{Number: 80},
+					Tls:  &networkingapi.ClientTLSSettings{Mode: networkingapi.ClientTLSSettings_ISTIO_MUTUAL},
+				}}
+				snapshot.DestinationRules = []*istionetworkingv1.DestinationRule{rule}
+			},
+			assert: func(t *testing.T, workload resolver.WorkloadInput) {
+				want := map[int32]string{8080: "ISTIO_MUTUAL"}
+				if len(workload.DestRules) != 1 || !reflect.DeepEqual(workload.DestRules[0].PortTLSModes, want) {
+					t.Fatalf("DestinationRule port modes = %#v, want %#v", workload.DestRules, want)
+				}
+				result := resolver.New().ResolveMTLS(workload)
+				if result.ClientTLSContradiction == nil || *result.ClientTLSContradiction {
+					t.Fatalf("client TLS contradiction = %#v, want false after service-to-workload port translation", result.ClientTLSContradiction)
 				}
 			},
 		},
@@ -444,6 +530,29 @@ func scopedAvailability(namespaces ...string) collect.ScopedAvailability {
 		available.Namespaces[namespace] = true
 	}
 	return available
+}
+
+func addClientProxy(snapshot *collect.Snapshot, namespace string, labels map[string]string) {
+	snapshot.Namespaces = append(snapshot.Namespaces, namespaceForPolicyTest(namespace))
+	snapshot.ReplicaSets = append(snapshot.ReplicaSets, appsv1.ReplicaSet{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "caller-rs",
+			Namespace: namespace,
+			OwnerReferences: []metav1.OwnerReference{{
+				Kind: "Deployment", Name: "caller",
+			}},
+		},
+		Spec: appsv1.ReplicaSetSpec{Template: corev1.PodTemplateSpec{
+			ObjectMeta: metav1.ObjectMeta{Labels: labels},
+			Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "caller"}, {Name: "istio-proxy"}}},
+		}},
+	})
+	snapshot.DestinationRuleAvailability.Namespaces[namespace] = true
+	snapshot.SidecarAvailability.Namespaces[namespace] = true
+}
+
+func namespaceForPolicyTest(name string) corev1.Namespace {
+	return corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: name}}
 }
 
 func serviceForWorkload(namespace, name, app, targetPort string) corev1.Service {

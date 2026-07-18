@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/openmeshguard/openmeshguard/internal/collect"
 	"github.com/openmeshguard/openmeshguard/internal/resolver"
 	securityapi "istio.io/api/security/v1beta1"
 	typeapi "istio.io/api/type/v1beta1"
@@ -42,6 +43,11 @@ type sidecarProjection struct {
 	namespace      string
 	selectorLabels map[string]string
 	egressHosts    []string
+}
+
+type clientProxy struct {
+	namespace string
+	labels    map[string]string
 }
 
 type policyTargetRef struct {
@@ -82,7 +88,7 @@ func (b *workloadBuilder) policyInputs(
 	services := b.selectedServices(namespace, labelSets)
 	waypoint := b.waypointFor(namespace, workloadLabels, namespaceLabels, services)
 	ports := b.serviceBoundPorts(namespace, services, podSpecs)
-	destinationRules, destinationRulesKnown := b.destinationRulesFor(namespace, labelSets, services)
+	destinationRules, destinationRulesKnown := b.destinationRulesFor(namespace, services, podSpecs)
 	return workloadPolicyInputs{
 		ports:                 ports,
 		destinationRules:      destinationRules,
@@ -162,29 +168,34 @@ func resolveTargetPort(servicePort corev1.ServicePort, podSpecs []corev1.PodSpec
 
 func (b *workloadBuilder) destinationRulesFor(
 	namespace string,
-	labelSets []map[string]string,
 	services []corev1.Service,
+	podSpecs []corev1.PodSpec,
 ) ([]resolver.DestinationRuleView, bool) {
-	known := b.destinationRulesKnown(namespace) && b.servicesKnown(namespace) && b.sidecarsKnown(namespace)
-	if !known {
+	if !b.servicesKnown(namespace) || !b.destinationRulesKnown(namespace) {
 		return nil, false
 	}
-	selectedSidecars := b.sidecarsFor(namespace, labelSets)
 	out := make([]resolver.DestinationRuleView, 0)
-	for _, destinationRule := range b.destinationRules {
-		if !exportedTo(destinationRule.exportTo, destinationRule.view.Namespace, namespace) {
-			continue
+	for _, client := range b.clientProxies {
+		if !b.destinationRulesKnown(client.namespace) || !b.sidecarsKnown(client.namespace) {
+			return nil, false
 		}
-		if len(destinationRule.selectorLabels) > 0 &&
-			(destinationRule.view.Namespace != namespace || !matchAnyLabels(destinationRule.selectorLabels, labelSets)) {
-			continue
-		}
+		selectedSidecars := b.sidecarsFor(client.namespace, []map[string]string{client.labels})
 		for _, service := range services {
-			if !destinationRuleTargetsService(destinationRule, service) || !sidecarsAllowService(selectedSidecars, namespace, service) {
+			if !b.destinationRulesKnown(service.Namespace) {
+				return nil, false
+			}
+			if !sidecarsAllowService(selectedSidecars, client.namespace, service) {
 				continue
 			}
-			out = append(out, destinationRule.view)
-			break
+			for _, destinationRule := range b.destinationRulesForClientService(client, service) {
+				view, ok := destinationRuleViewForService(destinationRule.view, service, podSpecs)
+				if !ok {
+					return nil, false
+				}
+				if !containsDestinationRuleView(out, view) {
+					out = append(out, view)
+				}
+			}
 		}
 	}
 	sort.Slice(out, func(i, j int) bool {
@@ -197,6 +208,149 @@ func (b *workloadBuilder) destinationRulesFor(
 		out = []resolver.DestinationRuleView{}
 	}
 	return out, true
+}
+
+func (b *workloadBuilder) destinationRulesForClientService(client clientProxy, service corev1.Service) []destinationRuleProjection {
+	lookupNamespaces := uniqueNonEmptyStrings(client.namespace, service.Namespace, b.rootNamespace)
+	for _, lookupNamespace := range lookupNamespaces {
+		var selected []destinationRuleProjection
+		for _, rule := range b.destinationRules {
+			if rule.view.Namespace != lookupNamespace ||
+				!exportedTo(rule.exportTo, rule.view.Namespace, client.namespace) ||
+				!destinationRuleTargetsService(rule, service) {
+				continue
+			}
+			if len(rule.selectorLabels) > 0 &&
+				(rule.view.Namespace != client.namespace || !matchAnyLabels(rule.selectorLabels, []map[string]string{client.labels})) {
+				continue
+			}
+			selected = append(selected, rule)
+		}
+		if len(selected) > 0 {
+			return selected
+		}
+	}
+	return nil
+}
+
+func destinationRuleViewForService(
+	view resolver.DestinationRuleView,
+	service corev1.Service,
+	podSpecs []corev1.PodSpec,
+) (resolver.DestinationRuleView, bool) {
+	if view.PortTLSModes == nil {
+		return view, true
+	}
+	translated := map[int32]string{}
+	for servicePort, mode := range view.PortTLSModes {
+		for _, candidate := range service.Spec.Ports {
+			if candidate.Port != servicePort {
+				continue
+			}
+			workloadPort, ok := resolveTargetPort(candidate, podSpecs)
+			if !ok {
+				return resolver.DestinationRuleView{}, false
+			}
+			if existing, exists := translated[workloadPort]; exists && existing != mode {
+				return resolver.DestinationRuleView{}, false
+			}
+			translated[workloadPort] = mode
+		}
+	}
+	if len(translated) == 0 {
+		view.PortTLSModes = nil
+	} else {
+		view.PortTLSModes = translated
+	}
+	return view, true
+}
+
+func containsDestinationRuleView(views []resolver.DestinationRuleView, candidate resolver.DestinationRuleView) bool {
+	for _, view := range views {
+		if reflect.DeepEqual(view, candidate) {
+			return true
+		}
+	}
+	return false
+}
+
+func uniqueNonEmptyStrings(values ...string) []string {
+	seen := map[string]struct{}{}
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		if value == "" {
+			continue
+		}
+		if _, exists := seen[value]; exists {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	return out
+}
+
+func projectClientProxies(snapshot collect.Snapshot) []clientProxy {
+	var proxies []clientProxy
+	add := func(namespace string, labels map[string]string, spec corev1.PodSpec) {
+		if namespace == "" || !hasContainer(spec, "istio-proxy") {
+			return
+		}
+		candidate := clientProxy{namespace: namespace, labels: copyStringMap(labels)}
+		for _, proxy := range proxies {
+			if proxy.namespace == candidate.namespace && reflect.DeepEqual(proxy.labels, candidate.labels) {
+				return
+			}
+		}
+		proxies = append(proxies, candidate)
+	}
+	for _, pod := range snapshot.Pods {
+		add(pod.Namespace, pod.Labels, pod.Spec)
+	}
+	for _, deployment := range snapshot.Deployments {
+		add(deployment.Namespace, deployment.Spec.Template.Labels, deployment.Spec.Template.Spec)
+	}
+	for _, replicaSet := range snapshot.ReplicaSets {
+		add(replicaSet.Namespace, replicaSet.Spec.Template.Labels, replicaSet.Spec.Template.Spec)
+	}
+	for _, statefulSet := range snapshot.StatefulSets {
+		add(statefulSet.Namespace, statefulSet.Spec.Template.Labels, statefulSet.Spec.Template.Spec)
+	}
+	for _, daemonSet := range snapshot.DaemonSets {
+		add(daemonSet.Namespace, daemonSet.Spec.Template.Labels, daemonSet.Spec.Template.Spec)
+	}
+	sort.Slice(proxies, func(i, j int) bool {
+		if proxies[i].namespace != proxies[j].namespace {
+			return proxies[i].namespace < proxies[j].namespace
+		}
+		return canonicalLabels(proxies[i].labels) < canonicalLabels(proxies[j].labels)
+	})
+	return proxies
+}
+
+func hasContainer(spec corev1.PodSpec, name string) bool {
+	for _, container := range append(spec.Containers, spec.InitContainers...) {
+		if container.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+func canonicalLabels(values map[string]string) string {
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	var out strings.Builder
+	for _, key := range keys {
+		out.WriteString(key)
+		out.WriteByte('=')
+		out.WriteString(values[key])
+		out.WriteByte('\x00')
+	}
+	return out.String()
 }
 
 func projectDestinationRules(rules []*istionetworkingv1.DestinationRule) []destinationRuleProjection {

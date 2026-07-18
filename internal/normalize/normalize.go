@@ -45,6 +45,7 @@ func Build(snapshot collect.Snapshot) Result {
 		sidecars:              sidecars,
 		authorizationPolicies: authorizationPolicies,
 		gateways:              gateways,
+		clientProxies:         projectClientProxies(snapshot),
 		coveredPods:           map[string]struct{}{},
 		rootNamespace:         rootNamespace,
 		replicaSetOwners:      replicaSetDeploymentOwners(snapshot.ReplicaSets),
@@ -164,6 +165,7 @@ type workloadBuilder struct {
 	sidecars                          []sidecarProjection
 	authorizationPolicies             []authorizationPolicyProjection
 	gateways                          []gatewayProjection
+	clientProxies                     []clientProxy
 	coveredPods                       map[string]struct{}
 	rootNamespace                     string
 	replicaSetOwners                  map[string]string
