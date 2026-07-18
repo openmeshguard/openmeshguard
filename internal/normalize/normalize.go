@@ -10,6 +10,7 @@ import (
 	istiosecurityv1beta1 "istio.io/client-go/pkg/apis/security/v1beta1"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	discoveryv1 "k8s.io/api/discovery/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 )
@@ -40,6 +41,7 @@ func Build(snapshot collect.Snapshot) Result {
 		namespaces:            namespaceLabels,
 		pods:                  snapshot.Pods,
 		services:              snapshot.Services,
+		endpointSlices:        snapshot.EndpointSlices,
 		peerAuthentications:   peerAuthentications,
 		destinationRules:      destinationRules,
 		sidecars:              sidecars,
@@ -60,6 +62,9 @@ func Build(snapshot collect.Snapshot) Result {
 		},
 		servicesAvailableFor: func(namespace string) bool {
 			return snapshot.ServicesAvailableFor(namespace)
+		},
+		endpointSlicesAvailableFor: func(namespace string) bool {
+			return snapshot.EndpointSlicesAvailableFor(namespace)
 		},
 		destinationRulesAvailableFor: func(namespace string) bool {
 			return snapshot.DestinationRulesAvailableFor(namespace, rootNamespace)
@@ -139,6 +144,7 @@ func Build(snapshot collect.Snapshot) Result {
 				"namespaces":            len(snapshot.Namespaces),
 				"pods":                  len(snapshot.Pods),
 				"services":              len(snapshot.Services),
+				"endpointSlices":        len(snapshot.EndpointSlices),
 				"deployments":           len(snapshot.Deployments),
 				"replicasets":           len(snapshot.ReplicaSets),
 				"statefulsets":          len(snapshot.StatefulSets),
@@ -160,6 +166,7 @@ type workloadBuilder struct {
 	namespaces                        map[string]map[string]string
 	pods                              []corev1.Pod
 	services                          []corev1.Service
+	endpointSlices                    []discoveryv1.EndpointSlice
 	peerAuthentications               []peerAuthenticationProjection
 	destinationRules                  []destinationRuleProjection
 	sidecars                          []sidecarProjection
@@ -173,6 +180,7 @@ type workloadBuilder struct {
 	replicaSetsAvailableFor           func(namespace string) bool
 	peerAuthenticationsAvailableFor   func(namespace string) bool
 	servicesAvailableFor              func(namespace string) bool
+	endpointSlicesAvailableFor        func(namespace string) bool
 	destinationRulesAvailableFor      func(namespace string) bool
 	sidecarsAvailableFor              func(namespace string) bool
 	authorizationPoliciesAvailableFor func(namespace string) bool
@@ -198,6 +206,7 @@ func (b *workloadBuilder) addController(kind, namespace, name string, template c
 				namespace,
 				[]map[string]string{pod.Labels},
 				[]corev1.PodSpec{pod.Spec},
+				[]string{pod.Name},
 				pod.Labels,
 				nsLabels,
 			)
@@ -220,7 +229,7 @@ func (b *workloadBuilder) addController(kind, namespace, name string, template c
 		b.coverPod(pod)
 	}
 	mode := detectDataPlaneMode(nsLabels, template.Labels, template.Annotations, template.Spec, pods, b.controllerPodEvidenceAvailable(kind, namespace))
-	policyInputs := b.policyInputs(namespace, labelSets, []corev1.PodSpec{template.Spec}, labels, nsLabels)
+	policyInputs := b.policyInputs(namespace, labelSets, []corev1.PodSpec{template.Spec}, nil, labels, nsLabels)
 	if observedPolicyInputs != nil {
 		policyInputs = *observedPolicyInputs
 	}
@@ -255,7 +264,7 @@ func (b *workloadBuilder) addPod(pod corev1.Pod) {
 	labels := copyStringMap(pod.Labels)
 	nsLabels := b.namespaces[pod.Namespace]
 	mode := detectDataPlaneMode(nsLabels, pod.Labels, pod.Annotations, pod.Spec, []corev1.Pod{pod}, b.podsAvailable(pod.Namespace))
-	policyInputs := b.policyInputs(pod.Namespace, []map[string]string{labels}, []corev1.PodSpec{pod.Spec}, labels, nsLabels)
+	policyInputs := b.policyInputs(pod.Namespace, []map[string]string{labels}, []corev1.PodSpec{pod.Spec}, []string{pod.Name}, labels, nsLabels)
 
 	b.workloads = append(b.workloads, resolver.WorkloadInput{
 		Ref: resolver.WorkloadRef{

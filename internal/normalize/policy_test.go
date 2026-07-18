@@ -15,6 +15,7 @@ import (
 	istiosecurityv1beta1 "istio.io/client-go/pkg/apis/security/v1beta1"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	discoveryv1 "k8s.io/api/discovery/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
@@ -167,6 +168,51 @@ func TestBuildPolicyInputs(t *testing.T) {
 			assert: func(t *testing.T, workload resolver.WorkloadInput) {
 				if workload.Ports == nil || len(workload.Ports) != 0 {
 					t.Fatalf("ports = %#v, want non-nil observed empty set", workload.Ports)
+				}
+			},
+		},
+		{
+			name: "maps selectorless Service EndpointSlice to workload ports",
+			mutate: func(snapshot *collect.Snapshot) {
+				configureSelectorlessServiceCase(snapshot, &corev1.ObjectReference{Kind: "Pod", Namespace: "payments", Name: "api-1"})
+			},
+			assert: func(t *testing.T, workload resolver.WorkloadInput) {
+				if !reflect.DeepEqual(workload.Ports, []int32{8080}) {
+					t.Fatalf("ports = %#v, want selectorless Service target port 8080", workload.Ports)
+				}
+			},
+		},
+		{
+			name: "selectorless Service with a different observed endpoint is known empty",
+			mutate: func(snapshot *collect.Snapshot) {
+				configureSelectorlessServiceCase(snapshot, &corev1.ObjectReference{Kind: "Pod", Namespace: "payments", Name: "other-1"})
+			},
+			assert: func(t *testing.T, workload resolver.WorkloadInput) {
+				if workload.Ports == nil || len(workload.Ports) != 0 {
+					t.Fatalf("ports = %#v, want observed empty selectorless Service evidence", workload.Ports)
+				}
+			},
+		},
+		{
+			name: "selectorless Service without EndpointSlice targetRef is unavailable",
+			mutate: func(snapshot *collect.Snapshot) {
+				configureSelectorlessServiceCase(snapshot, nil)
+			},
+			assert: func(t *testing.T, workload resolver.WorkloadInput) {
+				if workload.Ports != nil || workload.DestinationRulesKnown {
+					t.Fatalf("policy evidence = ports %#v, destinationRulesKnown %t; want unavailable selectorless attachment", workload.Ports, workload.DestinationRulesKnown)
+				}
+			},
+		},
+		{
+			name: "selectorless Service EndpointSlice denial is unavailable rather than empty",
+			mutate: func(snapshot *collect.Snapshot) {
+				configureSelectorlessServiceCase(snapshot, &corev1.ObjectReference{Kind: "Pod", Namespace: "payments", Name: "api-1"})
+				snapshot.EndpointSliceAvailability.Namespaces["payments"] = false
+			},
+			assert: func(t *testing.T, workload resolver.WorkloadInput) {
+				if workload.Ports != nil || workload.DestinationRulesKnown {
+					t.Fatalf("policy evidence = ports %#v, destinationRulesKnown %t; want unavailable after EndpointSlice denial", workload.Ports, workload.DestinationRulesKnown)
 				}
 			},
 		},
@@ -500,6 +546,17 @@ func TestBuildSplitsControllerWhenPolicyInputsDifferAcrossPods(t *testing.T) {
 	}
 }
 
+func TestBuildCountsEndpointSlices(t *testing.T) {
+	snapshot := policySnapshot()
+	snapshot.EndpointSlices = []discoveryv1.EndpointSlice{
+		{ObjectMeta: metav1.ObjectMeta{Name: "api-1", Namespace: "payments"}},
+		{ObjectMeta: metav1.ObjectMeta{Name: "api-2", Namespace: "payments"}},
+	}
+	if got := Build(snapshot).Inventory.Counts["endpointSlices"]; got != 2 {
+		t.Fatalf("endpointSlices count = %d, want 2", got)
+	}
+}
+
 func policySnapshot() collect.Snapshot {
 	return collect.Snapshot{
 		Namespaces: []corev1.Namespace{
@@ -549,6 +606,30 @@ func addClientProxy(snapshot *collect.Snapshot, namespace string, labels map[str
 	})
 	snapshot.DestinationRuleAvailability.Namespaces[namespace] = true
 	snapshot.SidecarAvailability.Namespaces[namespace] = true
+}
+
+func configureSelectorlessServiceCase(snapshot *collect.Snapshot, targetRef *corev1.ObjectReference) {
+	snapshot.Deployments = nil
+	snapshot.ReplicaSets = nil
+	snapshot.Pods = []corev1.Pod{{
+		ObjectMeta: metav1.ObjectMeta{Name: "api-1", Namespace: "payments", Labels: map[string]string{"app": "api"}},
+		Spec: corev1.PodSpec{Containers: []corev1.Container{
+			{Name: "api", Ports: []corev1.ContainerPort{{Name: "http", ContainerPort: 8080}}},
+			{Name: "istio-proxy"},
+		}},
+	}}
+	service := serviceForWorkload("payments", "api", "api", "http")
+	service.Spec.Selector = nil
+	snapshot.Services = []corev1.Service{service}
+	snapshot.EndpointSlices = []discoveryv1.EndpointSlice{{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "api-1",
+			Namespace: "payments",
+			Labels:    map[string]string{discoveryv1.LabelServiceName: "api"},
+		},
+		Endpoints: []discoveryv1.Endpoint{{TargetRef: targetRef}},
+	}}
+	snapshot.EndpointSliceAvailability = scopedAvailability("payments")
 }
 
 func namespaceForPolicyTest(name string) corev1.Namespace {

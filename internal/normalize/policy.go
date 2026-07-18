@@ -12,6 +12,7 @@ import (
 	istionetworkingv1 "istio.io/client-go/pkg/apis/networking/v1"
 	istiosecurityv1 "istio.io/client-go/pkg/apis/security/v1"
 	corev1 "k8s.io/api/core/v1"
+	discoveryv1 "k8s.io/api/discovery/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
@@ -82,38 +83,90 @@ func (b *workloadBuilder) policyInputs(
 	namespace string,
 	labelSets []map[string]string,
 	podSpecs []corev1.PodSpec,
+	podNames []string,
 	workloadLabels map[string]string,
 	namespaceLabels map[string]string,
 ) workloadPolicyInputs {
-	services := b.selectedServices(namespace, labelSets)
+	services, serviceSelectionKnown := b.selectedServices(namespace, labelSets, podNames)
 	waypoint := b.waypointFor(namespace, workloadLabels, namespaceLabels, services)
-	ports := b.serviceBoundPorts(namespace, services, podSpecs)
-	destinationRules, destinationRulesKnown := b.destinationRulesFor(namespace, services, podSpecs)
+	ports := b.serviceBoundPorts(namespace, services, podSpecs, serviceSelectionKnown)
+	var destinationRules []resolver.DestinationRuleView
+	destinationRulesKnown := false
+	if serviceSelectionKnown {
+		destinationRules, destinationRulesKnown = b.destinationRulesFor(namespace, services, podSpecs)
+	}
 	return workloadPolicyInputs{
 		ports:                 ports,
 		destinationRules:      destinationRules,
 		destinationRulesKnown: destinationRulesKnown,
-		authorizationPolicies: b.authorizationPoliciesFor(namespace, labelSets, services, namespaceLabels, waypoint),
+		authorizationPolicies: b.authorizationPoliciesFor(namespace, labelSets, services, serviceSelectionKnown, namespaceLabels, waypoint),
 		waypoint:              waypoint,
 	}
 }
 
-func (b *workloadBuilder) selectedServices(namespace string, labelSets []map[string]string) []corev1.Service {
+func (b *workloadBuilder) selectedServices(namespace string, labelSets []map[string]string, podNames []string) ([]corev1.Service, bool) {
+	if !b.servicesKnown(namespace) {
+		return nil, false
+	}
 	var selected []corev1.Service
 	for _, service := range b.services {
-		if service.Namespace != namespace || len(service.Spec.Selector) == 0 {
+		if service.Namespace != namespace {
 			continue
 		}
-		if matchAnyLabels(service.Spec.Selector, labelSets) {
+		if len(service.Spec.Selector) > 0 && matchAnyLabels(service.Spec.Selector, labelSets) {
 			selected = append(selected, service)
+			continue
+		}
+		if len(service.Spec.Selector) == 0 {
+			matches, known := b.selectorlessServiceMatches(service, podNames)
+			if !known {
+				return nil, false
+			}
+			if matches {
+				selected = append(selected, service)
+			}
 		}
 	}
 	sort.Slice(selected, func(i, j int) bool { return selected[i].Name < selected[j].Name })
-	return selected
+	return selected, true
 }
 
-func (b *workloadBuilder) serviceBoundPorts(namespace string, services []corev1.Service, podSpecs []corev1.PodSpec) []int32 {
-	if !b.servicesKnown(namespace) {
+func (b *workloadBuilder) selectorlessServiceMatches(service corev1.Service, podNames []string) (bool, bool) {
+	if !b.endpointSlicesKnown(service.Namespace) {
+		return false, false
+	}
+	pods := map[string]struct{}{}
+	for _, name := range podNames {
+		pods[name] = struct{}{}
+	}
+	for _, endpointSlice := range b.endpointSlices {
+		if endpointSlice.Namespace != service.Namespace || endpointSlice.Labels[discoveryv1.LabelServiceName] != service.Name {
+			continue
+		}
+		for _, endpoint := range endpointSlice.Endpoints {
+			if endpoint.TargetRef == nil {
+				return false, false
+			}
+			if endpoint.TargetRef.Kind != "Pod" {
+				continue
+			}
+			targetNamespace := endpoint.TargetRef.Namespace
+			if targetNamespace == "" {
+				targetNamespace = endpointSlice.Namespace
+			}
+			if targetNamespace != service.Namespace {
+				continue
+			}
+			if _, exists := pods[endpoint.TargetRef.Name]; exists {
+				return true, true
+			}
+		}
+	}
+	return false, true
+}
+
+func (b *workloadBuilder) serviceBoundPorts(namespace string, services []corev1.Service, podSpecs []corev1.PodSpec, serviceSelectionKnown bool) []int32 {
+	if !serviceSelectionKnown || !b.servicesKnown(namespace) {
 		return nil
 	}
 	ports := map[int32]struct{}{}
@@ -595,6 +648,7 @@ func (b *workloadBuilder) authorizationPoliciesFor(
 	namespace string,
 	labelSets []map[string]string,
 	services []corev1.Service,
+	serviceSelectionKnown bool,
 	namespaceLabels map[string]string,
 	waypoint *resolver.WaypointView,
 ) []resolver.AuthorizationPolicyView {
@@ -611,6 +665,9 @@ func (b *workloadBuilder) authorizationPoliciesFor(
 			view.SelectorMatch = matchAnyLabels(policy.selectorLabels, labelSets)
 		}
 		if len(policy.targetRefs) > 0 {
+			if !serviceSelectionKnown {
+				return nil
+			}
 			if !b.targetRefsKnown(namespace, policy.targetRefs) {
 				return nil
 			}
@@ -918,6 +975,10 @@ func gatewaySupportsScope(gatewayScope, selectedScope string) bool {
 
 func (b *workloadBuilder) servicesKnown(namespace string) bool {
 	return b.servicesAvailableFor != nil && b.servicesAvailableFor(namespace)
+}
+
+func (b *workloadBuilder) endpointSlicesKnown(namespace string) bool {
+	return b.endpointSlicesAvailableFor != nil && b.endpointSlicesAvailableFor(namespace)
 }
 
 func (b *workloadBuilder) destinationRulesKnown(namespace string) bool {

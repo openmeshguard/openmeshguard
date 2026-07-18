@@ -14,6 +14,7 @@ import (
 	istioclient "istio.io/client-go/pkg/clientset/versioned"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	discoveryv1 "k8s.io/api/discovery/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
@@ -101,6 +102,11 @@ func (c *Collector) Collect(ctx context.Context, scope Scope) (Snapshot, error) 
 		defer mu.Unlock()
 		markScopedAvailability(&snapshot.ServiceAvailability, namespace, available)
 	}
+	markEndpointSlicesAvailable := func(namespace string, available bool) {
+		mu.Lock()
+		defer mu.Unlock()
+		markScopedAvailability(&snapshot.EndpointSliceAvailability, namespace, available)
+	}
 	markPeerAuthenticationsAvailable := func(namespace string, available bool) {
 		mu.Lock()
 		defer mu.Unlock()
@@ -186,6 +192,25 @@ func (c *Collector) Collect(ctx context.Context, scope Scope) (Snapshot, error) 
 				mu.Unlock()
 				markServicesAvailable(ns, true)
 				appendPermission(serviceMeta.permissionForScope(true, permissionScopeName(ns)))
+				return nil
+			},
+			func(ctx context.Context) error {
+				items, err := listPages(ctx, func(ctx context.Context, opts metav1.ListOptions) ([]discoveryv1.EndpointSlice, string, error) {
+					list, err := c.kube.DiscoveryV1().EndpointSlices(ns).List(ctx, opts)
+					if err != nil {
+						return nil, "", err
+					}
+					return list.Items, list.Continue, nil
+				})
+				if err != nil {
+					markEndpointSlicesAvailable(ns, false)
+					return appendDegraded(endpointSliceMeta, permissionScopeName(ns), err)
+				}
+				mu.Lock()
+				snapshot.EndpointSlices = append(snapshot.EndpointSlices, items...)
+				mu.Unlock()
+				markEndpointSlicesAvailable(ns, true)
+				appendPermission(endpointSliceMeta.permissionForScope(true, permissionScopeName(ns)))
 				return nil
 			},
 			c.listTask(deploymentMeta, permissionScopeName(ns), func(ctx context.Context) error {
@@ -654,6 +679,11 @@ var (
 	serviceMeta = resourceMeta{
 		resource: "services",
 		impact:   "service inventory, workload ports, policy targetRefs, and multi-cluster gateway signals may be unavailable",
+	}
+	endpointSliceMeta = resourceMeta{
+		apiGroup: "discovery.k8s.io",
+		resource: "endpointslices",
+		impact:   "selectorless Service attachment and workload port evidence may be unavailable",
 	}
 	deploymentMeta = resourceMeta{
 		apiGroup: "apps",

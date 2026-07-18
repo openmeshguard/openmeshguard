@@ -6,6 +6,7 @@ import (
 	istiosecurityv1beta1 "istio.io/client-go/pkg/apis/security/v1beta1"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	discoveryv1 "k8s.io/api/discovery/v1"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 )
 
@@ -43,6 +44,8 @@ type Snapshot struct {
 	DaemonSets                      []appsv1.DaemonSet
 	Services                        []corev1.Service
 	ServiceAvailability             ScopedAvailability
+	EndpointSlices                  []discoveryv1.EndpointSlice
+	EndpointSliceAvailability       ScopedAvailability
 	PeerAuthentications             []*istiosecurityv1beta1.PeerAuthentication
 	PeerAuthAvailability            ScopedAvailability
 	DestinationRules                []*istionetworkingv1.DestinationRule
@@ -131,6 +134,12 @@ func (s Snapshot) hasPeerAuthenticationAvailabilityDetails() bool {
 // port evidence were collected for a workload namespace.
 func (s Snapshot) ServicesAvailableFor(namespace string) bool {
 	return s.scopedResourceAvailableFor(s.ServiceAvailability, []string{namespace}, "", "services")
+}
+
+// EndpointSlicesAvailableFor reports whether selectorless Service endpoint
+// attachment evidence was collected for a workload namespace.
+func (s Snapshot) EndpointSlicesAvailableFor(namespace string) bool {
+	return s.scopedResourceAvailableFor(s.EndpointSliceAvailability, []string{namespace}, "discovery.k8s.io", "endpointslices")
 }
 
 // DestinationRulesAvailableFor reports whether DestinationRule evidence was

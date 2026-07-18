@@ -14,6 +14,7 @@ import (
 	istiofake "istio.io/client-go/pkg/clientset/versioned/fake"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	discoveryv1 "k8s.io/api/discovery/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -29,6 +30,7 @@ func TestCollectorActionAuditOnlyGetListAndNeverSecrets(t *testing.T) {
 		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "foo"}},
 		&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "api-1", Namespace: "foo"}},
 		&corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: "api", Namespace: "foo"}},
+		&discoveryv1.EndpointSlice{ObjectMeta: metav1.ObjectMeta{Name: "api-1", Namespace: "foo"}},
 		&appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "api", Namespace: "foo"}},
 		&appsv1.ReplicaSet{ObjectMeta: metav1.ObjectMeta{Name: "api-rs", Namespace: "foo"}},
 		&appsv1.StatefulSet{ObjectMeta: metav1.ObjectMeta{Name: "db", Namespace: "foo"}},
@@ -91,6 +93,7 @@ func TestCollectorActionAuditOnlyGetListAndNeverSecrets(t *testing.T) {
 		"namespaces",
 		"pods",
 		"services",
+		"endpointslices",
 		"deployments",
 		"replicasets",
 		"statefulsets",
@@ -115,6 +118,9 @@ func TestCollectorDegradesForbiddenAndNotFound(t *testing.T) {
 	kube.PrependReactor("list", "pods", func(ktesting.Action) (bool, runtime.Object, error) {
 		return true, nil, apierrors.NewForbidden(schema.GroupResource{Resource: "pods"}, "", errors.New("denied"))
 	})
+	kube.PrependReactor("list", "endpointslices", func(ktesting.Action) (bool, runtime.Object, error) {
+		return true, nil, apierrors.NewForbidden(schema.GroupResource{Group: "discovery.k8s.io", Resource: "endpointslices"}, "", errors.New("denied"))
+	})
 
 	istio := istiofake.NewSimpleClientset()
 	istio.PrependReactor("list", "peerauthentications", func(ktesting.Action) (bool, runtime.Object, error) {
@@ -133,12 +139,16 @@ func TestCollectorDegradesForbiddenAndNotFound(t *testing.T) {
 	}
 
 	assertPermission(t, snapshot.PermissionSummary, "", "pods", false)
+	assertPermission(t, snapshot.PermissionSummary, "discovery.k8s.io", "endpointslices", false)
 	assertPermission(t, snapshot.PermissionSummary, "security.istio.io", "peerauthentications", false)
 	if snapshot.PodsAvailableFor("foo") {
 		t.Fatal("PodsAvailableFor(foo) = true after pod list denial")
 	}
 	if snapshot.PeerAuthenticationsAvailable() {
 		t.Fatal("PeerAuthenticationsAvailable = true after peerauthentications not found")
+	}
+	if snapshot.EndpointSlicesAvailableFor("foo") {
+		t.Fatal("EndpointSlicesAvailableFor(foo) = true after EndpointSlice list denial")
 	}
 }
 
@@ -442,6 +452,7 @@ func TestPermissionMetadataDoesNotEmbedControlCatalog(t *testing.T) {
 		{name: "namespaces", meta: namespaceMeta},
 		{name: "pods", meta: podMeta},
 		{name: "services", meta: serviceMeta},
+		{name: "endpointslices", meta: endpointSliceMeta},
 		{name: "deployments", meta: deploymentMeta},
 		{name: "replicasets", meta: replicaSetMeta},
 		{name: "statefulsets", meta: statefulSetMeta},
