@@ -209,8 +209,8 @@
       "verbs": [
         "list"
       ],
-      "granted": true,
-      "impact": "DestinationRule visibility may be unavailable without Sidecar egress scoping evidence",
+      "granted": false,
+      "impact": "DestinationRule visibility may be unavailable without Sidecar egress scoping evidence; denied scope(s): namespace/istio-system",
       "affectedControls": [
         "MG-MTLS-007"
       ]
