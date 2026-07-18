@@ -186,7 +186,8 @@ assert_scanner_binding() {
 
 assert_nonresource_default_role() {
 	default_role_name=$1
-	default_role_file="$results/$default_role_name.json"
+	# Artifact uploads reject ':' in file names, so sanitize role names like system:discovery.
+	default_role_file="$results/$(printf '%s' "$default_role_name" | tr ':' '_').json"
 	fixture_kubectl get clusterrole "$default_role_name" -o json >"$default_role_file"
 	if ! jq -e '
 		(.aggregationRule == null) and

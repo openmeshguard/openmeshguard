@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"runtime/debug"
 
 	"github.com/openmeshguard/openmeshguard/internal/resolver"
 	"github.com/spf13/cobra"
@@ -11,6 +12,9 @@ import (
 const (
 	versionPlaceholder = "dev"
 )
+
+// version is set via -ldflags "-X main.version=..." on release builds.
+var version string
 
 var errNotImplemented = errors.New("not implemented")
 
@@ -22,9 +26,31 @@ type versionInfo struct {
 func defaultVersionInfo() versionInfo {
 	resolved := resolver.New()
 	return versionInfo{
-		Version:         versionPlaceholder,
+		Version:         scannerVersion(version, readModuleVersion),
 		ResolverVersion: resolved.Version(),
 	}
+}
+
+// scannerVersion resolves the reported scanner version: an explicit ldflags
+// value wins, then the module version stamped by `go install module@version`,
+// then the local-build placeholder. Local `go build` yields "(devel)" from
+// build info, which must keep reporting the placeholder.
+func scannerVersion(ldflagsVersion string, moduleVersion func() string) string {
+	if ldflagsVersion != "" {
+		return ldflagsVersion
+	}
+	if fromModule := moduleVersion(); fromModule != "" && fromModule != "(devel)" {
+		return fromModule
+	}
+	return versionPlaceholder
+}
+
+func readModuleVersion() string {
+	info, ok := debug.ReadBuildInfo()
+	if !ok {
+		return ""
+	}
+	return info.Main.Version
 }
 
 func newRootCommand(info versionInfo) *cobra.Command {

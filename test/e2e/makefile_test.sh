@@ -8,7 +8,7 @@ test_binary="${TMPDIR:-/tmp}"
 test_binary="${test_binary%/}/openmeshguard-makefile-test/openmeshguard"
 dry_run=$(make -n -C "$TEST_ROOT" BINARY="$test_binary" e2e)
 
-if ! printf '%s\n' "$dry_run" | grep -F "go build -o \"$test_binary\" ./cmd/openmeshguard" >/dev/null; then
+if ! printf '%s\n' "$dry_run" | grep -F "go build -ldflags \"-X main.version=dev\" -o \"$test_binary\" ./cmd/openmeshguard" >/dev/null; then
 	echo "make e2e did not build the overridden binary" >&2
 	exit 1
 fi
