@@ -1,0 +1,5 @@
+authz-root-local	omg-authz-root-local	authz-root-local	sidecar	
+authz-broad	omg-authz-broad	authz-broad	sidecar	MG-AUTHZ-003=open,MG-AUTHZ-004=open
+authz-deny	omg-authz-deny	authz-deny	sidecar	MG-AUTHZ-002=open
+authz-allow-only	omg-authz-allow-only	authz-allow-only	sidecar	MG-AUTHZ-002=open
+authz-selector-mismatch	omg-authz-selector-mismatch	authz-selector-mismatch	sidecar	MG-AUTHZ-001=open,MG-AUTHZ-002=open,MG-AUTHZ-005=open

@@ -1,0 +1,287 @@
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: authz-root-default-deny
+  namespace: istio-system
+spec:
+  selector:
+    matchLabels:
+      authz-case: root-local
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: omg-authz-root-local
+  labels:
+    istio-injection: enabled
+---
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: allow-client
+  namespace: omg-authz-root-local
+spec:
+  selector:
+    matchLabels:
+      app: authz-root-local
+  rules:
+    - from:
+        - source:
+            principals: ["cluster.local/ns/client/sa/client"]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: authz-root-local
+  namespace: omg-authz-root-local
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: authz-root-local}
+  template:
+    metadata:
+      labels:
+        app: authz-root-local
+        authz-case: root-local
+    spec:
+      containers:
+        - name: app
+          image: registry.k8s.io/pause:3.10
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: authz-root-local
+  namespace: omg-authz-root-local
+spec:
+  selector: {app: authz-root-local}
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8080
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: omg-authz-broad
+  labels:
+    istio-injection: enabled
+---
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: default-deny
+  namespace: omg-authz-broad
+spec: {}
+---
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: allow-all
+  namespace: omg-authz-broad
+spec:
+  rules:
+    - {}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: authz-broad
+  namespace: omg-authz-broad
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: authz-broad}
+  template:
+    metadata:
+      labels: {app: authz-broad}
+    spec:
+      containers:
+        - name: app
+          image: registry.k8s.io/pause:3.10
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: authz-broad
+  namespace: omg-authz-broad
+spec:
+  selector: {app: authz-broad}
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8080
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: omg-authz-deny
+  labels:
+    istio-injection: enabled
+---
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: deny-blocked
+  namespace: omg-authz-deny
+spec:
+  action: DENY
+  rules:
+    - from:
+        - source:
+            namespaces: ["blocked"]
+---
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: allow-client
+  namespace: omg-authz-deny
+spec:
+  rules:
+    - from:
+        - source:
+            principals: ["cluster.local/ns/client/sa/client"]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: authz-deny
+  namespace: omg-authz-deny
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: authz-deny}
+  template:
+    metadata:
+      labels: {app: authz-deny}
+    spec:
+      containers:
+        - name: app
+          image: registry.k8s.io/pause:3.10
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: authz-deny
+  namespace: omg-authz-deny
+spec:
+  selector: {app: authz-deny}
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8080
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: omg-authz-allow-only
+  labels:
+    istio-injection: enabled
+---
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: allow-client
+  namespace: omg-authz-allow-only
+spec:
+  rules:
+    - from:
+        - source:
+            principals: ["cluster.local/ns/client/sa/client"]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: authz-allow-only
+  namespace: omg-authz-allow-only
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: authz-allow-only}
+  template:
+    metadata:
+      labels: {app: authz-allow-only}
+    spec:
+      containers:
+        - name: app
+          image: registry.k8s.io/pause:3.10
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: authz-allow-only
+  namespace: omg-authz-allow-only
+spec:
+  selector: {app: authz-allow-only}
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8080
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: omg-authz-selector-mismatch
+  labels:
+    istio-injection: enabled
+---
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: wrong-workload
+  namespace: omg-authz-selector-mismatch
+spec:
+  selector:
+    matchLabels:
+      app: other
+  rules:
+    - {}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: authz-selector-mismatch
+  namespace: omg-authz-selector-mismatch
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: authz-selector-mismatch}
+  template:
+    metadata:
+      labels: {app: authz-selector-mismatch}
+    spec:
+      containers:
+        - name: app
+          image: registry.k8s.io/pause:3.10
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: authz-selector-mismatch
+  namespace: omg-authz-selector-mismatch
+spec:
+  selector: {app: authz-selector-mismatch}
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8080

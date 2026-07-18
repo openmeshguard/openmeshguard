@@ -3,8 +3,13 @@
   "generatedAt": "2000-01-01T00:00:00Z",
   "scanner": {
     "version": "dev",
-    "resolverVersion": "mtls/v2",
+    "resolverVersion": "mtls/v2,authz/v1",
     "controlPacks": [
+      {
+        "name": "builtin-authz",
+        "version": "0.1.0",
+        "source": "builtin"
+      },
       {
         "name": "builtin-mtls",
         "version": "0.1.0",
@@ -46,9 +51,17 @@
       "granted": true,
       "impact": "sidecar detection from running pods may be unavailable",
       "affectedControls": [
+        "MG-AUTHZ-001",
+        "MG-AUTHZ-002",
+        "MG-AUTHZ-003",
+        "MG-AUTHZ-004",
+        "MG-AUTHZ-005",
+        "MG-AUTHZ-006",
+        "MG-AUTHZ-007",
         "MG-MTLS-001",
         "MG-MTLS-002",
-        "MG-MTLS-003"
+        "MG-MTLS-003",
+        "MG-MTLS-007"
       ]
     },
     {
@@ -58,7 +71,18 @@
         "list"
       ],
       "granted": true,
-      "impact": "service inventory and multi-cluster gateway signals may be unavailable"
+      "impact": "service inventory, workload ports, policy targetRefs, and multi-cluster gateway signals may be unavailable",
+      "affectedControls": [
+        "MG-AUTHZ-001",
+        "MG-AUTHZ-002",
+        "MG-AUTHZ-003",
+        "MG-AUTHZ-004",
+        "MG-AUTHZ-005",
+        "MG-AUTHZ-006",
+        "MG-AUTHZ-007",
+        "MG-MTLS-002",
+        "MG-MTLS-007"
+      ]
     },
     {
       "apiGroup": "apps",
@@ -69,9 +93,17 @@
       "granted": true,
       "impact": "DaemonSet workload posture may be unavailable",
       "affectedControls": [
+        "MG-AUTHZ-001",
+        "MG-AUTHZ-002",
+        "MG-AUTHZ-003",
+        "MG-AUTHZ-004",
+        "MG-AUTHZ-005",
+        "MG-AUTHZ-006",
+        "MG-AUTHZ-007",
         "MG-MTLS-001",
         "MG-MTLS-002",
-        "MG-MTLS-003"
+        "MG-MTLS-003",
+        "MG-MTLS-007"
       ]
     },
     {
@@ -83,9 +115,17 @@
       "granted": true,
       "impact": "deployment workload posture may be unavailable",
       "affectedControls": [
+        "MG-AUTHZ-001",
+        "MG-AUTHZ-002",
+        "MG-AUTHZ-003",
+        "MG-AUTHZ-004",
+        "MG-AUTHZ-005",
+        "MG-AUTHZ-006",
+        "MG-AUTHZ-007",
         "MG-MTLS-001",
         "MG-MTLS-002",
-        "MG-MTLS-003"
+        "MG-MTLS-003",
+        "MG-MTLS-007"
       ]
     },
     {
@@ -97,9 +137,17 @@
       "granted": true,
       "impact": "standalone ReplicaSet workload posture may be unavailable",
       "affectedControls": [
+        "MG-AUTHZ-001",
+        "MG-AUTHZ-002",
+        "MG-AUTHZ-003",
+        "MG-AUTHZ-004",
+        "MG-AUTHZ-005",
+        "MG-AUTHZ-006",
+        "MG-AUTHZ-007",
         "MG-MTLS-001",
         "MG-MTLS-002",
-        "MG-MTLS-003"
+        "MG-MTLS-003",
+        "MG-MTLS-007"
       ]
     },
     {
@@ -111,9 +159,78 @@
       "granted": true,
       "impact": "StatefulSet workload posture may be unavailable",
       "affectedControls": [
+        "MG-AUTHZ-001",
+        "MG-AUTHZ-002",
+        "MG-AUTHZ-003",
+        "MG-AUTHZ-004",
+        "MG-AUTHZ-005",
+        "MG-AUTHZ-006",
+        "MG-AUTHZ-007",
         "MG-MTLS-001",
         "MG-MTLS-002",
-        "MG-MTLS-003"
+        "MG-MTLS-003",
+        "MG-MTLS-007"
+      ]
+    },
+    {
+      "apiGroup": "gateway.networking.k8s.io",
+      "resource": "gateways",
+      "verbs": [
+        "list"
+      ],
+      "granted": false,
+      "optional": true,
+      "impact": "ambient L7 waypoint enforceability may be unavailable without Gateway evidence; denied scope(s): namespace/omg-port-override",
+      "affectedControls": [
+        "MG-AUTHZ-001",
+        "MG-AUTHZ-002",
+        "MG-AUTHZ-003",
+        "MG-AUTHZ-004",
+        "MG-AUTHZ-005",
+        "MG-AUTHZ-006",
+        "MG-AUTHZ-007"
+      ]
+    },
+    {
+      "apiGroup": "networking.istio.io",
+      "resource": "destinationrules",
+      "verbs": [
+        "list"
+      ],
+      "granted": true,
+      "impact": "client TLS contradiction posture resolves to unknown without DestinationRule evidence",
+      "affectedControls": [
+        "MG-MTLS-007"
+      ]
+    },
+    {
+      "apiGroup": "networking.istio.io",
+      "resource": "sidecars",
+      "verbs": [
+        "list"
+      ],
+      "granted": true,
+      "impact": "DestinationRule visibility may be unavailable without Sidecar egress scoping evidence",
+      "affectedControls": [
+        "MG-MTLS-007"
+      ]
+    },
+    {
+      "apiGroup": "security.istio.io",
+      "resource": "authorizationpolicies",
+      "verbs": [
+        "list"
+      ],
+      "granted": true,
+      "impact": "effective authorization posture resolves to unknown without AuthorizationPolicy evidence",
+      "affectedControls": [
+        "MG-AUTHZ-001",
+        "MG-AUTHZ-002",
+        "MG-AUTHZ-003",
+        "MG-AUTHZ-004",
+        "MG-AUTHZ-005",
+        "MG-AUTHZ-006",
+        "MG-AUTHZ-007"
       ]
     },
     {
@@ -127,19 +244,24 @@
       "affectedControls": [
         "MG-MTLS-001",
         "MG-MTLS-002",
-        "MG-MTLS-003"
+        "MG-MTLS-003",
+        "MG-MTLS-007"
       ]
     }
   ],
   "inventory": {
     "counts": {
+      "authorizationPolicies": 1,
       "daemonsets": 0,
       "deployments": 1,
+      "destinationRules": 0,
+      "gateways": 0,
       "namespaces": 1,
       "peerAuthentications": 3,
       "pods": 1,
       "replicasets": 1,
       "services": 1,
+      "sidecars": 0,
       "statefulsets": 0
     },
     "dataPlane": {
@@ -159,29 +281,87 @@
       },
       "dataPlaneMode": "sidecar",
       "mtls": {
-        "effective": "unknown",
-        "chain": [],
-        "unknownReason": "workload ports unavailable for port-level PeerAuthentication on omg-port-override/port-override"
+        "effective": "disabled",
+        "byPort": {
+          "8080": "disabled"
+        },
+        "clientTLSContradiction": false,
+        "chain": [
+          {
+            "order": 1,
+            "kind": "MeshConfigDefault",
+            "field": "defaultPeerAuthenticationMode",
+            "effect": "defaults mesh mTLS mode to PERMISSIVE when no PeerAuthentication mode overrides it"
+          },
+          {
+            "order": 2,
+            "kind": "PeerAuthentication",
+            "name": "default",
+            "namespace": "istio-system",
+            "field": "spec.mtls.mode",
+            "effect": "sets mesh-wide mTLS mode to STRICT"
+          },
+          {
+            "order": 3,
+            "kind": "PeerAuthentication",
+            "name": "default",
+            "namespace": "omg-port-override",
+            "field": "spec.mtls.mode",
+            "effect": "sets namespace mTLS mode to STRICT"
+          },
+          {
+            "order": 4,
+            "kind": "PeerAuthentication",
+            "name": "port-override",
+            "namespace": "omg-port-override",
+            "field": "spec.mtls.mode",
+            "effect": "sets workload mTLS mode to STRICT"
+          },
+          {
+            "order": 5,
+            "kind": "PeerAuthentication",
+            "name": "port-override",
+            "namespace": "omg-port-override",
+            "field": "spec.portLevelMtls[\"8080\"].mode",
+            "effect": "sets port 8080 mTLS mode to DISABLE"
+          }
+        ]
       },
       "authorization": {
-        "effective": "unknown",
-        "chain": [],
-        "unknownReason": "authorization resolver not yet implemented (M5)"
+        "effective": "no-policy",
+        "broadAllow": false,
+        "chain": [
+          {
+            "order": 1,
+            "kind": "AuthorizationDefault",
+            "field": "implicitEnablement",
+            "effect": "establishes Istio's implicit allow when no applicable ALLOW policy exists"
+          },
+          {
+            "order": 2,
+            "kind": "AuthorizationPolicy",
+            "name": "authz-root-default-deny",
+            "namespace": "istio-system",
+            "field": "spec.selector",
+            "effect": "selector does not match the workload; excludes policy from authorization evaluation"
+          }
+        ]
       }
     }
   ],
   "findings": [
     {
-      "id": "MG-MTLS-001-80d7e54b438e",
-      "controlId": "MG-MTLS-001",
-      "title": "Mesh-managed workloads must resolve to strict mTLS",
+      "id": "MG-AUTHZ-001-04bb2c0c6a94",
+      "controlId": "MG-AUTHZ-001",
+      "title": "Mesh-managed workloads must have resolved authorization coverage",
       "severity": "high",
       "evidenceType": "config",
-      "status": "unknown",
-      "confidence": "unavailable",
+      "status": "open",
+      "confidence": "resolved",
       "dataPlaneMode": "sidecar",
       "evidenceSources": [
-        "kubernetes-api"
+        "kubernetes-api",
+        "istio-crd"
       ],
       "resources": [
         {
@@ -190,11 +370,174 @@
           "name": "port-api"
         }
       ],
-      "reasoning": "Control MG-MTLS-001 could not be evaluated for omg-port-override/port-api: mtls.effective unavailable: workload ports unavailable for port-level PeerAuthentication on omg-port-override/port-override.",
+      "resolutionChain": [
+        {
+          "order": 1,
+          "kind": "AuthorizationDefault",
+          "field": "implicitEnablement",
+          "effect": "establishes Istio's implicit allow when no applicable ALLOW policy exists"
+        },
+        {
+          "order": 2,
+          "kind": "AuthorizationPolicy",
+          "name": "authz-root-default-deny",
+          "namespace": "istio-system",
+          "field": "spec.selector",
+          "effect": "selector does not match the workload; excludes policy from authorization evaluation"
+        }
+      ],
+      "reasoning": "omg-port-override/port-api has no resolved AuthorizationPolicy coverage.",
       "remediation": {
-        "guidance": "Apply or correct PeerAuthentication so the workload resolves to STRICT, then inspect the attached resolution chain."
-      },
-      "unknownReason": "mtls.effective unavailable: workload ports unavailable for port-level PeerAuthentication on omg-port-override/port-override"
+        "guidance": "Apply an AuthorizationPolicy that selects this workload and inspect the resolution chain to confirm its effective scope."
+      }
+    },
+    {
+      "id": "MG-AUTHZ-002-862e92dbdf03",
+      "controlId": "MG-AUTHZ-002",
+      "title": "Workloads should resolve to default deny with explicit allow",
+      "severity": "high",
+      "evidenceType": "config",
+      "status": "open",
+      "confidence": "resolved",
+      "dataPlaneMode": "sidecar",
+      "evidenceSources": [
+        "kubernetes-api",
+        "istio-crd"
+      ],
+      "resources": [
+        {
+          "kind": "Deployment",
+          "namespace": "omg-port-override",
+          "name": "port-api"
+        }
+      ],
+      "resolutionChain": [
+        {
+          "order": 1,
+          "kind": "AuthorizationDefault",
+          "field": "implicitEnablement",
+          "effect": "establishes Istio's implicit allow when no applicable ALLOW policy exists"
+        },
+        {
+          "order": 2,
+          "kind": "AuthorizationPolicy",
+          "name": "authz-root-default-deny",
+          "namespace": "istio-system",
+          "field": "spec.selector",
+          "effect": "selector does not match the workload; excludes policy from authorization evaluation"
+        }
+      ],
+      "reasoning": "Authorization for omg-port-override/port-api resolves to no-policy, not default deny with explicit allow.",
+      "remediation": {
+        "guidance": "Establish an empty ALLOW policy for default deny and add narrowly scoped ALLOW rules for required traffic."
+      }
+    },
+    {
+      "id": "MG-AUTHZ-005-9dabaa764f4a",
+      "controlId": "MG-AUTHZ-005",
+      "title": "Authorization coverage must resolve at workload level",
+      "severity": "high",
+      "evidenceType": "config",
+      "status": "open",
+      "confidence": "resolved",
+      "dataPlaneMode": "sidecar",
+      "evidenceSources": [
+        "kubernetes-api",
+        "istio-crd"
+      ],
+      "resources": [
+        {
+          "kind": "Deployment",
+          "namespace": "omg-port-override",
+          "name": "port-api"
+        }
+      ],
+      "resolutionChain": [
+        {
+          "order": 1,
+          "kind": "AuthorizationDefault",
+          "field": "implicitEnablement",
+          "effect": "establishes Istio's implicit allow when no applicable ALLOW policy exists"
+        },
+        {
+          "order": 2,
+          "kind": "AuthorizationPolicy",
+          "name": "authz-root-default-deny",
+          "namespace": "istio-system",
+          "field": "spec.selector",
+          "effect": "selector does not match the workload; excludes policy from authorization evaluation"
+        }
+      ],
+      "reasoning": "omg-port-override/port-api is not selected by any resolved AuthorizationPolicy.",
+      "remediation": {
+        "guidance": "Correct policy namespace, selector, or targetRefs so coverage reaches this workload rather than relying on policy resource presence alone."
+      }
+    },
+    {
+      "id": "MG-MTLS-001-80d7e54b438e",
+      "controlId": "MG-MTLS-001",
+      "title": "Mesh-managed workloads must resolve to strict mTLS",
+      "severity": "high",
+      "evidenceType": "config",
+      "status": "open",
+      "confidence": "resolved",
+      "dataPlaneMode": "sidecar",
+      "evidenceSources": [
+        "kubernetes-api",
+        "istio-crd"
+      ],
+      "resources": [
+        {
+          "kind": "Deployment",
+          "namespace": "omg-port-override",
+          "name": "port-api"
+        }
+      ],
+      "resolutionChain": [
+        {
+          "order": 1,
+          "kind": "MeshConfigDefault",
+          "field": "defaultPeerAuthenticationMode",
+          "effect": "defaults mesh mTLS mode to PERMISSIVE when no PeerAuthentication mode overrides it"
+        },
+        {
+          "order": 2,
+          "kind": "PeerAuthentication",
+          "name": "default",
+          "namespace": "istio-system",
+          "field": "spec.mtls.mode",
+          "effect": "sets mesh-wide mTLS mode to STRICT"
+        },
+        {
+          "order": 3,
+          "kind": "PeerAuthentication",
+          "name": "default",
+          "namespace": "omg-port-override",
+          "field": "spec.mtls.mode",
+          "effect": "sets namespace mTLS mode to STRICT"
+        },
+        {
+          "order": 4,
+          "kind": "PeerAuthentication",
+          "name": "port-override",
+          "namespace": "omg-port-override",
+          "field": "spec.mtls.mode",
+          "effect": "sets workload mTLS mode to STRICT"
+        },
+        {
+          "order": 5,
+          "kind": "PeerAuthentication",
+          "name": "port-override",
+          "namespace": "omg-port-override",
+          "field": "spec.portLevelMtls[\"8080\"].mode",
+          "effect": "sets port 8080 mTLS mode to DISABLE"
+        }
+      ],
+      "reasoning": "Effective mTLS for omg-port-override/port-api resolves to disabled, not strict.",
+      "remediation": {
+        "guidance": "Apply or correct PeerAuthentication so the workload resolves to STRICT, then inspect the attached resolution chain.",
+        "suggestedYAML": "apiVersion: security.istio.io/v1\nkind: PeerAuthentication\nmetadata:\n  name: default\n  namespace: omg-port-override\nspec:\n  mtls:\n    mode: STRICT"
+      }
     },
     {
       "id": "MG-MTLS-002-b8e058bf1dcf",
@@ -202,11 +545,12 @@
       "title": "Declared workload ports must resolve to strict mTLS",
       "severity": "high",
       "evidenceType": "config",
-      "status": "unknown",
-      "confidence": "unavailable",
+      "status": "open",
+      "confidence": "resolved",
       "dataPlaneMode": "sidecar",
       "evidenceSources": [
-        "kubernetes-api"
+        "kubernetes-api",
+        "istio-crd"
       ],
       "resources": [
         {
@@ -215,11 +559,50 @@
           "name": "port-api"
         }
       ],
-      "reasoning": "Control MG-MTLS-002 could not be evaluated for omg-port-override/port-api: mtls.byPort unavailable: workload ports unavailable.",
+      "resolutionChain": [
+        {
+          "order": 1,
+          "kind": "MeshConfigDefault",
+          "field": "defaultPeerAuthenticationMode",
+          "effect": "defaults mesh mTLS mode to PERMISSIVE when no PeerAuthentication mode overrides it"
+        },
+        {
+          "order": 2,
+          "kind": "PeerAuthentication",
+          "name": "default",
+          "namespace": "istio-system",
+          "field": "spec.mtls.mode",
+          "effect": "sets mesh-wide mTLS mode to STRICT"
+        },
+        {
+          "order": 3,
+          "kind": "PeerAuthentication",
+          "name": "default",
+          "namespace": "omg-port-override",
+          "field": "spec.mtls.mode",
+          "effect": "sets namespace mTLS mode to STRICT"
+        },
+        {
+          "order": 4,
+          "kind": "PeerAuthentication",
+          "name": "port-override",
+          "namespace": "omg-port-override",
+          "field": "spec.mtls.mode",
+          "effect": "sets workload mTLS mode to STRICT"
+        },
+        {
+          "order": 5,
+          "kind": "PeerAuthentication",
+          "name": "port-override",
+          "namespace": "omg-port-override",
+          "field": "spec.portLevelMtls[\"8080\"].mode",
+          "effect": "sets port 8080 mTLS mode to DISABLE"
+        }
+      ],
+      "reasoning": "Effective mTLS for omg-port-override/port-api permits plaintext on one or more declared workload ports.",
       "remediation": {
         "guidance": "Correct workload-level port mTLS overrides so every declared, Service-bound workload port resolves to STRICT."
-      },
-      "unknownReason": "mtls.byPort unavailable: workload ports unavailable"
+      }
     },
     {
       "id": "MG-MTLS-003-3f227819eee2",
@@ -227,11 +610,12 @@
       "title": "Workloads must never resolve to globally disabled mTLS",
       "severity": "critical",
       "evidenceType": "config",
-      "status": "unknown",
-      "confidence": "unavailable",
+      "status": "open",
+      "confidence": "resolved",
       "dataPlaneMode": "sidecar",
       "evidenceSources": [
-        "kubernetes-api"
+        "kubernetes-api",
+        "istio-crd"
       ],
       "resources": [
         {
@@ -240,21 +624,66 @@
           "name": "port-api"
         }
       ],
-      "reasoning": "Control MG-MTLS-003 could not be evaluated for omg-port-override/port-api: mtls.effective unavailable: workload ports unavailable for port-level PeerAuthentication on omg-port-override/port-override.",
+      "resolutionChain": [
+        {
+          "order": 1,
+          "kind": "MeshConfigDefault",
+          "field": "defaultPeerAuthenticationMode",
+          "effect": "defaults mesh mTLS mode to PERMISSIVE when no PeerAuthentication mode overrides it"
+        },
+        {
+          "order": 2,
+          "kind": "PeerAuthentication",
+          "name": "default",
+          "namespace": "istio-system",
+          "field": "spec.mtls.mode",
+          "effect": "sets mesh-wide mTLS mode to STRICT"
+        },
+        {
+          "order": 3,
+          "kind": "PeerAuthentication",
+          "name": "default",
+          "namespace": "omg-port-override",
+          "field": "spec.mtls.mode",
+          "effect": "sets namespace mTLS mode to STRICT"
+        },
+        {
+          "order": 4,
+          "kind": "PeerAuthentication",
+          "name": "port-override",
+          "namespace": "omg-port-override",
+          "field": "spec.mtls.mode",
+          "effect": "sets workload mTLS mode to STRICT"
+        },
+        {
+          "order": 5,
+          "kind": "PeerAuthentication",
+          "name": "port-override",
+          "namespace": "omg-port-override",
+          "field": "spec.portLevelMtls[\"8080\"].mode",
+          "effect": "sets port 8080 mTLS mode to DISABLE"
+        }
+      ],
+      "reasoning": "Effective mTLS for omg-port-override/port-api is disabled.",
       "remediation": {
         "guidance": "Apply or correct PeerAuthentication so the workload no longer resolves to DISABLE, then inspect the attached resolution chain."
-      },
-      "unknownReason": "mtls.effective unavailable: workload ports unavailable for port-level PeerAuthentication on omg-port-override/port-override"
+      }
     }
   ],
   "scores": {
     "overall": null,
     "categories": [
       {
+        "category": "authz",
+        "grade": "F",
+        "passRate": 0.5714285714285714,
+        "evaluated": 7
+      },
+      {
         "category": "mtls",
-        "grade": "unknown",
-        "passRate": null,
-        "unknown": 3
+        "grade": "F",
+        "passRate": 0.25,
+        "evaluated": 4
       }
     ]
   }

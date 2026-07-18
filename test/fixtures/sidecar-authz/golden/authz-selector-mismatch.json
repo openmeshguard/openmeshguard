@@ -22,7 +22,7 @@
     "scope": {
       "allNamespaces": false,
       "namespaces": [
-        "omg-dr-contradiction"
+        "omg-authz-selector-mismatch"
       ]
     },
     "dataSources": {
@@ -180,7 +180,7 @@
       ],
       "granted": false,
       "optional": true,
-      "impact": "ambient L7 waypoint enforceability may be unavailable without Gateway evidence; denied scope(s): namespace/omg-dr-contradiction",
+      "impact": "ambient L7 waypoint enforceability may be unavailable without Gateway evidence; denied scope(s): namespace/omg-authz-selector-mismatch",
       "affectedControls": [
         "MG-AUTHZ-001",
         "MG-AUTHZ-002",
@@ -251,13 +251,13 @@
   ],
   "inventory": {
     "counts": {
-      "authorizationPolicies": 1,
+      "authorizationPolicies": 2,
       "daemonsets": 0,
       "deployments": 1,
-      "destinationRules": 1,
+      "destinationRules": 0,
       "gateways": 0,
       "namespaces": 1,
-      "peerAuthentications": 2,
+      "peerAuthentications": 1,
       "pods": 1,
       "replicasets": 1,
       "services": 1,
@@ -275,8 +275,8 @@
   "workloadPostures": [
     {
       "workload": {
-        "namespace": "omg-dr-contradiction",
-        "name": "dr-api",
+        "namespace": "omg-authz-selector-mismatch",
+        "name": "authz-selector-mismatch",
         "kind": "Deployment"
       },
       "dataPlaneMode": "sidecar",
@@ -285,7 +285,7 @@
         "byPort": {
           "8080": "strict"
         },
-        "clientTLSContradiction": true,
+        "clientTLSContradiction": false,
         "chain": [
           {
             "order": 1,
@@ -300,22 +300,6 @@
             "namespace": "istio-system",
             "field": "spec.mtls.mode",
             "effect": "sets mesh-wide mTLS mode to STRICT"
-          },
-          {
-            "order": 3,
-            "kind": "PeerAuthentication",
-            "name": "default",
-            "namespace": "omg-dr-contradiction",
-            "field": "spec.mtls.mode",
-            "effect": "sets namespace mTLS mode to STRICT"
-          },
-          {
-            "order": 4,
-            "kind": "DestinationRule",
-            "name": "dr-api",
-            "namespace": "omg-dr-contradiction",
-            "field": "spec.trafficPolicy.tls.mode",
-            "effect": "sets client TLS mode DISABLE, which conflicts with strict server mTLS"
           }
         ]
       },
@@ -336,6 +320,14 @@
             "namespace": "istio-system",
             "field": "spec.selector",
             "effect": "selector does not match the workload; excludes policy from authorization evaluation"
+          },
+          {
+            "order": 3,
+            "kind": "AuthorizationPolicy",
+            "name": "wrong-workload",
+            "namespace": "omg-authz-selector-mismatch",
+            "field": "spec.selector",
+            "effect": "selector does not match the workload; excludes policy from authorization evaluation"
           }
         ]
       }
@@ -343,7 +335,7 @@
   ],
   "findings": [
     {
-      "id": "MG-AUTHZ-001-e0b53394f442",
+      "id": "MG-AUTHZ-001-7ebebbe83df4",
       "controlId": "MG-AUTHZ-001",
       "title": "Mesh-managed workloads must have resolved authorization coverage",
       "severity": "high",
@@ -358,8 +350,8 @@
       "resources": [
         {
           "kind": "Deployment",
-          "namespace": "omg-dr-contradiction",
-          "name": "dr-api"
+          "namespace": "omg-authz-selector-mismatch",
+          "name": "authz-selector-mismatch"
         }
       ],
       "resolutionChain": [
@@ -376,15 +368,23 @@
           "namespace": "istio-system",
           "field": "spec.selector",
           "effect": "selector does not match the workload; excludes policy from authorization evaluation"
+        },
+        {
+          "order": 3,
+          "kind": "AuthorizationPolicy",
+          "name": "wrong-workload",
+          "namespace": "omg-authz-selector-mismatch",
+          "field": "spec.selector",
+          "effect": "selector does not match the workload; excludes policy from authorization evaluation"
         }
       ],
-      "reasoning": "omg-dr-contradiction/dr-api has no resolved AuthorizationPolicy coverage.",
+      "reasoning": "omg-authz-selector-mismatch/authz-selector-mismatch has no resolved AuthorizationPolicy coverage.",
       "remediation": {
         "guidance": "Apply an AuthorizationPolicy that selects this workload and inspect the resolution chain to confirm its effective scope."
       }
     },
     {
-      "id": "MG-AUTHZ-002-cd81895eb262",
+      "id": "MG-AUTHZ-002-8e9b545d54c2",
       "controlId": "MG-AUTHZ-002",
       "title": "Workloads should resolve to default deny with explicit allow",
       "severity": "high",
@@ -399,8 +399,8 @@
       "resources": [
         {
           "kind": "Deployment",
-          "namespace": "omg-dr-contradiction",
-          "name": "dr-api"
+          "namespace": "omg-authz-selector-mismatch",
+          "name": "authz-selector-mismatch"
         }
       ],
       "resolutionChain": [
@@ -417,15 +417,23 @@
           "namespace": "istio-system",
           "field": "spec.selector",
           "effect": "selector does not match the workload; excludes policy from authorization evaluation"
+        },
+        {
+          "order": 3,
+          "kind": "AuthorizationPolicy",
+          "name": "wrong-workload",
+          "namespace": "omg-authz-selector-mismatch",
+          "field": "spec.selector",
+          "effect": "selector does not match the workload; excludes policy from authorization evaluation"
         }
       ],
-      "reasoning": "Authorization for omg-dr-contradiction/dr-api resolves to no-policy, not default deny with explicit allow.",
+      "reasoning": "Authorization for omg-authz-selector-mismatch/authz-selector-mismatch resolves to no-policy, not default deny with explicit allow.",
       "remediation": {
         "guidance": "Establish an empty ALLOW policy for default deny and add narrowly scoped ALLOW rules for required traffic."
       }
     },
     {
-      "id": "MG-AUTHZ-005-186d253606c3",
+      "id": "MG-AUTHZ-005-44be77fb39a9",
       "controlId": "MG-AUTHZ-005",
       "title": "Authorization coverage must resolve at workload level",
       "severity": "high",
@@ -440,8 +448,8 @@
       "resources": [
         {
           "kind": "Deployment",
-          "namespace": "omg-dr-contradiction",
-          "name": "dr-api"
+          "namespace": "omg-authz-selector-mismatch",
+          "name": "authz-selector-mismatch"
         }
       ],
       "resolutionChain": [
@@ -458,68 +466,19 @@
           "namespace": "istio-system",
           "field": "spec.selector",
           "effect": "selector does not match the workload; excludes policy from authorization evaluation"
-        }
-      ],
-      "reasoning": "omg-dr-contradiction/dr-api is not selected by any resolved AuthorizationPolicy.",
-      "remediation": {
-        "guidance": "Correct policy namespace, selector, or targetRefs so coverage reaches this workload rather than relying on policy resource presence alone."
-      }
-    },
-    {
-      "id": "MG-MTLS-007-e12ab9adb383",
-      "controlId": "MG-MTLS-007",
-      "title": "Client TLS must agree with resolved server mTLS",
-      "severity": "high",
-      "evidenceType": "config",
-      "status": "open",
-      "confidence": "resolved",
-      "dataPlaneMode": "sidecar",
-      "evidenceSources": [
-        "kubernetes-api",
-        "istio-crd"
-      ],
-      "resources": [
-        {
-          "kind": "Deployment",
-          "namespace": "omg-dr-contradiction",
-          "name": "dr-api"
-        }
-      ],
-      "resolutionChain": [
-        {
-          "order": 1,
-          "kind": "MeshConfigDefault",
-          "field": "defaultPeerAuthenticationMode",
-          "effect": "defaults mesh mTLS mode to PERMISSIVE when no PeerAuthentication mode overrides it"
-        },
-        {
-          "order": 2,
-          "kind": "PeerAuthentication",
-          "name": "default",
-          "namespace": "istio-system",
-          "field": "spec.mtls.mode",
-          "effect": "sets mesh-wide mTLS mode to STRICT"
         },
         {
           "order": 3,
-          "kind": "PeerAuthentication",
-          "name": "default",
-          "namespace": "omg-dr-contradiction",
-          "field": "spec.mtls.mode",
-          "effect": "sets namespace mTLS mode to STRICT"
-        },
-        {
-          "order": 4,
-          "kind": "DestinationRule",
-          "name": "dr-api",
-          "namespace": "omg-dr-contradiction",
-          "field": "spec.trafficPolicy.tls.mode",
-          "effect": "sets client TLS mode DISABLE, which conflicts with strict server mTLS"
+          "kind": "AuthorizationPolicy",
+          "name": "wrong-workload",
+          "namespace": "omg-authz-selector-mismatch",
+          "field": "spec.selector",
+          "effect": "selector does not match the workload; excludes policy from authorization evaluation"
         }
       ],
-      "reasoning": "DestinationRule client TLS for omg-dr-contradiction/dr-api contradicts the resolved server-side mTLS posture.",
+      "reasoning": "omg-authz-selector-mismatch/authz-selector-mismatch is not selected by any resolved AuthorizationPolicy.",
       "remediation": {
-        "guidance": "Correct DestinationRule TLS mode or the server-side PeerAuthentication posture so client and server settings agree."
+        "guidance": "Correct policy namespace, selector, or targetRefs so coverage reaches this workload rather than relying on policy resource presence alone."
       }
     }
   ],
@@ -534,8 +493,8 @@
       },
       {
         "category": "mtls",
-        "grade": "C",
-        "passRate": 0.75,
+        "grade": "A",
+        "passRate": 1,
         "evaluated": 4
       }
     ]
