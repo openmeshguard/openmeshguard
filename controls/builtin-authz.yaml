@@ -21,6 +21,10 @@ controls:
       guidance: >-
         Apply an AuthorizationPolicy that selects this workload and inspect the
         resolution chain to confirm its effective scope.
+    frameworks:
+      - nist-csf-2.0/PR.AA-05
+      - nist-sp-800-53-r5/AC-3
+      - owasp-k8s-2025/K05
 
   - id: MG-AUTHZ-002
     title: Workloads should resolve to default deny with explicit allow
@@ -40,6 +44,11 @@ controls:
       guidance: >-
         Establish an empty ALLOW policy for default deny and add narrowly scoped
         ALLOW rules for required traffic.
+    frameworks:
+      - nist-csf-2.0/PR.AA-05
+      - nist-sp-800-53-r5/AC-3
+      - nist-sp-800-53-r5/AC-6
+      - owasp-k8s-2025/K05
 
   - id: MG-AUTHZ-003
     title: Authorization policies must not grant structurally broad access
@@ -60,6 +69,11 @@ controls:
       guidance: >-
         Replace empty rules and wildcard principals or namespaces with the
         narrow identities and operations the workload requires.
+    frameworks:
+      - nist-csf-2.0/PR.AA-05
+      - nist-sp-800-53-r5/AC-3
+      - nist-sp-800-53-r5/AC-6
+      - owasp-k8s-2025/K05
 
   - id: MG-AUTHZ-004
     title: Authorization access must be scoped to explicit identities
@@ -80,6 +94,11 @@ controls:
       guidance: >-
         Scope ALLOW rules to approved principals, namespaces, service accounts,
         or workload identities.
+    frameworks:
+      - nist-csf-2.0/PR.AA-05
+      - nist-sp-800-53-r5/AC-3
+      - nist-sp-800-53-r5/AC-6
+      - owasp-k8s-2025/K05
 
   - id: MG-AUTHZ-005
     title: Authorization coverage must resolve at workload level
@@ -99,6 +118,10 @@ controls:
       guidance: >-
         Correct policy namespace, selector, or targetRefs so coverage reaches
         this workload rather than relying on policy resource presence alone.
+    frameworks:
+      - nist-csf-2.0/PR.AA-05
+      - nist-sp-800-53-r5/AC-3
+      - owasp-k8s-2025/K05
 
   - id: MG-AUTHZ-006
     title: Ambient L7 authorization must be enforced by a waypoint
@@ -119,6 +142,10 @@ controls:
       guidance: >-
         Attach the L7 policy with targetRefs and select a ready waypoint whose
         scope includes the workload.
+    frameworks:
+      - nist-csf-2.0/PR.AA-05
+      - nist-sp-800-53-r5/AC-3
+      - owasp-k8s-2025/K05
 
   - id: MG-AUTHZ-007
     title: L7 authorization without an enforcement path must be reported
@@ -138,3 +165,7 @@ controls:
       guidance: >-
         Provision or repair the selected waypoint and confirm that policy
         targetRefs attach through that enforcement path.
+    frameworks:
+      - nist-csf-2.0/PR.AA-05
+      - nist-sp-800-53-r5/AC-3
+      - owasp-k8s-2025/K05

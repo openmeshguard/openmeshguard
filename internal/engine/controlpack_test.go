@@ -474,20 +474,38 @@ func TestBuiltinAuthorizationCatalogMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadBuiltins returned error: %v", err)
 	}
-	wantTitles := map[string]string{
-		"MG-AUTHZ-001": "Mesh-managed workloads must have resolved authorization coverage",
-		"MG-AUTHZ-002": "Workloads should resolve to default deny with explicit allow",
-		"MG-AUTHZ-003": "Authorization policies must not grant structurally broad access",
-		"MG-AUTHZ-004": "Authorization access must be scoped to explicit identities",
-		"MG-AUTHZ-005": "Authorization coverage must resolve at workload level",
-		"MG-AUTHZ-006": "Ambient L7 authorization must be enforced by a waypoint",
-		"MG-AUTHZ-007": "L7 authorization without an enforcement path must be reported",
+	accessEnforcement := []string{
+		"nist-csf-2.0/PR.AA-05",
+		"nist-sp-800-53-r5/AC-3",
+		"owasp-k8s-2025/K05",
 	}
-	for id, title := range wantTitles {
-		t.Run(id, func(t *testing.T) {
-			control := packWithControl(t, packs, id).Controls[0]
-			if control.Title != title || control.Category != "authz" || control.EvidenceType != "config" || control.Scope != "workload" {
-				t.Fatalf("control = %#v, want authz config workload control titled %q", control, title)
+	leastPrivilege := []string{
+		"nist-csf-2.0/PR.AA-05",
+		"nist-sp-800-53-r5/AC-3",
+		"nist-sp-800-53-r5/AC-6",
+		"owasp-k8s-2025/K05",
+	}
+	tests := []struct {
+		id         string
+		title      string
+		frameworks []string
+	}{
+		{id: "MG-AUTHZ-001", title: "Mesh-managed workloads must have resolved authorization coverage", frameworks: accessEnforcement},
+		{id: "MG-AUTHZ-002", title: "Workloads should resolve to default deny with explicit allow", frameworks: leastPrivilege},
+		{id: "MG-AUTHZ-003", title: "Authorization policies must not grant structurally broad access", frameworks: leastPrivilege},
+		{id: "MG-AUTHZ-004", title: "Authorization access must be scoped to explicit identities", frameworks: leastPrivilege},
+		{id: "MG-AUTHZ-005", title: "Authorization coverage must resolve at workload level", frameworks: accessEnforcement},
+		{id: "MG-AUTHZ-006", title: "Ambient L7 authorization must be enforced by a waypoint", frameworks: accessEnforcement},
+		{id: "MG-AUTHZ-007", title: "L7 authorization without an enforcement path must be reported", frameworks: accessEnforcement},
+	}
+	for _, tt := range tests {
+		t.Run(tt.id, func(t *testing.T) {
+			control := packWithControl(t, packs, tt.id).Controls[0]
+			if control.Title != tt.title || control.Category != "authz" || control.EvidenceType != "config" || control.Scope != "workload" {
+				t.Fatalf("control = %#v, want authz config workload control titled %q", control, tt.title)
+			}
+			if !reflect.DeepEqual(control.Frameworks, tt.frameworks) {
+				t.Fatalf("frameworks = %#v, want %#v", control.Frameworks, tt.frameworks)
 			}
 		})
 	}
