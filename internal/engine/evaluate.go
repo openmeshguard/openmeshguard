@@ -54,8 +54,9 @@ type mtlsData struct {
 }
 
 type authorizationData struct {
-	Effective  string
-	BroadAllow *bool
+	Effective      string
+	BroadAllow     *bool
+	IdentityScoped *bool
 }
 
 type verifiedData struct {
@@ -438,8 +439,9 @@ func workloadTargets(input Input, params map[string]any) []evaluationTarget {
 				Posture: postureData{
 					Mtls: mtlsData{Effective: string(workload.Posture.MTLS.Effective), ByPort: workload.Posture.MTLS.ByPort, ClientTLSContradiction: workload.Posture.MTLS.ClientTLSContradiction},
 					Authorization: authorizationData{
-						Effective:  string(workload.Posture.Authz.Effective),
-						BroadAllow: workload.Posture.Authz.BroadAllow,
+						Effective:      string(workload.Posture.Authz.Effective),
+						BroadAllow:     workload.Posture.Authz.BroadAllow,
+						IdentityScoped: workload.Posture.Authz.IdentityScoped,
 					},
 				},
 				Verified: verifiedTemplateData(workload.Verified), Inventory: nonNilMap(input.Inventory), Params: params,
@@ -591,6 +593,9 @@ func defaultWorkloadAvailability(workload WorkloadInput, namespace NamespaceInpu
 	if workload.Posture.Authz.BroadAllow == nil {
 		setDefaultAvailability(availability, "workload.authorization.broadAllow", Availability{Reason: "authorization broad-allow evidence unavailable"})
 	}
+	if workload.Posture.Authz.IdentityScoped == nil {
+		setDefaultAvailability(availability, "workload.authorization.identityScoped", Availability{Reason: "authorization identity-scope evidence unavailable"})
+	}
 	if workload.Verified == nil {
 		setDefaultAvailability(availability, "workload.verified", Availability{Reason: "runtime verification unavailable"})
 	}
@@ -647,6 +652,9 @@ func workloadValue(workload WorkloadInput, availability map[string]Availability)
 	}
 	if available(availability, "workload.authorization.broadAllow") && workload.Posture.Authz.BroadAllow != nil {
 		authz["broadAllow"] = *workload.Posture.Authz.BroadAllow
+	}
+	if available(availability, "workload.authorization.identityScoped") && workload.Posture.Authz.IdentityScoped != nil {
+		authz["identityScoped"] = *workload.Posture.Authz.IdentityScoped
 	}
 	value["authorization"] = authz
 	if workload.Verified != nil {

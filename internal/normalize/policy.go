@@ -7,6 +7,7 @@ import (
 
 	"github.com/openmeshguard/openmeshguard/internal/resolver"
 	securityapi "istio.io/api/security/v1beta1"
+	typeapi "istio.io/api/type/v1beta1"
 	istionetworkingv1 "istio.io/client-go/pkg/apis/networking/v1"
 	istiosecurityv1 "istio.io/client-go/pkg/apis/security/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -86,7 +87,7 @@ func (b *workloadBuilder) policyInputs(
 		ports:                 ports,
 		destinationRules:      destinationRules,
 		destinationRulesKnown: destinationRulesKnown,
-		authorizationPolicies: b.authorizationPoliciesFor(namespace, labelSets, services, waypoint),
+		authorizationPolicies: b.authorizationPoliciesFor(namespace, labelSets, services, namespaceLabels, waypoint),
 		waypoint:              waypoint,
 	}
 }
@@ -384,29 +385,47 @@ func projectAuthorizationPolicies(
 		selector := policy.Spec.GetSelector()
 		projection := authorizationPolicyProjection{
 			view: resolver.AuthorizationPolicyView{
-				Name:          policy.Name,
-				Namespace:     policy.Namespace,
-				Action:        policy.Spec.GetAction().String(),
-				HasSelector:   selector != nil,
-				RequiresL7:    authorizationPolicyRequiresL7(&policy.Spec),
-				HasRules:      len(policy.Spec.GetRules()) > 0,
-				BroadAllow:    authorizationPolicyBroadAllow(&policy.Spec),
-				RootNamespace: policy.Namespace == rootNamespace,
+				Name:           policy.Name,
+				Namespace:      policy.Namespace,
+				Action:         policy.Spec.GetAction().String(),
+				HasSelector:    selector != nil,
+				RequiresL7:     authorizationPolicyRequiresL7(&policy.Spec),
+				HasRules:       len(policy.Spec.GetRules()) > 0,
+				BroadAllow:     authorizationPolicyBroadAllow(&policy.Spec),
+				IdentityScoped: authorizationPolicyIdentityScoped(&policy.Spec),
+				RootNamespace:  policy.Namespace == rootNamespace,
 			},
 		}
 		if selector != nil {
 			projection.selectorLabels = copyStringMap(selector.GetMatchLabels())
 		}
-		for _, targetRef := range policy.Spec.GetTargetRefs() {
+		targetRefs := make([]*typeapi.PolicyTargetReference, 0, len(policy.Spec.GetTargetRefs())+1)
+		if targetRef := policy.Spec.GetTargetRef(); targetRef != nil {
+			targetRefs = append(targetRefs, targetRef)
+		}
+		targetRefs = append(targetRefs, policy.Spec.GetTargetRefs()...)
+		seenTargetRefs := map[policyTargetRef]struct{}{}
+		for _, targetRef := range targetRefs {
 			if targetRef == nil {
 				continue
 			}
-			projection.targetRefs = append(projection.targetRefs, policyTargetRef{
+			ref := policyTargetRef{
 				group: targetRef.GetGroup(),
 				kind:  targetRef.GetKind(),
 				name:  targetRef.GetName(),
-			})
+			}
+			if _, exists := seenTargetRefs[ref]; exists {
+				continue
+			}
+			seenTargetRefs[ref] = struct{}{}
+			projection.targetRefs = append(projection.targetRefs, ref)
 		}
+		sort.Slice(projection.targetRefs, func(i, j int) bool {
+			if projection.targetRefs[i].kind != projection.targetRefs[j].kind {
+				return projection.targetRefs[i].kind < projection.targetRefs[j].kind
+			}
+			return projection.targetRefs[i].name < projection.targetRefs[j].name
+		})
 		out = append(out, projection)
 	}
 	sort.Slice(out, func(i, j int) bool {
@@ -422,6 +441,7 @@ func (b *workloadBuilder) authorizationPoliciesFor(
 	namespace string,
 	labelSets []map[string]string,
 	services []corev1.Service,
+	namespaceLabels map[string]string,
 	waypoint *resolver.WaypointView,
 ) []resolver.AuthorizationPolicyView {
 	if !b.authorizationPoliciesKnown(namespace) {
@@ -440,10 +460,13 @@ func (b *workloadBuilder) authorizationPoliciesFor(
 			if !b.targetRefsKnown(namespace, policy.targetRefs) {
 				return nil
 			}
-			if !targetRefsMatch(policy.targetRefs, services, waypoint) {
-				continue
+			for _, ref := range policy.targetRefs {
+				targetView, matches := b.authorizationPolicyTargetView(view, ref, namespace, services, namespaceLabels, waypoint)
+				if matches {
+					out = append(out, targetView)
+				}
 			}
-			view.TargetsWaypoint = true
+			continue
 		}
 		out = append(out, view)
 	}
@@ -466,28 +489,41 @@ func (b *workloadBuilder) targetRefsKnown(namespace string, refs []policyTargetR
 	return true
 }
 
-func targetRefsMatch(refs []policyTargetRef, services []corev1.Service, waypoint *resolver.WaypointView) bool {
-	for _, ref := range refs {
-		switch strings.ToLower(ref.kind) {
-		case "service":
-			if ref.group != "" && ref.group != "core" {
-				continue
-			}
-			for _, service := range services {
-				if service.Name == ref.name {
-					return true
-				}
-			}
-		case "gateway":
-			if ref.group != "gateway.networking.k8s.io" || waypoint == nil {
-				continue
-			}
-			if waypoint.Name == ref.name {
-				return true
+func (b *workloadBuilder) authorizationPolicyTargetView(
+	view resolver.AuthorizationPolicyView,
+	ref policyTargetRef,
+	workloadNamespace string,
+	services []corev1.Service,
+	namespaceLabels map[string]string,
+	workloadWaypoint *resolver.WaypointView,
+) (resolver.AuthorizationPolicyView, bool) {
+	if view.Namespace != workloadNamespace {
+		return resolver.AuthorizationPolicyView{}, false
+	}
+	view.TargetsWaypoint = true
+	view.TargetRefKind = ref.kind
+	view.TargetRefName = ref.name
+	switch strings.ToLower(ref.kind) {
+	case "service":
+		if ref.group != "" && ref.group != "core" {
+			return resolver.AuthorizationPolicyView{}, false
+		}
+		for _, service := range services {
+			if service.Namespace == view.Namespace && service.Name == ref.name {
+				view.TargetWaypoint = b.waypointForService(service, namespaceLabels)
+				return view, true
 			}
 		}
+	case "gateway":
+		if ref.group != "gateway.networking.k8s.io" || workloadWaypoint == nil ||
+			workloadWaypoint.Namespace != view.Namespace || workloadWaypoint.Name != ref.name {
+			return resolver.AuthorizationPolicyView{}, false
+		}
+		waypoint := *workloadWaypoint
+		view.TargetWaypoint = &waypoint
+		return view, true
 	}
-	return false
+	return resolver.AuthorizationPolicyView{}, false
 }
 
 func authorizationPolicyRequiresL7(policy *securityapi.AuthorizationPolicy) bool {
@@ -529,16 +565,16 @@ func authorizationPolicyBroadAllow(policy *securityapi.AuthorizationPolicy) bool
 		if rule == nil {
 			continue
 		}
-		if len(rule.GetFrom()) == 0 && len(rule.GetTo()) == 0 && len(rule.GetWhen()) == 0 {
+		if len(rule.GetFrom()) == 0 {
 			return true
 		}
 		for _, from := range rule.GetFrom() {
 			if from == nil || from.GetSource() == nil {
-				continue
+				return true
 			}
 			source := from.GetSource()
 			if containsWildcard(source.GetPrincipals()) || containsWildcard(source.GetNamespaces()) ||
-				containsWildcard(source.GetRequestPrincipals()) {
+				containsWildcard(source.GetServiceAccounts()) || containsWildcard(source.GetRequestPrincipals()) {
 				return true
 			}
 		}
@@ -548,7 +584,41 @@ func authorizationPolicyBroadAllow(policy *securityapi.AuthorizationPolicy) bool
 
 func containsWildcard(values []string) bool {
 	for _, value := range values {
-		if value == "*" {
+		if strings.Contains(value, "*") {
+			return true
+		}
+	}
+	return false
+}
+
+func authorizationPolicyIdentityScoped(policy *securityapi.AuthorizationPolicy) bool {
+	if len(policy.GetRules()) == 0 {
+		return false
+	}
+	for _, rule := range policy.GetRules() {
+		if rule == nil || len(rule.GetFrom()) == 0 {
+			return false
+		}
+		for _, from := range rule.GetFrom() {
+			if from == nil || !sourceHasExplicitIdentity(from.GetSource()) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func sourceHasExplicitIdentity(source *securityapi.Source) bool {
+	if source == nil {
+		return false
+	}
+	for _, identities := range [][]string{
+		source.GetPrincipals(),
+		source.GetNamespaces(),
+		source.GetServiceAccounts(),
+		source.GetRequestPrincipals(),
+	} {
+		if len(identities) > 0 && !containsWildcard(identities) {
 			return true
 		}
 	}
@@ -569,7 +639,7 @@ func sameAuthorizationPolicySet(left, right []resolver.AuthorizationPolicyView) 
 		return false
 	}
 	for i := range left {
-		if left[i] != right[i] {
+		if !reflect.DeepEqual(left[i], right[i]) {
 			return false
 		}
 	}
@@ -615,6 +685,25 @@ func (b *workloadBuilder) waypointFor(
 	if name == "" {
 		return nil
 	}
+	return b.waypointView(name, waypointNamespace, scope)
+}
+
+func (b *workloadBuilder) waypointForService(service corev1.Service, namespaceLabels map[string]string) *resolver.WaypointView {
+	name := service.Labels[useWaypointLabel]
+	labels := service.Labels
+	scope := "service"
+	if name == "" {
+		name = namespaceLabels[useWaypointLabel]
+		labels = namespaceLabels
+		scope = "namespace"
+	}
+	if name == "" {
+		return nil
+	}
+	return b.waypointView(name, waypointNamespace(service.Namespace, labels), scope)
+}
+
+func (b *workloadBuilder) waypointView(name, waypointNamespace, scope string) *resolver.WaypointView {
 	if !b.gatewaysKnown(waypointNamespace) {
 		return &resolver.WaypointView{Name: name, Namespace: waypointNamespace, Known: false, Scope: scope}
 	}

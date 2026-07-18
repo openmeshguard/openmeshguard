@@ -141,6 +141,8 @@ func TestBuiltinAuthorizationControlsCoverEveryOutcome(t *testing.T) {
 	secure := workloadWithAuthz(resolver.AuthzDefaultDenyExplicitAllow, boolPointer(false), []string{"payments/default-deny", "payments/api"}, nil)
 	noPolicy := workloadWithAuthz(resolver.AuthzNoPolicy, boolPointer(false), nil, nil)
 	broad := workloadWithAuthz(resolver.AuthzAllowOnly, boolPointer(true), []string{"payments/allow-all"}, nil)
+	identityUnscoped := workloadWithAuthz(resolver.AuthzAllowOnly, boolPointer(false), []string{"payments/ip-restricted"}, nil)
+	identityUnscoped.Posture.Authz.IdentityScoped = boolPointer(false)
 	allowOnly := workloadWithAuthz(resolver.AuthzAllowOnly, boolPointer(false), []string{"payments/api"}, nil)
 	unenforced := workloadWithAuthz(resolver.AuthzL7Unenforced, boolPointer(false), []string{"payments/api"}, []string{"payments/api"})
 	unknown := workloadWithAuthz(resolver.AuthzUnknown, nil, nil, nil)
@@ -169,7 +171,7 @@ func TestBuiltinAuthorizationControlsCoverEveryOutcome(t *testing.T) {
 		{name: "MG-AUTHZ-003 unknown", controlID: "MG-AUTHZ-003", workload: unknown, wantFindings: 1, wantStatus: statusUnknown},
 		{name: "MG-AUTHZ-003 not applicable", controlID: "MG-AUTHZ-003", workload: notApplicable, wantFindings: 1, wantStatus: statusNotApplicable},
 		{name: "MG-AUTHZ-004 pass", controlID: "MG-AUTHZ-004", workload: secure},
-		{name: "MG-AUTHZ-004 fail", controlID: "MG-AUTHZ-004", workload: broad, wantFindings: 1, wantStatus: statusOpen},
+		{name: "MG-AUTHZ-004 fail", controlID: "MG-AUTHZ-004", workload: identityUnscoped, wantFindings: 1, wantStatus: statusOpen},
 		{name: "MG-AUTHZ-004 unknown", controlID: "MG-AUTHZ-004", workload: unknown, wantFindings: 1, wantStatus: statusUnknown},
 		{name: "MG-AUTHZ-004 not applicable", controlID: "MG-AUTHZ-004", workload: notApplicable, wantFindings: 1, wantStatus: statusNotApplicable},
 		{name: "MG-AUTHZ-005 pass", controlID: "MG-AUTHZ-005", workload: secure},
@@ -1171,6 +1173,7 @@ func workloadWithAuthz(
 	workload.Posture.Authz = resolver.AuthzResult{
 		Effective:       effective,
 		BroadAllow:      broadAllow,
+		IdentityScoped:  optionalNegation(broadAllow),
 		PoliciesInScope: policiesInScope,
 		L7Unenforced:    l7Unenforced,
 		Chain: []resolver.Step{{
@@ -1190,6 +1193,7 @@ func secureAuthzResult() resolver.AuthzResult {
 	return resolver.AuthzResult{
 		Effective:       resolver.AuthzDefaultDenyExplicitAllow,
 		BroadAllow:      boolPointer(false),
+		IdentityScoped:  boolPointer(true),
 		PoliciesInScope: []string{"payments/default-deny", "payments/api"},
 		Chain: []resolver.Step{{
 			Order: 1, Kind: "AuthorizationPolicy", Namespace: "payments", Name: "default-deny", Effect: "sets effective authorization",
@@ -1219,4 +1223,11 @@ func notInMeshWorkload() WorkloadInput {
 
 func boolPointer(value bool) *bool {
 	return &value
+}
+
+func optionalNegation(value *bool) *bool {
+	if value == nil {
+		return nil
+	}
+	return boolPointer(!*value)
 }

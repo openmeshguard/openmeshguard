@@ -70,9 +70,9 @@ controls:
     environments: []
     requires:
       - authorization.effective
-      - authorization.broadAllow
+      - authorization.identityScoped
     applicability: 'workload.dataPlaneMode != "not-applicable"'
-    expression: '!workload.authorization.broadAllow'
+    expression: 'workload.authorization.identityScoped'
     message: >-
       Authorization access for {{ .Workload }} is not scoped to explicit
       principals, namespaces, or workloads.

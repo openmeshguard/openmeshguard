@@ -583,7 +583,7 @@ func replicaSetDeploymentOwners(replicaSets []appsv1.ReplicaSet) map[string]stri
 
 func matchAnyLabels(selector map[string]string, labelSets []map[string]string) bool {
 	if len(selector) == 0 {
-		return false
+		return true
 	}
 	for _, labels := range labelSets {
 		matched := true

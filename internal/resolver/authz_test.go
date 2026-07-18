@@ -13,6 +13,7 @@ func TestResolverV2ResolveAuthz(t *testing.T) {
 		in             WorkloadInput
 		wantEffective  AuthzEffective
 		wantBroadAllow *bool
+		wantIdentity   *bool
 		wantPolicies   []string
 		wantUnenforced []string
 		wantUnknown    string
@@ -23,6 +24,7 @@ func TestResolverV2ResolveAuthz(t *testing.T) {
 			in:             authzWorkload(ModeSidecar),
 			wantEffective:  AuthzNoPolicy,
 			wantBroadAllow: &falseValue,
+			wantIdentity:   &falseValue,
 			wantChain:      []Step{authzDefaultStep(1)},
 		},
 		{
@@ -33,6 +35,7 @@ func TestResolverV2ResolveAuthz(t *testing.T) {
 			),
 			wantEffective:  AuthzDefaultDenyExplicitAllow,
 			wantBroadAllow: &falseValue,
+			wantIdentity:   &trueValue,
 			wantPolicies:   []string{"istio-system/default-deny", "payments/api"},
 			wantChain: []Step{
 				authzDefaultStep(1),
@@ -48,6 +51,7 @@ func TestResolverV2ResolveAuthz(t *testing.T) {
 			),
 			wantEffective:  AuthzDenyPresent,
 			wantBroadAllow: &falseValue,
+			wantIdentity:   &trueValue,
 			wantPolicies:   []string{"payments/deny-admin", "payments/allow-api"},
 			wantChain: []Step{
 				authzDefaultStep(1),
@@ -63,6 +67,7 @@ func TestResolverV2ResolveAuthz(t *testing.T) {
 			),
 			wantEffective:  AuthzAllowOnly,
 			wantBroadAllow: &falseValue,
+			wantIdentity:   &trueValue,
 			wantPolicies:   []string{"payments/external-check", "payments/allow-api"},
 			wantChain: []Step{
 				authzDefaultStep(1),
@@ -77,6 +82,7 @@ func TestResolverV2ResolveAuthz(t *testing.T) {
 			),
 			wantEffective:  AuthzAllowOnly,
 			wantBroadAllow: &falseValue,
+			wantIdentity:   &trueValue,
 			wantPolicies:   []string{"payments/allow-api"},
 			wantChain: []Step{
 				authzDefaultStep(1),
@@ -93,6 +99,7 @@ func TestResolverV2ResolveAuthz(t *testing.T) {
 			),
 			wantEffective:  AuthzNoPolicy,
 			wantBroadAllow: &falseValue,
+			wantIdentity:   &falseValue,
 			wantChain: []Step{
 				authzDefaultStep(1),
 				{
@@ -108,6 +115,7 @@ func TestResolverV2ResolveAuthz(t *testing.T) {
 			),
 			wantEffective:  AuthzL7Unenforced,
 			wantBroadAllow: &falseValue,
+			wantIdentity:   &trueValue,
 			wantPolicies:   []string{"payments/http-get"},
 			wantUnenforced: []string{"payments/http-get"},
 			wantChain: []Step{
@@ -123,6 +131,7 @@ func TestResolverV2ResolveAuthz(t *testing.T) {
 			}, waypointAuthzPolicy("payments", "http-get", true)),
 			wantEffective:  AuthzAllowOnly,
 			wantBroadAllow: &falseValue,
+			wantIdentity:   &trueValue,
 			wantPolicies:   []string{"payments/http-get"},
 			wantChain: []Step{
 				authzDefaultStep(1),
@@ -137,6 +146,7 @@ func TestResolverV2ResolveAuthz(t *testing.T) {
 			}, waypointAuthzPolicy("payments", "mixed-rules", true)),
 			wantEffective:  AuthzL7Unenforced,
 			wantBroadAllow: &falseValue,
+			wantIdentity:   &trueValue,
 			wantPolicies:   []string{"payments/mixed-rules"},
 			wantUnenforced: []string{"payments/mixed-rules"},
 			wantChain: []Step{
@@ -151,11 +161,12 @@ func TestResolverV2ResolveAuthz(t *testing.T) {
 				authzPolicy("payments", "local", "ALLOW", true),
 				AuthorizationPolicyView{
 					Name: "mesh-broad", Namespace: "istio-system", Action: "ALLOW",
-					RootNamespace: true, HasRules: true, BroadAllow: true,
+					RootNamespace: true, HasRules: true, BroadAllow: true, IdentityScoped: false,
 				},
 			),
 			wantEffective:  AuthzAllowOnly,
 			wantBroadAllow: &trueValue,
+			wantIdentity:   &falseValue,
 			wantPolicies:   []string{"istio-system/mesh-broad", "payments/local"},
 			wantChain: []Step{
 				authzDefaultStep(1),
@@ -170,6 +181,7 @@ func TestResolverV2ResolveAuthz(t *testing.T) {
 			),
 			wantEffective:  AuthzDenyPresent,
 			wantBroadAllow: &falseValue,
+			wantIdentity:   &trueValue,
 			wantPolicies:   []string{"payments/allow-nothing"},
 			wantChain: []Step{
 				authzDefaultStep(1),
@@ -183,6 +195,7 @@ func TestResolverV2ResolveAuthz(t *testing.T) {
 			),
 			wantEffective:  AuthzAllowOnly,
 			wantBroadAllow: &trueValue,
+			wantIdentity:   &falseValue,
 			wantPolicies:   []string{"payments/allow-all"},
 			wantChain: []Step{
 				authzDefaultStep(1),
@@ -196,6 +209,7 @@ func TestResolverV2ResolveAuthz(t *testing.T) {
 			),
 			wantEffective:  AuthzUnknown,
 			wantBroadAllow: &falseValue,
+			wantIdentity:   &falseValue,
 			wantPolicies:   []string{"payments/external-check"},
 			wantUnknown:    customOnlyUnknownReason,
 			wantChain: []Step{
@@ -208,11 +222,12 @@ func TestResolverV2ResolveAuthz(t *testing.T) {
 			in: authzWorkload(ModeAmbient,
 				AuthorizationPolicyView{
 					Name: "legacy-http", Namespace: "payments", Action: "ALLOW",
-					HasSelector: true, SelectorMatch: true, HasRules: true, RequiresL7: true,
+					HasSelector: true, SelectorMatch: true, HasRules: true, RequiresL7: true, IdentityScoped: true,
 				},
 			),
 			wantEffective:  AuthzDenyPresent,
 			wantBroadAllow: &falseValue,
+			wantIdentity:   &trueValue,
 			wantPolicies:   []string{"payments/legacy-http"},
 			wantChain: []Step{
 				authzDefaultStep(1),
@@ -225,6 +240,7 @@ func TestResolverV2ResolveAuthz(t *testing.T) {
 				waypointAuthzPolicy("payments", "http-get", true)),
 			wantEffective:  AuthzUnknown,
 			wantBroadAllow: &falseValue,
+			wantIdentity:   &trueValue,
 			wantPolicies:   []string{"payments/http-get"},
 			wantUnknown:    waypointEvidenceUnavailableReason,
 			wantChain: []Step{
@@ -238,8 +254,86 @@ func TestResolverV2ResolveAuthz(t *testing.T) {
 			in:             WorkloadInput{Ref: workloadRef(), DataPlaneMode: ModeSidecar},
 			wantEffective:  AuthzUnknown,
 			wantBroadAllow: nil,
+			wantIdentity:   nil,
 			wantUnknown:    authorizationPoliciesUnavailableReason,
 			wantChain:      []Step{},
+		},
+		{
+			name: "service targetRef policy is not attributed to a sidecar",
+			in: authzWorkload(ModeSidecar, AuthorizationPolicyView{
+				Name: "service-default-deny", Namespace: "payments", Action: "ALLOW",
+				TargetsWaypoint: true, TargetRefKind: "Service", TargetRefName: "api",
+			}),
+			wantEffective:  AuthzNoPolicy,
+			wantBroadAllow: &falseValue,
+			wantIdentity:   &falseValue,
+			wantChain: []Step{
+				authzDefaultStep(1),
+				{
+					Order: 2, Kind: "AuthorizationPolicy", Namespace: "payments", Name: "service-default-deny",
+					Field: "spec.targetRefs", Effect: "targetRef policy attaches to a waypoint; excludes it from sidecar authorization evaluation",
+				},
+			},
+		},
+		{
+			name:           "unknown data plane membership makes L4 authorization unknown",
+			in:             authzWorkload(ModeUnknown, authzPolicy("payments", "allow-api", "ALLOW", true)),
+			wantEffective:  AuthzUnknown,
+			wantBroadAllow: nil,
+			wantIdentity:   nil,
+			wantUnknown:    authzDataPlaneUnknownReason,
+			wantChain:      []Step{},
+		},
+		{
+			name:           "mixed data plane membership makes L4 authorization unknown",
+			in:             authzWorkload(ModeMixed, authzPolicy("payments", "allow-api", "ALLOW", true)),
+			wantEffective:  AuthzUnknown,
+			wantBroadAllow: nil,
+			wantIdentity:   nil,
+			wantUnknown:    authzDataPlaneUnknownReason,
+			wantChain:      []Step{},
+		},
+		{
+			name: "ruleless DENY never matches",
+			in: authzWorkload(ModeSidecar,
+				authzPolicy("payments", "deny-nothing", "DENY", false),
+			),
+			wantEffective:  AuthzNoPolicy,
+			wantBroadAllow: &falseValue,
+			wantIdentity:   &falseValue,
+			wantPolicies:   []string{"payments/deny-nothing"},
+			wantChain: []Step{
+				authzDefaultStep(1),
+				authzPolicyStepWant(2, "payments", "deny-nothing", "DENY policy has no rules and never matches"),
+			},
+		},
+		{
+			name: "ruleless CUSTOM never matches",
+			in: authzWorkload(ModeSidecar,
+				authzPolicy("payments", "custom-nothing", "CUSTOM", false),
+			),
+			wantEffective:  AuthzNoPolicy,
+			wantBroadAllow: &falseValue,
+			wantIdentity:   &falseValue,
+			wantPolicies:   []string{"payments/custom-nothing"},
+			wantChain: []Step{
+				authzDefaultStep(1),
+				authzPolicyStepWant(2, "payments", "custom-nothing", "CUSTOM policy has no rules and never matches"),
+			},
+		},
+		{
+			name: "operation-only ALLOW is not identity scoped",
+			in: authzWorkload(ModeSidecar, AuthorizationPolicyView{
+				Name: "get-any-source", Namespace: "payments", Action: "ALLOW", HasRules: true, BroadAllow: true,
+			}),
+			wantEffective:  AuthzAllowOnly,
+			wantBroadAllow: &trueValue,
+			wantIdentity:   &falseValue,
+			wantPolicies:   []string{"payments/get-any-source"},
+			wantChain: []Step{
+				authzDefaultStep(1),
+				authzPolicyStepWant(2, "payments", "get-any-source", "adds a structurally broad rule to the additive ALLOW union"),
+			},
 		},
 	}
 
@@ -251,6 +345,9 @@ func TestResolverV2ResolveAuthz(t *testing.T) {
 			}
 			if !equalOptionalBool(result.BroadAllow, tt.wantBroadAllow) {
 				t.Fatalf("broadAllow = %v, want %v", optionalBoolValue(result.BroadAllow), optionalBoolValue(tt.wantBroadAllow))
+			}
+			if !equalOptionalBool(result.IdentityScoped, tt.wantIdentity) {
+				t.Fatalf("identityScoped = %v, want %v", optionalBoolValue(result.IdentityScoped), optionalBoolValue(tt.wantIdentity))
 			}
 			if !reflect.DeepEqual(result.PoliciesInScope, tt.wantPolicies) {
 				t.Fatalf("policiesInScope = %#v, want %#v", result.PoliciesInScope, tt.wantPolicies)
@@ -273,6 +370,11 @@ func authzWorkload(mode DataPlaneMode, policies ...AuthorizationPolicyView) Work
 }
 
 func authzWorkloadWithWaypoint(mode DataPlaneMode, waypoint *WaypointView, policies ...AuthorizationPolicyView) WorkloadInput {
+	for i := range policies {
+		if policies[i].TargetsWaypoint {
+			policies[i].TargetWaypoint = waypoint
+		}
+	}
 	return WorkloadInput{
 		Ref:           workloadRef(),
 		DataPlaneMode: mode,
@@ -283,7 +385,7 @@ func authzWorkloadWithWaypoint(mode DataPlaneMode, waypoint *WaypointView, polic
 }
 
 func authzPolicy(namespace, name, action string, hasRules bool) AuthorizationPolicyView {
-	return AuthorizationPolicyView{Name: name, Namespace: namespace, Action: action, HasRules: hasRules}
+	return AuthorizationPolicyView{Name: name, Namespace: namespace, Action: action, HasRules: hasRules, IdentityScoped: hasRules}
 }
 
 func rootAuthzPolicy(namespace, name, action string, hasRules bool) AuthorizationPolicyView {
@@ -295,7 +397,7 @@ func rootAuthzPolicy(namespace, name, action string, hasRules bool) Authorizatio
 func waypointAuthzPolicy(namespace, name string, hasRules bool) AuthorizationPolicyView {
 	return AuthorizationPolicyView{
 		Name: name, Namespace: namespace, Action: "ALLOW", HasRules: hasRules,
-		TargetsWaypoint: true, RequiresL7: true,
+		TargetsWaypoint: true, RequiresL7: true, IdentityScoped: hasRules,
 	}
 }
 

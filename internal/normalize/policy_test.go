@@ -217,6 +217,48 @@ func TestBuildPolicyInputs(t *testing.T) {
 			},
 		},
 		{
+			name: "empty selector matches every workload in namespace",
+			mutate: func(snapshot *collect.Snapshot) {
+				snapshot.AuthorizationPolicies = []*istiosecurityv1.AuthorizationPolicy{
+					authorizationPolicy("payments", "empty-selector", map[string]string{}, []*securityapi.Rule{{}}, nil),
+				}
+			},
+			assert: func(t *testing.T, workload resolver.WorkloadInput) {
+				if len(workload.AuthzPolicies) != 1 || !workload.AuthzPolicies[0].HasSelector || !workload.AuthzPolicies[0].SelectorMatch {
+					t.Fatalf("AuthorizationPolicy = %#v, want selector: {} to match", workload.AuthzPolicies)
+				}
+			},
+		},
+		{
+			name: "projects broad access separately from explicit identity scope",
+			mutate: func(snapshot *collect.Snapshot) {
+				snapshot.AuthorizationPolicies = []*istiosecurityv1.AuthorizationPolicy{
+					authorizationPolicy("payments", "operation-only", nil, l7GetRule(), nil),
+					authorizationPolicy("payments", "exact-principal", nil, []*securityapi.Rule{{
+						From: []*securityapi.Rule_From{{Source: &securityapi.Source{Principals: []string{"cluster.local/ns/caller/sa/client"}}}},
+					}}, nil),
+					authorizationPolicy("payments", "wildcard-principal", nil, []*securityapi.Rule{{
+						From: []*securityapi.Rule_From{{Source: &securityapi.Source{Principals: []string{"cluster.local/ns/caller/sa/*"}}}},
+					}}, nil),
+				}
+			},
+			assert: func(t *testing.T, workload resolver.WorkloadInput) {
+				byName := map[string]resolver.AuthorizationPolicyView{}
+				for _, policy := range workload.AuthzPolicies {
+					byName[policy.Name] = policy
+				}
+				if !byName["operation-only"].BroadAllow || byName["operation-only"].IdentityScoped {
+					t.Fatalf("operation-only projection = %#v, want broad and identity-unscoped", byName["operation-only"])
+				}
+				if byName["exact-principal"].BroadAllow || !byName["exact-principal"].IdentityScoped {
+					t.Fatalf("exact-principal projection = %#v, want narrow and identity-scoped", byName["exact-principal"])
+				}
+				if !byName["wildcard-principal"].BroadAllow || byName["wildcard-principal"].IdentityScoped {
+					t.Fatalf("wildcard-principal projection = %#v, want broad and identity-unscoped", byName["wildcard-principal"])
+				}
+			},
+		},
+		{
 			name: "discovers a ready service waypoint for targetRef L7 policy",
 			mutate: func(snapshot *collect.Snapshot) {
 				service := serviceForWorkload("payments", "api", "api", "http")
@@ -231,8 +273,14 @@ func TestBuildPolicyInputs(t *testing.T) {
 				if workload.Waypoint == nil || !workload.Waypoint.Known || !workload.Waypoint.Ready || workload.Waypoint.Scope != "service" {
 					t.Fatalf("waypoint = %#v, want known ready service waypoint", workload.Waypoint)
 				}
-				if len(workload.AuthzPolicies) != 1 || !workload.AuthzPolicies[0].TargetsWaypoint || !workload.AuthzPolicies[0].RequiresL7 {
+				if len(workload.AuthzPolicies) != 1 || !workload.AuthzPolicies[0].TargetsWaypoint || !workload.AuthzPolicies[0].RequiresL7 ||
+					workload.AuthzPolicies[0].TargetRefKind != "Service" || workload.AuthzPolicies[0].TargetRefName != "api" ||
+					workload.AuthzPolicies[0].TargetWaypoint == nil || workload.AuthzPolicies[0].TargetWaypoint.Name != "api-waypoint" {
 					t.Fatalf("AuthorizationPolicy targetRef projection = %#v", workload.AuthzPolicies)
+				}
+				sidecarResult := resolver.New().ResolveAuthz(workload)
+				if sidecarResult.Effective != resolver.AuthzNoPolicy || len(sidecarResult.PoliciesInScope) != 0 {
+					t.Fatalf("sidecar authorization = %#v, want targetRef policy excluded", sidecarResult)
 				}
 				workload.DataPlaneMode = resolver.ModeAmbient
 				result := resolver.New().ResolveAuthz(workload)
@@ -241,6 +289,44 @@ func TestBuildPolicyInputs(t *testing.T) {
 				}
 				if got := result.Chain[len(result.Chain)-1]; got.Kind != "Waypoint" || !strings.Contains(got.Effect, "ready and enforces") {
 					t.Fatalf("last chain step = %#v, want ready waypoint enforcement", got)
+				}
+			},
+		},
+		{
+			name: "projects singular targetRef with its specific service waypoint",
+			mutate: func(snapshot *collect.Snapshot) {
+				serviceA := serviceForWorkload("payments", "a-api", "api", "http")
+				serviceA.Labels = map[string]string{useWaypointLabel: "a-waypoint"}
+				serviceB := serviceForWorkload("payments", "b-api", "api", "http")
+				serviceB.Labels = map[string]string{useWaypointLabel: "b-waypoint"}
+				snapshot.Services = []corev1.Service{serviceA, serviceB}
+				policy := authorizationPolicy("payments", "get-b", nil, l7GetRule(), nil)
+				policy.Spec.TargetRef = &typeapi.PolicyTargetReference{Kind: "Service", Name: "b-api"}
+				snapshot.AuthorizationPolicies = []*istiosecurityv1.AuthorizationPolicy{policy}
+				snapshot.Gateways = []gatewayv1.Gateway{
+					readyWaypoint("payments", "a-waypoint", "service"),
+					unreadyWaypoint("payments", "b-waypoint", "service"),
+				}
+			},
+			assert: func(t *testing.T, workload resolver.WorkloadInput) {
+				if workload.Waypoint == nil || workload.Waypoint.Name != "a-waypoint" {
+					t.Fatalf("workload waypoint = %#v, want first selected service waypoint a-waypoint", workload.Waypoint)
+				}
+				if len(workload.AuthzPolicies) != 1 {
+					t.Fatalf("AuthorizationPolicies = %#v, want singular targetRef projection", workload.AuthzPolicies)
+				}
+				policy := workload.AuthzPolicies[0]
+				if policy.TargetRefKind != "Service" || policy.TargetRefName != "b-api" || policy.TargetWaypoint == nil ||
+					policy.TargetWaypoint.Name != "b-waypoint" || policy.TargetWaypoint.Ready {
+					t.Fatalf("target-specific policy projection = %#v, want unready b-waypoint", policy)
+				}
+				workload.DataPlaneMode = resolver.ModeAmbient
+				result := resolver.New().ResolveAuthz(workload)
+				if result.Effective != resolver.AuthzL7Unenforced || len(result.L7Unenforced) != 1 {
+					t.Fatalf("authorization = %#v, want b-waypoint unenforced", result)
+				}
+				if got := result.Chain[len(result.Chain)-1]; got.Name != "b-waypoint" {
+					t.Fatalf("waypoint chain step = %#v, want target-specific b-waypoint", got)
 				}
 			},
 		},
@@ -435,4 +521,10 @@ func readyWaypoint(namespace, name, scope string) gatewayv1.Gateway {
 			Status: metav1.ConditionTrue,
 		}}},
 	}
+}
+
+func unreadyWaypoint(namespace, name, scope string) gatewayv1.Gateway {
+	gateway := readyWaypoint(namespace, name, scope)
+	gateway.Status.Conditions[0].Status = metav1.ConditionFalse
+	return gateway
 }

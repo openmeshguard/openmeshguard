@@ -5,7 +5,7 @@
 // changes to exported types in this file require human approval.
 //
 // Resolver versions are a stable, comma-separated list of subsystem tags in
-// the order mTLS, authorization (for example, mtls/v2,authz/v1). Bump only the
+// the order mTLS, authorization (for example, mtls/v2,authz/v2). Bump only the
 // tag whose precedence, interpretation, or unknown-propagation semantics
 // change, and add or update table coverage for that behavior.
 //
@@ -145,10 +145,14 @@ type AuthorizationPolicyView struct {
 	HasSelector     bool
 	SelectorMatch   bool
 	TargetsWaypoint bool // attached via targetRefs to a waypoint/Gateway
-	RequiresL7      bool // rule uses L7-only attributes (methods, paths, headers, request principals, ...)
-	HasRules        bool // distinguishes spec: {} from rules: [{}]
-	BroadAllow      bool // unrestricted rule or wildcard source hint; ignored when HasRules is false
-	RootNamespace   bool // lives in the mesh root namespace
+	TargetRefKind   string
+	TargetRefName   string
+	TargetWaypoint  *WaypointView // waypoint selected for this exact targetRef attachment
+	RequiresL7      bool          // rule uses L7-only attributes (methods, paths, headers, request principals, ...)
+	HasRules        bool          // distinguishes spec: {} from rules: [{}]
+	BroadAllow      bool          // unrestricted rule or wildcard source hint; ignored when HasRules is false
+	IdentityScoped  bool          // every matching ALLOW rule is constrained to explicit workload identity
+	RootNamespace   bool          // lives in the mesh root namespace
 }
 
 type WaypointView struct {
@@ -171,6 +175,7 @@ type MTLSResult struct {
 type AuthzResult struct {
 	Effective       AuthzEffective `json:"effective"`
 	BroadAllow      *bool          `json:"broadAllow,omitempty"`
+	IdentityScoped  *bool          `json:"identityScoped,omitempty"`
 	PoliciesInScope []string       `json:"policiesInScope,omitempty"` // "namespace/name"
 	L7Unenforced    []string       `json:"l7Unenforced,omitempty"`
 	Chain           []Step         `json:"chain"`

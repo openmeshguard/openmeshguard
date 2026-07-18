@@ -9,7 +9,7 @@ import (
 const (
 	authorizationPoliciesUnavailableReason = "AuthorizationPolicy resources unavailable"
 	waypointEvidenceUnavailableReason      = "Gateway API waypoint evidence unavailable"
-	authzDataPlaneUnknownReason            = "data plane mode unavailable for L7 authorization enforcement"
+	authzDataPlaneUnknownReason            = "data plane membership unavailable for authorization enforcement"
 	customOnlyUnknownReason                = "CUSTOM-only authorization posture depends on an external provider and is not representable by the current effective-posture enum"
 )
 
@@ -23,7 +23,10 @@ const (
 // https://istio.io/latest/docs/reference/config/security/authorization-policy/
 func (ResolverV2) ResolveAuthz(in WorkloadInput) AuthzResult {
 	if in.AuthzPolicies == nil {
-		return unknownAuthz(authorizationPoliciesUnavailableReason, nil, nil, nil)
+		return unknownAuthz(authorizationPoliciesUnavailableReason, nil, nil, nil, nil)
+	}
+	if in.DataPlaneMode == ModeUnknown || in.DataPlaneMode == ModeMixed || in.DataPlaneMode == "" {
+		return unknownAuthz(authzDataPlaneUnknownReason, nil, nil, nil, nil)
 	}
 
 	policies := append([]AuthorizationPolicyView(nil), in.AuthzPolicies...)
@@ -50,6 +53,7 @@ func (ResolverV2) ResolveAuthz(in WorkloadInput) AuthzResult {
 	var policiesInScope []string
 	var l7Unenforced []string
 	broadAllow := false
+	identityScoped := true
 	hasCustom := false
 	hasDeny := false
 	hasEmptyAllow := false
@@ -67,6 +71,16 @@ func (ResolverV2) ResolveAuthz(in WorkloadInput) AuthzResult {
 				Namespace: policy.Namespace,
 				Field:     "spec.selector",
 				Effect:    "selector does not match the workload; excludes policy from authorization evaluation",
+			})
+			continue
+		}
+		if policy.TargetsWaypoint && in.DataPlaneMode == ModeSidecar {
+			chain = append(chain, Step{
+				Kind:      "AuthorizationPolicy",
+				Name:      policy.Name,
+				Namespace: policy.Namespace,
+				Field:     "spec.targetRefs",
+				Effect:    "targetRef policy attaches to a waypoint; excludes it from sidecar authorization evaluation",
 			})
 			continue
 		}
@@ -95,7 +109,7 @@ func (ResolverV2) ResolveAuthz(in WorkloadInput) AuthzResult {
 					hasDeny = true
 					step.Effect += "; ambient ztunnel converts selector-based L7 policy to fail-safe DENY"
 				} else {
-					waypointStep, enforced, unavailable := resolveWaypointEnforcement(in.Waypoint, policy)
+					waypointStep, enforced, unavailable := resolveWaypointEnforcement(policy.TargetWaypoint, policy)
 					chain = append(chain, step, waypointStep)
 					if unavailable && unknownReason == "" {
 						unknownReason = waypointEvidenceUnavailableReason
@@ -103,12 +117,8 @@ func (ResolverV2) ResolveAuthz(in WorkloadInput) AuthzResult {
 					if !enforced && !unavailable {
 						l7Unenforced = append(l7Unenforced, policyRef)
 					}
-					updateAuthzActionState(action, policy, &hasCustom, &hasDeny, &hasEmptyAllow, &hasExplicitAllow, &broadAllow)
+					updateAuthzActionState(action, policy, &hasCustom, &hasDeny, &hasEmptyAllow, &hasExplicitAllow, &broadAllow, &identityScoped)
 					continue
-				}
-			case ModeUnknown, ModeMixed, "":
-				if unknownReason == "" {
-					unknownReason = authzDataPlaneUnknownReason
 				}
 			default:
 				step.Effect += "; workload is outside an enforceable Istio data plane"
@@ -116,21 +126,23 @@ func (ResolverV2) ResolveAuthz(in WorkloadInput) AuthzResult {
 		}
 
 		chain = append(chain, step)
-		updateAuthzActionState(action, policy, &hasCustom, &hasDeny, &hasEmptyAllow, &hasExplicitAllow, &broadAllow)
+		updateAuthzActionState(action, policy, &hasCustom, &hasDeny, &hasEmptyAllow, &hasExplicitAllow, &broadAllow, &identityScoped)
 	}
 
 	chain = orderChain(chain)
 	policiesInScope = uniqueStrings(policiesInScope)
 	l7Unenforced = uniqueStrings(l7Unenforced)
 	knownBroadAllow := broadAllow
+	knownIdentityScoped := hasEmptyAllow || (hasExplicitAllow && identityScoped)
 
 	if unknownReason != "" {
-		return unknownAuthz(unknownReason, policiesInScope, chain, &knownBroadAllow)
+		return unknownAuthz(unknownReason, policiesInScope, chain, &knownBroadAllow, &knownIdentityScoped)
 	}
 	if len(l7Unenforced) > 0 {
 		return AuthzResult{
 			Effective:       AuthzL7Unenforced,
 			BroadAllow:      &knownBroadAllow,
+			IdentityScoped:  &knownIdentityScoped,
 			PoliciesInScope: policiesInScope,
 			L7Unenforced:    l7Unenforced,
 			Chain:           chain,
@@ -140,6 +152,7 @@ func (ResolverV2) ResolveAuthz(in WorkloadInput) AuthzResult {
 		return AuthzResult{
 			Effective:       AuthzDenyPresent,
 			BroadAllow:      &knownBroadAllow,
+			IdentityScoped:  &knownIdentityScoped,
 			PoliciesInScope: policiesInScope,
 			Chain:           chain,
 		}
@@ -148,6 +161,7 @@ func (ResolverV2) ResolveAuthz(in WorkloadInput) AuthzResult {
 		return AuthzResult{
 			Effective:       AuthzDefaultDenyExplicitAllow,
 			BroadAllow:      &knownBroadAllow,
+			IdentityScoped:  &knownIdentityScoped,
 			PoliciesInScope: policiesInScope,
 			Chain:           chain,
 		}
@@ -156,16 +170,18 @@ func (ResolverV2) ResolveAuthz(in WorkloadInput) AuthzResult {
 		return AuthzResult{
 			Effective:       AuthzAllowOnly,
 			BroadAllow:      &knownBroadAllow,
+			IdentityScoped:  &knownIdentityScoped,
 			PoliciesInScope: policiesInScope,
 			Chain:           chain,
 		}
 	}
 	if hasCustom {
-		return unknownAuthz(customOnlyUnknownReason, policiesInScope, chain, &knownBroadAllow)
+		return unknownAuthz(customOnlyUnknownReason, policiesInScope, chain, &knownBroadAllow, &knownIdentityScoped)
 	}
 	return AuthzResult{
 		Effective:       AuthzNoPolicy,
 		BroadAllow:      &knownBroadAllow,
+		IdentityScoped:  &knownIdentityScoped,
 		PoliciesInScope: policiesInScope,
 		Chain:           chain,
 	}
@@ -215,9 +231,17 @@ func authzPolicyStep(policy AuthorizationPolicyView, action string) Step {
 	effect := ""
 	switch action {
 	case "CUSTOM":
-		effect = "evaluates CUSTOM authorization before additive DENY and ALLOW policies"
+		if !policy.HasRules {
+			effect = "CUSTOM policy has no rules and never matches"
+		} else {
+			effect = "evaluates CUSTOM authorization before additive DENY and ALLOW policies"
+		}
 	case "DENY":
-		effect = "adds DENY rules; any matching DENY overrides additive ALLOW policies"
+		if !policy.HasRules {
+			effect = "DENY policy has no rules and never matches"
+		} else {
+			effect = "adds DENY rules; any matching DENY overrides additive ALLOW policies"
+		}
 	case "ALLOW":
 		switch {
 		case !policy.HasRules:
@@ -271,12 +295,13 @@ func updateAuthzActionState(
 	hasEmptyAllow *bool,
 	hasExplicitAllow *bool,
 	broadAllow *bool,
+	identityScoped *bool,
 ) {
 	switch action {
 	case "CUSTOM":
-		*hasCustom = true
+		*hasCustom = *hasCustom || policy.HasRules
 	case "DENY":
-		*hasDeny = true
+		*hasDeny = *hasDeny || policy.HasRules
 	case "ALLOW":
 		if !policy.HasRules {
 			*hasEmptyAllow = true
@@ -284,6 +309,7 @@ func updateAuthzActionState(
 		}
 		*hasExplicitAllow = true
 		*broadAllow = *broadAllow || policy.BroadAllow
+		*identityScoped = *identityScoped && policy.IdentityScoped
 	}
 }
 
@@ -307,13 +333,14 @@ func uniqueStrings(values []string) []string {
 	return out
 }
 
-func unknownAuthz(reason string, policies []string, chain []Step, broadAllow *bool) AuthzResult {
+func unknownAuthz(reason string, policies []string, chain []Step, broadAllow, identityScoped *bool) AuthzResult {
 	if chain == nil {
 		chain = []Step{}
 	}
 	return AuthzResult{
 		Effective:       AuthzUnknown,
 		BroadAllow:      broadAllow,
+		IdentityScoped:  identityScoped,
 		PoliciesInScope: policies,
 		Chain:           chain,
 		UnknownReason:   reason,

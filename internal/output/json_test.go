@@ -154,8 +154,13 @@ func workloadPosture(mode resolver.DataPlaneMode, effective resolver.MTLSEffecti
 		Authz: resolver.AuthzResult{
 			Effective:       resolver.AuthzDefaultDenyExplicitAllow,
 			BroadAllow:      &knownFalse,
+			IdentityScoped:  boolPointerForOutput(true),
 			PoliciesInScope: []string{"payments/default-deny", "payments/api"},
 			Chain:           []resolver.Step{{Order: 1, Kind: "AuthorizationPolicy", Namespace: "payments", Name: "default-deny", Effect: "sets effective authorization"}},
 		},
 	}
+}
+
+func boolPointerForOutput(value bool) *bool {
+	return &value
 }
