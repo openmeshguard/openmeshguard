@@ -17,6 +17,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
+	gatewayclient "sigs.k8s.io/gateway-api/pkg/client/clientset/versioned"
 )
 
 type scanOptions struct {
@@ -106,8 +107,12 @@ func runScan(ctx context.Context, info versionInfo, opts scanOptions, stdout io.
 	if err != nil {
 		return fmt.Errorf("create Istio client: %w", err)
 	}
+	gatewayClient, err := gatewayclient.NewForConfig(restConfig)
+	if err != nil {
+		return fmt.Errorf("create Gateway API client: %w", err)
+	}
 
-	snapshot, err := collect.New(kubeClient, istioClient).Collect(ctx, collect.Scope{
+	snapshot, err := collect.New(kubeClient, istioClient, gatewayClient).Collect(ctx, collect.Scope{
 		AllNamespaces: opts.AllNamespaces,
 		Namespaces:    opts.Namespaces,
 		RootNamespace: opts.RootNamespace,

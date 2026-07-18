@@ -6,7 +6,10 @@ import (
 	"strings"
 	"testing"
 
+	networkingapi "istio.io/api/networking/v1alpha3"
 	securityapi "istio.io/api/security/v1beta1"
+	istionetworkingv1 "istio.io/client-go/pkg/apis/networking/v1"
+	istiosecurityv1 "istio.io/client-go/pkg/apis/security/v1"
 	istiosecurityv1beta1 "istio.io/client-go/pkg/apis/security/v1beta1"
 	istiofake "istio.io/client-go/pkg/clientset/versioned/fake"
 	appsv1 "k8s.io/api/apps/v1"
@@ -17,6 +20,8 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	kubefake "k8s.io/client-go/kubernetes/fake"
 	ktesting "k8s.io/client-go/testing"
+	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
+	gatewayfake "sigs.k8s.io/gateway-api/pkg/client/clientset/versioned/fake"
 )
 
 func TestCollectorActionAuditOnlyGetListAndNeverSecrets(t *testing.T) {
@@ -29,16 +34,34 @@ func TestCollectorActionAuditOnlyGetListAndNeverSecrets(t *testing.T) {
 		&appsv1.StatefulSet{ObjectMeta: metav1.ObjectMeta{Name: "db", Namespace: "foo"}},
 		&appsv1.DaemonSet{ObjectMeta: metav1.ObjectMeta{Name: "node-agent", Namespace: "foo"}},
 	)
-	istio := istiofake.NewSimpleClientset(&istiosecurityv1beta1.PeerAuthentication{
-		ObjectMeta: metav1.ObjectMeta{Name: "default", Namespace: "foo"},
-		Spec: securityapi.PeerAuthentication{
-			Mtls: &securityapi.PeerAuthentication_MutualTLS{
-				Mode: securityapi.PeerAuthentication_MutualTLS_PERMISSIVE,
+	istio := istiofake.NewSimpleClientset(
+		&istiosecurityv1beta1.PeerAuthentication{
+			ObjectMeta: metav1.ObjectMeta{Name: "default", Namespace: "foo"},
+			Spec: securityapi.PeerAuthentication{
+				Mtls: &securityapi.PeerAuthentication_MutualTLS{
+					Mode: securityapi.PeerAuthentication_MutualTLS_PERMISSIVE,
+				},
 			},
 		},
+		&istiosecurityv1.AuthorizationPolicy{
+			ObjectMeta: metav1.ObjectMeta{Name: "allow-api", Namespace: "foo"},
+			Spec:       securityapi.AuthorizationPolicy{},
+		},
+		&istionetworkingv1.DestinationRule{
+			ObjectMeta: metav1.ObjectMeta{Name: "api", Namespace: "foo"},
+			Spec:       networkingapi.DestinationRule{Host: "api.foo.svc.cluster.local"},
+		},
+		&istionetworkingv1.Sidecar{
+			ObjectMeta: metav1.ObjectMeta{Name: "default", Namespace: "foo"},
+			Spec:       networkingapi.Sidecar{},
+		},
+	)
+	gateway := gatewayfake.NewSimpleClientset(&gatewayv1.Gateway{
+		ObjectMeta: metav1.ObjectMeta{Name: "waypoint", Namespace: "foo"},
+		Spec:       gatewayv1.GatewaySpec{GatewayClassName: "istio-waypoint"},
 	})
 
-	collector := New(kube, istio)
+	collector := New(kube, istio, gateway)
 	collector.SetMaxConcurrentLists(2)
 
 	snapshot, err := collector.Collect(context.Background(), Scope{AllNamespaces: true})
@@ -50,7 +73,10 @@ func TestCollectorActionAuditOnlyGetListAndNeverSecrets(t *testing.T) {
 	}
 
 	seenResources := map[string]bool{}
-	for _, action := range append(kube.Actions(), istio.Actions()...) {
+	actions := append([]ktesting.Action{}, kube.Actions()...)
+	actions = append(actions, istio.Actions()...)
+	actions = append(actions, gateway.Actions()...)
+	for _, action := range actions {
 		if got := action.GetVerb(); got != "get" && got != "list" {
 			t.Fatalf("unexpected action verb %q for %#v", got, action)
 		}
@@ -70,6 +96,10 @@ func TestCollectorActionAuditOnlyGetListAndNeverSecrets(t *testing.T) {
 		"statefulsets",
 		"daemonsets",
 		"peerauthentications",
+		"authorizationpolicies",
+		"destinationrules",
+		"sidecars",
+		"gateways",
 	} {
 		if !seenResources[resource] {
 			t.Fatalf("expected a read action for %s; saw %#v", resource, seenResources)
@@ -94,7 +124,7 @@ func TestCollectorDegradesForbiddenAndNotFound(t *testing.T) {
 		)
 	})
 
-	snapshot, err := New(kube, istio).Collect(context.Background(), Scope{AllNamespaces: true})
+	snapshot, err := newTestCollector(kube, istio).Collect(context.Background(), Scope{AllNamespaces: true})
 	if err != nil {
 		t.Fatalf("collect: %v", err)
 	}
@@ -137,7 +167,7 @@ func TestCollectorRejectsInvalidScopes(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := New(kubefake.NewSimpleClientset(), istiofake.NewSimpleClientset()).Collect(context.Background(), tt.scope)
+			_, err := newTestCollector(kubefake.NewSimpleClientset(), istiofake.NewSimpleClientset()).Collect(context.Background(), tt.scope)
 			if err == nil {
 				t.Fatal("Collect returned nil error")
 			}
@@ -152,7 +182,7 @@ func TestCollectorErrorsWhenScopedNamespaceIsMissing(t *testing.T) {
 	kube := kubefake.NewSimpleClientset(&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "payments"}})
 	istio := istiofake.NewSimpleClientset()
 
-	_, err := New(kube, istio).Collect(context.Background(), Scope{Namespaces: []string{"paymets"}})
+	_, err := newTestCollector(kube, istio).Collect(context.Background(), Scope{Namespaces: []string{"paymets"}})
 	if err == nil {
 		t.Fatal("Collect returned nil error for missing namespace")
 	}
@@ -182,7 +212,7 @@ func TestCollectorScopedScanIncludesRootNamespacePeerAuthentications(t *testing.
 		},
 	)
 
-	snapshot, err := New(kube, istio).Collect(context.Background(), Scope{Namespaces: []string{"payments"}, RootNamespace: rootNamespace})
+	snapshot, err := newTestCollector(kube, istio).Collect(context.Background(), Scope{Namespaces: []string{"payments"}, RootNamespace: rootNamespace})
 	if err != nil {
 		t.Fatalf("collect: %v", err)
 	}
@@ -213,7 +243,7 @@ func TestCollectorScopedScanDoesNotListAllNamespaces(t *testing.T) {
 	kube := kubefake.NewSimpleClientset(&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "payments"}})
 	istio := istiofake.NewSimpleClientset()
 
-	if _, err := New(kube, istio).Collect(context.Background(), Scope{Namespaces: []string{"payments"}}); err != nil {
+	if _, err := newTestCollector(kube, istio).Collect(context.Background(), Scope{Namespaces: []string{"payments"}}); err != nil {
 		t.Fatalf("collect: %v", err)
 	}
 
@@ -238,7 +268,7 @@ func TestCollectorMergesPermissionSummaryAcrossNamespaces(t *testing.T) {
 	)
 	istio := istiofake.NewSimpleClientset()
 
-	snapshot, err := New(kube, istio).Collect(context.Background(), Scope{Namespaces: []string{"payments", "orders"}})
+	snapshot, err := newTestCollector(kube, istio).Collect(context.Background(), Scope{Namespaces: []string{"payments", "orders"}})
 	if err != nil {
 		t.Fatalf("collect: %v", err)
 	}
@@ -276,7 +306,7 @@ func TestCollectorTracksPeerAuthenticationAvailabilityPerNamespace(t *testing.T)
 		)
 	})
 
-	snapshot, err := New(kube, istio).Collect(context.Background(), Scope{Namespaces: []string{"payments", "orders"}})
+	snapshot, err := newTestCollector(kube, istio).Collect(context.Background(), Scope{Namespaces: []string{"payments", "orders"}})
 	if err != nil {
 		t.Fatalf("collect: %v", err)
 	}
@@ -310,7 +340,7 @@ func TestCollectorTracksReplicaSetAvailabilityPerNamespace(t *testing.T) {
 		)
 	})
 
-	snapshot, err := New(kube, istiofake.NewSimpleClientset()).Collect(context.Background(), Scope{Namespaces: []string{"payments"}})
+	snapshot, err := newTestCollector(kube, istiofake.NewSimpleClientset()).Collect(context.Background(), Scope{Namespaces: []string{"payments"}})
 	if err != nil {
 		t.Fatalf("collect: %v", err)
 	}
@@ -384,6 +414,10 @@ func TestPermissionMetadataDoesNotEmbedControlCatalog(t *testing.T) {
 		{name: "statefulsets", meta: statefulSetMeta},
 		{name: "daemonsets", meta: daemonSetMeta},
 		{name: "peerauthentications", meta: peerAuthenticationMeta},
+		{name: "destinationrules", meta: destinationRuleMeta},
+		{name: "sidecars", meta: sidecarMeta},
+		{name: "authorizationpolicies", meta: authorizationPolicyMeta},
+		{name: "gateways", meta: gatewayMeta},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -393,6 +427,10 @@ func TestPermissionMetadataDoesNotEmbedControlCatalog(t *testing.T) {
 			}
 		})
 	}
+}
+
+func newTestCollector(kube *kubefake.Clientset, istio *istiofake.Clientset) *Collector {
+	return New(kube, istio, gatewayfake.NewSimpleClientset())
 }
 
 func assertPermission(t *testing.T, permissions []Permission, apiGroup, resource string, granted bool) {

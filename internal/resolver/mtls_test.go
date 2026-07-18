@@ -31,6 +31,23 @@ func TestResolverV2ResolveMTLS(t *testing.T) {
 			},
 		},
 		{
+			name: "observed workload ports inherit the resolved posture",
+			in: sidecarWorkloadWithPortsAndDestinationRules(
+				[]int32{8080, 9090},
+				[]PeerAuthenticationView{peerAuthentication("istio-system", "default", "STRICT", false)},
+				nil,
+			),
+			wantEffective: MTLSStrict,
+			wantByPort: map[int32]MTLSEffective{
+				8080: MTLSStrict,
+				9090: MTLSStrict,
+			},
+			wantChain: []Step{
+				defaultStep(1),
+				peerStep(2, "istio-system", "default", "spec.mtls.mode", "sets mesh-wide mTLS mode to STRICT"),
+			},
+		},
+		{
 			name: "namespace PeerAuthentication overrides mesh-wide PeerAuthentication",
 			in: sidecarWorkload(
 				peerAuthentication("istio-system", "default", "STRICT", false),
@@ -73,8 +90,10 @@ func TestResolverV2ResolveMTLS(t *testing.T) {
 		},
 		{
 			name: "port-level DISABLE overrides workload STRICT",
-			in: sidecarWorkload(
-				peerAuthenticationWithPorts("payments", "api", "STRICT", true, map[int32]string{8080: "DISABLE"}),
+			in: sidecarWorkloadWithPortsAndDestinationRules(
+				[]int32{8080, 9090},
+				[]PeerAuthenticationView{peerAuthenticationWithPorts("payments", "api", "STRICT", true, map[int32]string{8080: "DISABLE"})},
+				nil,
 			),
 			wantEffective: MTLSMixedByPort,
 			wantByPort: map[int32]MTLSEffective{
@@ -89,9 +108,13 @@ func TestResolverV2ResolveMTLS(t *testing.T) {
 		},
 		{
 			name: "port-level STRICT overrides disabled parent",
-			in: sidecarWorkload(
-				peerAuthentication("payments", "default", "DISABLE", false),
-				peerAuthenticationWithPorts("payments", "api", "UNSET", true, map[int32]string{8080: "STRICT"}),
+			in: sidecarWorkloadWithPortsAndDestinationRules(
+				[]int32{8080, 9090},
+				[]PeerAuthenticationView{
+					peerAuthentication("payments", "default", "DISABLE", false),
+					peerAuthenticationWithPorts("payments", "api", "UNSET", true, map[int32]string{8080: "STRICT"}),
+				},
+				nil,
 			),
 			wantEffective: MTLSMixedByPort,
 			wantByPort: map[int32]MTLSEffective{
@@ -160,6 +183,7 @@ func TestResolverV2ResolveMTLS(t *testing.T) {
 				}},
 			),
 			wantEffective: MTLSStrict,
+			wantByPort:    map[int32]MTLSEffective{8080: MTLSStrict},
 			wantChain: []Step{
 				defaultStep(1),
 				peerStep(2, "istio-system", "default", "spec.mtls.mode", "sets mesh-wide mTLS mode to STRICT"),
@@ -181,6 +205,7 @@ func TestResolverV2ResolveMTLS(t *testing.T) {
 				}},
 			),
 			wantEffective:           MTLSStrict,
+			wantByPort:              map[int32]MTLSEffective{8080: MTLSStrict, 9090: MTLSStrict},
 			wantClientContradiction: true,
 			wantChain: []Step{
 				defaultStep(1),
@@ -203,6 +228,7 @@ func TestResolverV2ResolveMTLS(t *testing.T) {
 				}},
 			),
 			wantEffective: MTLSStrict,
+			wantByPort:    map[int32]MTLSEffective{8080: MTLSStrict},
 			wantChain: []Step{
 				defaultStep(1),
 				peerStep(2, "istio-system", "default", "spec.mtls.mode", "sets mesh-wide mTLS mode to STRICT"),
@@ -381,7 +407,6 @@ func TestResolverV2OmitsClientTLSConclusionWhenDestinationRulesUnavailable(t *te
 func sidecarWorkload(peerAuthentications ...PeerAuthenticationView) WorkloadInput {
 	return WorkloadInput{
 		Ref:                   workloadRef(),
-		Ports:                 []int32{8080, 9090},
 		DataPlaneMode:         ModeSidecar,
 		MeshDefaults:          knownMeshDefaults(),
 		PeerAuthN:             peerAuthentications,
@@ -393,11 +418,9 @@ func sidecarWorkloadWithDestinationRules(
 	peerAuthentications []PeerAuthenticationView,
 	destinationRules []DestinationRuleView,
 ) WorkloadInput {
-	return sidecarWorkloadWithPortsAndDestinationRules(
-		[]int32{8080, 9090},
-		peerAuthentications,
-		destinationRules,
-	)
+	in := sidecarWorkload(peerAuthentications...)
+	in.DestRules = destinationRules
+	return in
 }
 
 func sidecarWorkloadWithPortsAndDestinationRules(

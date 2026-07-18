@@ -1,9 +1,12 @@
 package collect
 
 import (
+	istionetworkingv1 "istio.io/client-go/pkg/apis/networking/v1"
+	istiosecurityv1 "istio.io/client-go/pkg/apis/security/v1"
 	istiosecurityv1beta1 "istio.io/client-go/pkg/apis/security/v1beta1"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 )
 
 // Scope describes whether a scan reads every namespace or a bounded namespace set.
@@ -29,28 +32,39 @@ type Permission struct {
 
 // Snapshot is the raw typed-resource bundle returned by collectors.
 type Snapshot struct {
-	RootNamespace          string
-	Namespaces             []corev1.Namespace
-	Pods                   []corev1.Pod
-	PodAvailability        PeerAuthenticationAvailability
-	Deployments            []appsv1.Deployment
-	ReplicaSets            []appsv1.ReplicaSet
-	ReplicaSetAvailability PeerAuthenticationAvailability
-	StatefulSets           []appsv1.StatefulSet
-	DaemonSets             []appsv1.DaemonSet
-	Services               []corev1.Service
-	PeerAuthentications    []*istiosecurityv1beta1.PeerAuthentication
-	PeerAuthAvailability   PeerAuthenticationAvailability
-	PermissionSummary      []Permission
+	RootNamespace                   string
+	Namespaces                      []corev1.Namespace
+	Pods                            []corev1.Pod
+	PodAvailability                 PeerAuthenticationAvailability
+	Deployments                     []appsv1.Deployment
+	ReplicaSets                     []appsv1.ReplicaSet
+	ReplicaSetAvailability          PeerAuthenticationAvailability
+	StatefulSets                    []appsv1.StatefulSet
+	DaemonSets                      []appsv1.DaemonSet
+	Services                        []corev1.Service
+	ServiceAvailability             ScopedAvailability
+	PeerAuthentications             []*istiosecurityv1beta1.PeerAuthentication
+	PeerAuthAvailability            ScopedAvailability
+	DestinationRules                []*istionetworkingv1.DestinationRule
+	DestinationRuleAvailability     ScopedAvailability
+	Sidecars                        []*istionetworkingv1.Sidecar
+	SidecarAvailability             ScopedAvailability
+	AuthorizationPolicies           []*istiosecurityv1.AuthorizationPolicy
+	AuthorizationPolicyAvailability ScopedAvailability
+	Gateways                        []gatewayv1.Gateway
+	GatewayAvailability             ScopedAvailability
+	PermissionSummary               []Permission
 }
 
-// PeerAuthenticationAvailability records which PeerAuthentication list scopes
-// were available. Scoped scans need both root-namespace and workload-namespace
-// evidence to resolve M1 mTLS posture.
-type PeerAuthenticationAvailability struct {
+// ScopedAvailability records which namespace list scopes were available.
+type ScopedAvailability struct {
 	AllNamespaces bool
 	Namespaces    map[string]bool
 }
+
+// PeerAuthenticationAvailability remains an alias for compatibility with
+// existing hand-built snapshots and tests.
+type PeerAuthenticationAvailability = ScopedAvailability
 
 // PeerAuthenticationsAvailable reports whether the scanner could list Istio
 // PeerAuthentication resources. A missing CRD or permission denial makes mTLS
@@ -113,6 +127,73 @@ func (s Snapshot) hasPeerAuthenticationAvailabilityDetails() bool {
 	return s.PeerAuthAvailability.AllNamespaces || len(s.PeerAuthAvailability.Namespaces) > 0
 }
 
+// ServicesAvailableFor reports whether Service selection and Service-bound
+// port evidence were collected for a workload namespace.
+func (s Snapshot) ServicesAvailableFor(namespace string) bool {
+	return s.scopedResourceAvailableFor(s.ServiceAvailability, []string{namespace}, "", "services")
+}
+
+// DestinationRulesAvailableFor reports whether DestinationRule evidence was
+// collected from both the workload and root configuration namespaces.
+func (s Snapshot) DestinationRulesAvailableFor(namespace, rootNamespace string) bool {
+	if rootNamespace == "" {
+		rootNamespace = DefaultRootNamespace
+	}
+	return s.scopedResourceAvailableFor(
+		s.DestinationRuleAvailability,
+		uniqueScopes(namespace, rootNamespace),
+		"networking.istio.io",
+		"destinationrules",
+	)
+}
+
+// SidecarsAvailableFor reports whether Sidecar resource scoping evidence was
+// collected for the workload namespace.
+func (s Snapshot) SidecarsAvailableFor(namespace string) bool {
+	return s.scopedResourceAvailableFor(s.SidecarAvailability, []string{namespace}, "networking.istio.io", "sidecars")
+}
+
+// AuthorizationPoliciesAvailableFor reports whether mesh-root and workload
+// namespace AuthorizationPolicy evidence was collected.
+func (s Snapshot) AuthorizationPoliciesAvailableFor(namespace, rootNamespace string) bool {
+	if rootNamespace == "" {
+		rootNamespace = DefaultRootNamespace
+	}
+	return s.scopedResourceAvailableFor(
+		s.AuthorizationPolicyAvailability,
+		uniqueScopes(namespace, rootNamespace),
+		"security.istio.io",
+		"authorizationpolicies",
+	)
+}
+
+// GatewaysAvailableFor reports whether Gateway API waypoint evidence was
+// collected for the namespace that owns a selected waypoint.
+func (s Snapshot) GatewaysAvailableFor(namespace string) bool {
+	return s.scopedResourceAvailableFor(s.GatewayAvailability, []string{namespace}, "gateway.networking.k8s.io", "gateways")
+}
+
+func (s Snapshot) scopedResourceAvailableFor(
+	availability ScopedAvailability,
+	namespaces []string,
+	apiGroup string,
+	resource string,
+) bool {
+	if hasScopedAvailabilityDetails(availability) {
+		if availability.AllNamespaces {
+			return true
+		}
+		for _, namespace := range namespaces {
+			if !availability.Namespaces[namespace] {
+				return false
+			}
+		}
+		return true
+	}
+	available, seen := s.resourcePermissionAvailable(apiGroup, resource)
+	return seen && available
+}
+
 // PodsAvailableFor reports whether pod evidence was available for the namespace.
 // Hand-built snapshots without permission metadata default to available so unit
 // tests can provide explicit pods without recreating collector bookkeeping.
@@ -140,15 +221,28 @@ func (s Snapshot) ReplicaSetsAvailableFor(namespace string) bool {
 	return available
 }
 
-func hasScopedAvailabilityDetails(availability PeerAuthenticationAvailability) bool {
+func hasScopedAvailabilityDetails(availability ScopedAvailability) bool {
 	return availability.AllNamespaces || len(availability.Namespaces) > 0
 }
 
-func scopedAvailableFor(availability PeerAuthenticationAvailability, namespace string) bool {
+func scopedAvailableFor(availability ScopedAvailability, namespace string) bool {
 	if availability.AllNamespaces {
 		return true
 	}
 	return availability.Namespaces[namespace]
+}
+
+func uniqueScopes(values ...string) []string {
+	seen := map[string]struct{}{}
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		if _, exists := seen[value]; exists {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	return out
 }
 
 func (s Snapshot) resourcePermissionAvailable(apiGroup, resource string) (bool, bool) {

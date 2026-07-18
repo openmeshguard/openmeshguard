@@ -276,25 +276,30 @@ func applyPortOverrides(
 	workloadPeerAuthentication *PeerAuthenticationView,
 	ports []int32,
 ) (MTLSEffective, map[int32]MTLSEffective, []Step, error) {
-	if workloadPeerAuthentication == nil || len(workloadPeerAuthentication.PortLevelModes) == 0 {
-		return parent, nil, nil, nil
-	}
-	if len(ports) == 0 {
+	if ports == nil {
+		if workloadPeerAuthentication == nil || len(workloadPeerAuthentication.PortLevelModes) == 0 {
+			return parent, nil, nil, nil
+		}
 		return MTLSUnknown, nil, nil, fmt.Errorf("%s on %s/%s", workloadPortsUnavailableReason, workloadPeerAuthentication.Namespace, workloadPeerAuthentication.Name)
 	}
 
 	claimedPorts := int32Set(ports)
+	orderedPorts := sortedInt32Keys(claimedPorts)
+	byPort := make(map[int32]MTLSEffective, len(orderedPorts))
+	for _, port := range orderedPorts {
+		byPort[port] = parent
+	}
+	if workloadPeerAuthentication == nil || len(workloadPeerAuthentication.PortLevelModes) == 0 {
+		return parent, byPort, nil, nil
+	}
 	for port := range workloadPeerAuthentication.PortLevelModes {
 		if !claimedPorts[port] {
 			return MTLSUnknown, nil, nil, fmt.Errorf("PeerAuthentication %s/%s portLevelMtls references unclaimed workload port %d", workloadPeerAuthentication.Namespace, workloadPeerAuthentication.Name, port)
 		}
 	}
 
-	orderedPorts := sortedInt32Keys(claimedPorts)
-	byPort := make(map[int32]MTLSEffective, len(orderedPorts))
 	var steps []Step
 	for _, port := range orderedPorts {
-		byPort[port] = parent
 		mode, ok := workloadPeerAuthentication.PortLevelModes[port]
 		if !ok {
 			continue

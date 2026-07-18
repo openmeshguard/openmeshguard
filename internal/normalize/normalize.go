@@ -16,9 +16,10 @@ import (
 
 const defaultRootNamespace = "istio-system"
 
-// Build converts collected typed resources into the normalized M1 inventory and
-// resolver inputs. M1 intentionally omits ports, DestinationRules, authz, and
-// ambient resolution.
+// Build converts collected typed resources into normalized inventory and pure
+// resolver inputs. Ambient membership detection remains intentionally deferred
+// to M6; M5 only models waypoint attachment and enforceability from observed
+// labels and Gateway API state.
 func Build(snapshot collect.Snapshot) Result {
 	rootNamespace := snapshot.RootNamespace
 	if rootNamespace == "" {
@@ -30,14 +31,23 @@ func Build(snapshot collect.Snapshot) Result {
 	}
 
 	peerAuthentications := projectPeerAuthentications(snapshot.PeerAuthentications)
+	destinationRules := projectDestinationRules(snapshot.DestinationRules)
+	sidecars := projectSidecars(snapshot.Sidecars)
+	authorizationPolicies := projectAuthorizationPolicies(snapshot.AuthorizationPolicies, rootNamespace)
+	gateways := projectGateways(snapshot.Gateways)
 
 	builder := workloadBuilder{
-		namespaces:          namespaceLabels,
-		pods:                snapshot.Pods,
-		peerAuthentications: peerAuthentications,
-		coveredPods:         map[string]struct{}{},
-		rootNamespace:       rootNamespace,
-		replicaSetOwners:    replicaSetDeploymentOwners(snapshot.ReplicaSets),
+		namespaces:            namespaceLabels,
+		pods:                  snapshot.Pods,
+		services:              snapshot.Services,
+		peerAuthentications:   peerAuthentications,
+		destinationRules:      destinationRules,
+		sidecars:              sidecars,
+		authorizationPolicies: authorizationPolicies,
+		gateways:              gateways,
+		coveredPods:           map[string]struct{}{},
+		rootNamespace:         rootNamespace,
+		replicaSetOwners:      replicaSetDeploymentOwners(snapshot.ReplicaSets),
 		podsAvailableFor: func(namespace string) bool {
 			return snapshot.PodsAvailableFor(namespace)
 		},
@@ -46,6 +56,21 @@ func Build(snapshot collect.Snapshot) Result {
 		},
 		peerAuthenticationsAvailableFor: func(namespace string) bool {
 			return snapshot.PeerAuthenticationsAvailableFor(namespace, rootNamespace)
+		},
+		servicesAvailableFor: func(namespace string) bool {
+			return snapshot.ServicesAvailableFor(namespace)
+		},
+		destinationRulesAvailableFor: func(namespace string) bool {
+			return snapshot.DestinationRulesAvailableFor(namespace, rootNamespace)
+		},
+		sidecarsAvailableFor: func(namespace string) bool {
+			return snapshot.SidecarsAvailableFor(namespace)
+		},
+		authorizationPoliciesAvailableFor: func(namespace string) bool {
+			return snapshot.AuthorizationPoliciesAvailableFor(namespace, rootNamespace)
+		},
+		gatewaysAvailableFor: func(namespace string) bool {
+			return snapshot.GatewaysAvailableFor(namespace)
 		},
 	}
 
@@ -110,14 +135,18 @@ func Build(snapshot collect.Snapshot) Result {
 	return Result{
 		Inventory: Inventory{
 			Counts: map[string]int{
-				"namespaces":          len(snapshot.Namespaces),
-				"pods":                len(snapshot.Pods),
-				"services":            len(snapshot.Services),
-				"deployments":         len(snapshot.Deployments),
-				"replicasets":         len(snapshot.ReplicaSets),
-				"statefulsets":        len(snapshot.StatefulSets),
-				"daemonsets":          len(snapshot.DaemonSets),
-				"peerAuthentications": len(snapshot.PeerAuthentications),
+				"namespaces":            len(snapshot.Namespaces),
+				"pods":                  len(snapshot.Pods),
+				"services":              len(snapshot.Services),
+				"deployments":           len(snapshot.Deployments),
+				"replicasets":           len(snapshot.ReplicaSets),
+				"statefulsets":          len(snapshot.StatefulSets),
+				"daemonsets":            len(snapshot.DaemonSets),
+				"peerAuthentications":   len(snapshot.PeerAuthentications),
+				"destinationRules":      len(snapshot.DestinationRules),
+				"sidecars":              len(snapshot.Sidecars),
+				"authorizationPolicies": len(snapshot.AuthorizationPolicies),
+				"gateways":              len(snapshot.Gateways),
 			},
 			DataPlaneMode: aggregateDataPlaneMode(workloads),
 			MultiCluster:  detectMultiCluster(snapshot),
@@ -127,15 +156,25 @@ func Build(snapshot collect.Snapshot) Result {
 }
 
 type workloadBuilder struct {
-	namespaces                      map[string]map[string]string
-	pods                            []corev1.Pod
-	peerAuthentications             []peerAuthenticationProjection
-	coveredPods                     map[string]struct{}
-	rootNamespace                   string
-	replicaSetOwners                map[string]string
-	podsAvailableFor                func(namespace string) bool
-	replicaSetsAvailableFor         func(namespace string) bool
-	peerAuthenticationsAvailableFor func(namespace string) bool
+	namespaces                        map[string]map[string]string
+	pods                              []corev1.Pod
+	services                          []corev1.Service
+	peerAuthentications               []peerAuthenticationProjection
+	destinationRules                  []destinationRuleProjection
+	sidecars                          []sidecarProjection
+	authorizationPolicies             []authorizationPolicyProjection
+	gateways                          []gatewayProjection
+	coveredPods                       map[string]struct{}
+	rootNamespace                     string
+	replicaSetOwners                  map[string]string
+	podsAvailableFor                  func(namespace string) bool
+	replicaSetsAvailableFor           func(namespace string) bool
+	peerAuthenticationsAvailableFor   func(namespace string) bool
+	servicesAvailableFor              func(namespace string) bool
+	destinationRulesAvailableFor      func(namespace string) bool
+	sidecarsAvailableFor              func(namespace string) bool
+	authorizationPoliciesAvailableFor func(namespace string) bool
+	gatewaysAvailableFor              func(namespace string) bool
 
 	workloads []resolver.WorkloadInput
 }
@@ -144,13 +183,16 @@ func (b *workloadBuilder) addController(kind, namespace, name string, template c
 	labels := copyStringMap(template.Labels)
 	nsLabels := b.namespaces[namespace]
 	pods := podsMatching(b.pods, namespace, kind, name, selector, b.replicaSetOwners)
-	peerAuthentications := b.peerAuthenticationsFor(namespace, []map[string]string{labels})
+	labelSets := []map[string]string{labels}
+	peerAuthentications := b.peerAuthenticationsFor(namespace, labelSets)
 	if len(pods) > 0 {
 		podPeerAuthentications := make([][]resolver.PeerAuthenticationView, len(pods))
+		podAuthorizationPolicies := make([][]resolver.AuthorizationPolicyView, len(pods))
 		for i, pod := range pods {
 			podPeerAuthentications[i] = b.peerAuthenticationsFor(namespace, []map[string]string{pod.Labels})
+			podAuthorizationPolicies[i] = b.authorizationPoliciesFor(namespace, []map[string]string{pod.Labels}, b.selectedServices(namespace, []map[string]string{pod.Labels}), b.waypointFor(namespace, pod.Labels, nsLabels, b.selectedServices(namespace, []map[string]string{pod.Labels})))
 		}
-		if !uniformPeerAuthenticationSets(podPeerAuthentications) {
+		if !uniformPeerAuthenticationSets(podPeerAuthentications) || !uniformAuthorizationPolicySets(podAuthorizationPolicies) {
 			for _, pod := range pods {
 				b.coverPod(pod)
 				b.addPod(pod)
@@ -158,11 +200,15 @@ func (b *workloadBuilder) addController(kind, namespace, name string, template c
 			return
 		}
 		peerAuthentications = podPeerAuthentications[0]
+		for _, pod := range pods {
+			labelSets = append(labelSets, pod.Labels)
+		}
 	}
 	for _, pod := range pods {
 		b.coverPod(pod)
 	}
 	mode := detectDataPlaneMode(nsLabels, template.Labels, template.Annotations, template.Spec, pods, b.controllerPodEvidenceAvailable(kind, namespace))
+	policyInputs := b.policyInputs(namespace, labelSets, appendPodSpecs(template.Spec, pods), labels, nsLabels)
 
 	b.workloads = append(b.workloads, resolver.WorkloadInput{
 		Ref: resolver.WorkloadRef{
@@ -181,7 +227,12 @@ func (b *workloadBuilder) addController(kind, namespace, name string, template c
 			RootNamespace: b.rootNamespace,
 			Known:         b.peerAuthenticationsKnown(namespace),
 		},
-		PeerAuthN: peerAuthentications,
+		Ports:                 policyInputs.ports,
+		PeerAuthN:             peerAuthentications,
+		DestRules:             policyInputs.destinationRules,
+		DestinationRulesKnown: policyInputs.destinationRulesKnown,
+		AuthzPolicies:         policyInputs.authorizationPolicies,
+		Waypoint:              policyInputs.waypoint,
 	})
 }
 
@@ -189,6 +240,7 @@ func (b *workloadBuilder) addPod(pod corev1.Pod) {
 	labels := copyStringMap(pod.Labels)
 	nsLabels := b.namespaces[pod.Namespace]
 	mode := detectDataPlaneMode(nsLabels, pod.Labels, pod.Annotations, pod.Spec, []corev1.Pod{pod}, b.podsAvailable(pod.Namespace))
+	policyInputs := b.policyInputs(pod.Namespace, []map[string]string{labels}, []corev1.PodSpec{pod.Spec}, labels, nsLabels)
 
 	b.workloads = append(b.workloads, resolver.WorkloadInput{
 		Ref: resolver.WorkloadRef{
@@ -207,7 +259,12 @@ func (b *workloadBuilder) addPod(pod corev1.Pod) {
 			RootNamespace: b.rootNamespace,
 			Known:         b.peerAuthenticationsKnown(pod.Namespace),
 		},
-		PeerAuthN: b.peerAuthenticationsFor(pod.Namespace, []map[string]string{labels}),
+		Ports:                 policyInputs.ports,
+		PeerAuthN:             b.peerAuthenticationsFor(pod.Namespace, []map[string]string{labels}),
+		DestRules:             policyInputs.destinationRules,
+		DestinationRulesKnown: policyInputs.destinationRulesKnown,
+		AuthzPolicies:         policyInputs.authorizationPolicies,
+		Waypoint:              policyInputs.waypoint,
 	})
 }
 
