@@ -45,11 +45,19 @@ func TestEngineFindingsReplaceProvisionalPathEndToEnd(t *testing.T) {
 				Posture:   workloadPosture(resolver.ModeNotApplicable, resolver.MTLSNotInMesh, nil),
 				Namespace: engine.NamespaceInput{Name: "payments"},
 			},
-			wantCount: 3,
+			wantCount: 11,
 			wantStatuses: map[string]string{
-				"MG-MTLS-001": "not-applicable",
-				"MG-MTLS-002": "not-applicable",
-				"MG-MTLS-003": "not-applicable",
+				"MG-AUTHZ-001": "not-applicable",
+				"MG-AUTHZ-002": "not-applicable",
+				"MG-AUTHZ-003": "not-applicable",
+				"MG-AUTHZ-004": "not-applicable",
+				"MG-AUTHZ-005": "not-applicable",
+				"MG-AUTHZ-006": "not-applicable",
+				"MG-AUTHZ-007": "not-applicable",
+				"MG-MTLS-001":  "not-applicable",
+				"MG-MTLS-002":  "not-applicable",
+				"MG-MTLS-003":  "not-applicable",
+				"MG-MTLS-007":  "not-applicable",
 			},
 		},
 		{
@@ -133,18 +141,21 @@ func TestDefaultOutputMakesUnwiredEvidenceUnknown(t *testing.T) {
 }
 
 func workloadPosture(mode resolver.DataPlaneMode, effective resolver.MTLSEffective, byPort map[int32]resolver.MTLSEffective) resolver.WorkloadResult {
+	knownFalse := false
 	return resolver.WorkloadResult{
 		Ref:  resolver.WorkloadRef{Cluster: "cluster-a", Namespace: "payments", Name: "api", Kind: "Deployment"},
 		Mode: mode,
 		MTLS: resolver.MTLSResult{
-			Effective: effective,
-			ByPort:    byPort,
-			Chain:     []resolver.Step{{Order: 1, Kind: "PeerAuthentication", Namespace: "payments", Name: "default", Effect: "sets effective mTLS"}},
+			Effective:              effective,
+			ByPort:                 byPort,
+			ClientTLSContradiction: &knownFalse,
+			Chain:                  []resolver.Step{{Order: 1, Kind: "PeerAuthentication", Namespace: "payments", Name: "default", Effect: "sets effective mTLS"}},
 		},
 		Authz: resolver.AuthzResult{
-			Effective:     resolver.AuthzUnknown,
-			Chain:         []resolver.Step{},
-			UnknownReason: "authorization resolver not yet implemented (M5)",
+			Effective:       resolver.AuthzDefaultDenyExplicitAllow,
+			BroadAllow:      &knownFalse,
+			PoliciesInScope: []string{"payments/default-deny", "payments/api"},
+			Chain:           []resolver.Step{{Order: 1, Kind: "AuthorizationPolicy", Namespace: "payments", Name: "default-deny", Effect: "sets effective authorization"}},
 		},
 	}
 }

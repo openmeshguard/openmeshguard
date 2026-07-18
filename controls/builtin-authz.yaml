@@ -1,0 +1,140 @@
+apiVersion: openmeshguard.io/v1alpha1
+kind: ControlPack
+metadata:
+  name: builtin-authz
+  version: 0.1.0
+controls:
+  - id: MG-AUTHZ-001
+    title: Mesh-managed workloads must have resolved authorization coverage
+    category: authz
+    severity: high
+    evidenceType: config
+    scope: workload
+    environments: []
+    requires:
+      - authorization.effective
+    applicability: 'workload.dataPlaneMode != "not-applicable"'
+    expression: 'workload.authorization.effective != "no-policy"'
+    message: >-
+      {{ .Workload }} has no resolved AuthorizationPolicy coverage.
+    remediation:
+      guidance: >-
+        Apply an AuthorizationPolicy that selects this workload and inspect the
+        resolution chain to confirm its effective scope.
+
+  - id: MG-AUTHZ-002
+    title: Workloads should resolve to default deny with explicit allow
+    category: authz
+    severity: high
+    evidenceType: config
+    scope: workload
+    environments: []
+    requires:
+      - authorization.effective
+    applicability: 'workload.dataPlaneMode != "not-applicable"'
+    expression: 'workload.authorization.effective == "default-deny-explicit-allow"'
+    message: >-
+      Authorization for {{ .Workload }} resolves to
+      {{ .Posture.Authorization.Effective }}, not default deny with explicit allow.
+    remediation:
+      guidance: >-
+        Establish an empty ALLOW policy for default deny and add narrowly scoped
+        ALLOW rules for required traffic.
+
+  - id: MG-AUTHZ-003
+    title: Authorization policies must not grant structurally broad access
+    category: authz
+    severity: high
+    evidenceType: config
+    scope: workload
+    environments: []
+    requires:
+      - authorization.effective
+      - authorization.broadAllow
+    applicability: 'workload.dataPlaneMode != "not-applicable"'
+    expression: '!workload.authorization.broadAllow'
+    message: >-
+      AuthorizationPolicy coverage for {{ .Workload }} includes an unrestricted
+      rule or wildcard source.
+    remediation:
+      guidance: >-
+        Replace empty rules and wildcard principals or namespaces with the
+        narrow identities and operations the workload requires.
+
+  - id: MG-AUTHZ-004
+    title: Authorization access must be scoped to explicit identities
+    category: authz
+    severity: high
+    evidenceType: config
+    scope: workload
+    environments: []
+    requires:
+      - authorization.effective
+      - authorization.broadAllow
+    applicability: 'workload.dataPlaneMode != "not-applicable"'
+    expression: '!workload.authorization.broadAllow'
+    message: >-
+      Authorization access for {{ .Workload }} is not scoped to explicit
+      principals, namespaces, or workloads.
+    remediation:
+      guidance: >-
+        Scope ALLOW rules to approved principals, namespaces, service accounts,
+        or workload identities.
+
+  - id: MG-AUTHZ-005
+    title: Authorization coverage must resolve at workload level
+    category: authz
+    severity: high
+    evidenceType: config
+    scope: workload
+    environments: []
+    requires:
+      - authorization.effective
+      - authorization.policiesInScope
+    applicability: 'workload.dataPlaneMode != "not-applicable"'
+    expression: 'workload.authorization.policiesInScope.size() > 0 && workload.authorization.effective != "no-policy"'
+    message: >-
+      {{ .Workload }} is not selected by any resolved AuthorizationPolicy.
+    remediation:
+      guidance: >-
+        Correct policy namespace, selector, or targetRefs so coverage reaches
+        this workload rather than relying on policy resource presence alone.
+
+  - id: MG-AUTHZ-006
+    title: Ambient L7 authorization must be enforced by a waypoint
+    category: authz
+    severity: high
+    evidenceType: config
+    scope: workload
+    environments: []
+    requires:
+      - authorization.effective
+      - authorization.l7Unenforced
+    applicability: 'workload.dataPlaneMode != "not-applicable"'
+    expression: 'workload.authorization.l7Unenforced.size() == 0'
+    message: >-
+      Ambient L7 authorization for {{ .Workload }} is not enforced by a ready
+      waypoint in the attachment path.
+    remediation:
+      guidance: >-
+        Attach the L7 policy with targetRefs and select a ready waypoint whose
+        scope includes the workload.
+
+  - id: MG-AUTHZ-007
+    title: L7 authorization without an enforcement path must be reported
+    category: authz
+    severity: high
+    evidenceType: config
+    scope: workload
+    environments: []
+    requires:
+      - authorization.effective
+    applicability: 'workload.dataPlaneMode != "not-applicable"'
+    expression: 'workload.authorization.effective != "l7-policy-unenforced"'
+    message: >-
+      L7 AuthorizationPolicy for {{ .Workload }} has no ready waypoint in its
+      enforcement path.
+    remediation:
+      guidance: >-
+        Provision or repair the selected waypoint and confirm that policy
+        targetRefs attach through that enforcement path.

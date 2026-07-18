@@ -232,6 +232,30 @@ func TestInventoryAvailabilityFromPermissionSummary(t *testing.T) {
 			wantPaths:  []string{"counts.peerAuthentications"},
 			rejectPath: "dataPlane.mode",
 		},
+		{
+			name:       "DestinationRule affects its count",
+			permission: collect.Permission{APIGroup: "networking.istio.io", Resource: "destinationrules", Granted: false},
+			wantPaths:  []string{"counts.destinationRules"},
+			rejectPath: "dataPlane.mode",
+		},
+		{
+			name:       "Sidecar affects its count",
+			permission: collect.Permission{APIGroup: "networking.istio.io", Resource: "sidecars", Granted: false},
+			wantPaths:  []string{"counts.sidecars"},
+			rejectPath: "dataPlane.mode",
+		},
+		{
+			name:       "AuthorizationPolicy affects its count",
+			permission: collect.Permission{APIGroup: "security.istio.io", Resource: "authorizationpolicies", Granted: false},
+			wantPaths:  []string{"counts.authorizationPolicies"},
+			rejectPath: "dataPlane.mode",
+		},
+		{
+			name:       "Gateway affects its count",
+			permission: collect.Permission{APIGroup: "gateway.networking.k8s.io", Resource: "gateways", Granted: false},
+			wantPaths:  []string{"counts.gateways"},
+			rejectPath: "dataPlane.mode",
+		},
 	}
 
 	for _, tt := range tests {
@@ -306,10 +330,10 @@ controls:
 	}
 	got := permissionSummaryWithControls(permissions, packs)
 	want := [][]string{
-		{"ACME-INV-001"},
+		{"ACME-INV-001", "MG-AUTHZ-001", "MG-AUTHZ-002", "MG-AUTHZ-003", "MG-AUTHZ-004", "MG-AUTHZ-005", "MG-AUTHZ-006", "MG-AUTHZ-007", "MG-MTLS-002", "MG-MTLS-007"},
 		{"ACME-ENV-001", "ACME-INV-001"},
-		{"MG-MTLS-001", "MG-MTLS-002", "MG-MTLS-003"},
-		{"ACME-ENV-001", "ACME-GOV-002", "ACME-INV-001", "MG-MTLS-001", "MG-MTLS-002", "MG-MTLS-003"},
+		{"MG-MTLS-001", "MG-MTLS-002", "MG-MTLS-003", "MG-MTLS-007"},
+		{"ACME-ENV-001", "ACME-GOV-002", "ACME-INV-001", "MG-AUTHZ-001", "MG-AUTHZ-002", "MG-AUTHZ-003", "MG-AUTHZ-004", "MG-AUTHZ-005", "MG-AUTHZ-006", "MG-AUTHZ-007", "MG-MTLS-001", "MG-MTLS-002", "MG-MTLS-003", "MG-MTLS-007"},
 	}
 	for index := range want {
 		if strings.Join(got[index].AffectedControls, ",") != strings.Join(want[index], ",") {

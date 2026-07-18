@@ -453,6 +453,7 @@ func TestBuiltinMTLSCatalogMetadata(t *testing.T) {
 		{id: "MG-MTLS-001", title: "Mesh-managed workloads must resolve to strict mTLS"},
 		{id: "MG-MTLS-002", title: "Declared workload ports must resolve to strict mTLS"},
 		{id: "MG-MTLS-003", title: "Workloads must never resolve to globally disabled mTLS"},
+		{id: "MG-MTLS-007", title: "Client TLS must agree with resolved server mTLS"},
 	}
 
 	for _, tt := range tests {
@@ -463,6 +464,30 @@ func TestBuiltinMTLSCatalogMetadata(t *testing.T) {
 			}
 			if !reflect.DeepEqual(control.Frameworks, wantFrameworks) {
 				t.Fatalf("frameworks = %#v, want %#v", control.Frameworks, wantFrameworks)
+			}
+		})
+	}
+}
+
+func TestBuiltinAuthorizationCatalogMetadata(t *testing.T) {
+	packs, err := LoadBuiltins()
+	if err != nil {
+		t.Fatalf("LoadBuiltins returned error: %v", err)
+	}
+	wantTitles := map[string]string{
+		"MG-AUTHZ-001": "Mesh-managed workloads must have resolved authorization coverage",
+		"MG-AUTHZ-002": "Workloads should resolve to default deny with explicit allow",
+		"MG-AUTHZ-003": "Authorization policies must not grant structurally broad access",
+		"MG-AUTHZ-004": "Authorization access must be scoped to explicit identities",
+		"MG-AUTHZ-005": "Authorization coverage must resolve at workload level",
+		"MG-AUTHZ-006": "Ambient L7 authorization must be enforced by a waypoint",
+		"MG-AUTHZ-007": "L7 authorization without an enforcement path must be reported",
+	}
+	for id, title := range wantTitles {
+		t.Run(id, func(t *testing.T) {
+			control := packWithControl(t, packs, id).Controls[0]
+			if control.Title != title || control.Category != "authz" || control.EvidenceType != "config" || control.Scope != "workload" {
+				t.Fatalf("control = %#v, want authz config workload control titled %q", control, title)
 			}
 		})
 	}

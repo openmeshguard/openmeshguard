@@ -69,3 +69,25 @@ controls:
     frameworks:
       - nist-csf-2.0/PR.DS-02
       - owasp-k8s-2025/K05
+
+  - id: MG-MTLS-007
+    title: Client TLS must agree with resolved server mTLS
+    category: mtls
+    severity: high
+    evidenceType: config
+    scope: workload
+    environments: []
+    requires:
+      - mtls.clientTLSContradiction
+    applicability: 'workload.dataPlaneMode != "not-applicable"'
+    expression: '!workload.mtls.clientTLSContradiction'
+    message: >-
+      DestinationRule client TLS for {{ .Workload }} contradicts the resolved
+      server-side mTLS posture.
+    remediation:
+      guidance: >-
+        Correct DestinationRule TLS mode or the server-side PeerAuthentication
+        posture so client and server settings agree.
+    frameworks:
+      - nist-csf-2.0/PR.DS-02
+      - owasp-k8s-2025/K05

@@ -54,7 +54,8 @@ type mtlsData struct {
 }
 
 type authorizationData struct {
-	Effective string
+	Effective  string
+	BroadAllow *bool
 }
 
 type verifiedData struct {
@@ -435,8 +436,11 @@ func workloadTargets(input Input, params map[string]any) []evaluationTarget {
 				Workload:  name,
 				Namespace: namespace.Name,
 				Posture: postureData{
-					Mtls:          mtlsData{Effective: string(workload.Posture.MTLS.Effective), ByPort: workload.Posture.MTLS.ByPort, ClientTLSContradiction: workload.Posture.MTLS.ClientTLSContradiction},
-					Authorization: authorizationData{Effective: string(workload.Posture.Authz.Effective)},
+					Mtls: mtlsData{Effective: string(workload.Posture.MTLS.Effective), ByPort: workload.Posture.MTLS.ByPort, ClientTLSContradiction: workload.Posture.MTLS.ClientTLSContradiction},
+					Authorization: authorizationData{
+						Effective:  string(workload.Posture.Authz.Effective),
+						BroadAllow: workload.Posture.Authz.BroadAllow,
+					},
 				},
 				Verified: verifiedTemplateData(workload.Verified), Inventory: nonNilMap(input.Inventory), Params: params,
 			},
@@ -584,6 +588,9 @@ func defaultWorkloadAvailability(workload WorkloadInput, namespace NamespaceInpu
 		setDefaultAvailability(availability, "workload.authorization.policiesInScope", Availability{Reason: reason})
 		setDefaultAvailability(availability, "workload.authorization.l7Unenforced", Availability{Reason: reason})
 	}
+	if workload.Posture.Authz.BroadAllow == nil {
+		setDefaultAvailability(availability, "workload.authorization.broadAllow", Availability{Reason: "authorization broad-allow evidence unavailable"})
+	}
 	if workload.Verified == nil {
 		setDefaultAvailability(availability, "workload.verified", Availability{Reason: "runtime verification unavailable"})
 	}
@@ -637,6 +644,9 @@ func workloadValue(workload WorkloadInput, availability map[string]Availability)
 	}
 	if available(availability, "workload.authorization.effective") {
 		authz["effective"] = string(workload.Posture.Authz.Effective)
+	}
+	if available(availability, "workload.authorization.broadAllow") && workload.Posture.Authz.BroadAllow != nil {
+		authz["broadAllow"] = *workload.Posture.Authz.BroadAllow
 	}
 	value["authorization"] = authz
 	if workload.Verified != nil {
