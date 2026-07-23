@@ -255,6 +255,24 @@ func TestResolverV2ResolveAuthz(t *testing.T) {
 			},
 		},
 		{
+			name: "root namespace selector matches a workload in another namespace",
+			in: authzWorkload(ModeSidecar,
+				AuthorizationPolicyView{
+					Name: "mesh-api", Namespace: "istio-system", Action: "ALLOW",
+					RootNamespace: true, HasSelector: true, SelectorMatch: true,
+					HasRules: true, IdentityScoped: true,
+				},
+			),
+			wantEffective:  AuthzAllowOnly,
+			wantBroadAllow: &falseValue,
+			wantIdentity:   &trueValue,
+			wantPolicies:   []string{"istio-system/mesh-api"},
+			wantChain: []Step{
+				authzDefaultStep(1),
+				authzPolicyStepWant(2, "istio-system", "mesh-api", "adds explicit rules to the additive ALLOW union"),
+			},
+		},
+		{
 			name: "empty ALLOW policy denies all without claiming explicit allow",
 			in: authzWorkload(ModeSidecar,
 				authzPolicy("payments", "allow-nothing", "ALLOW", false),
