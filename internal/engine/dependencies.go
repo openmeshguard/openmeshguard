@@ -162,6 +162,8 @@ func contractIdentifier(identifier string) string {
 func knownBooleanDependency(path string) bool {
 	switch path {
 	case "workload.mtls.clientTLSContradiction",
+		"workload.authorization.broadAllow",
+		"workload.authorization.identityScoped",
 		"workload.verified.plaintextObserved",
 		"inventory.multiCluster.participationDetected",
 		"inventory.multiCluster.evaluated",

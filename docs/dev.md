@@ -69,12 +69,13 @@ Kind configuration, preserving spaces, `#`, and apostrophes.
 
 The live scanner resolves mesh/namespace STRICT, namespace PERMISSIVE, and a
 namespace-STRICT versus workload-DISABLE precedence conflict. The
-port-level-override and DestinationRule-contradiction manifests are also
-verified to exist live, but their goldens intentionally retain current
-unavailable evidence: workload ports and DestinationRule collection have no
-producers yet. Injection-disabled membership remains unknown until M6 owns
-ambient enrollment detection. M4 does not silently wire any of those deferred
-inputs.
+port-level-override and DestinationRule-contradiction cases now resolve from
+collected Services, EndpointSlices, workload ports, DestinationRules, and
+client proxy context. The authorization group proves root/local union,
+structurally broad ALLOW, DENY precedence, allow-only scope, and selector
+exclusion through the same `cases.tsv`-driven golden path. Injection-disabled
+membership remains unknown until M6 owns ambient enrollment detection; M5
+does not infer ambient membership.
 
 ## RBAC identities and proof
 
@@ -149,9 +150,9 @@ the namespace scanner. The two phase logs are combined before asserting:
 The latest audit artifact is `.e2e/results/audit.jsonl`. CI also retains pod,
 event, control-plane, Kind, and audit diagnostics on failure.
 
-## Recorded M4 proof
+## Recorded M5 proof
 
-Recorded locally on 2026-07-17 (America/Chicago):
+Recorded locally on 2026-07-22 (America/Chicago):
 
 | Component | Exact version |
 |---|---|
@@ -159,27 +160,25 @@ Recorded locally on 2026-07-17 (America/Chicago):
 | Kubernetes node | `kindest/node:v1.35.0@sha256:452d707d4862f52530247495d180205e029056831160e22870e37e3f6c1ac31f` |
 | Istio | 1.30.2 |
 
-The final clean lifecycle and determinism proof was:
+The final clean lifecycle, guarded update, and determinism proof was:
 
 | Target | Duration | Result |
 |---|---:|---|
-| `make kind-up` | 47s | green in the exact combined lifecycle |
-| `make e2e` | 25s | eight goldens matched; nine reports schema-valid; RBAC/audit proofs green |
-| `make kind-down` | 0s | green in the exact combined lifecycle |
+| `make kind-up` | 43s | clean disposable cluster; pinned Kind, Kubernetes, and Istio versions verified |
+| `UPDATE_GOLDEN=1 make e2e` | 38s | guarded update changed 13 reviewed goldens; 14 reports schema-valid; both RBAC/audit proofs green |
+| first clean `make e2e` | 51s | all 13 goldens matched; 14 reports schema-valid; both RBAC/audit proofs green |
+| second clean `make e2e` | 51s | identical golden matches and audited event count |
+| `make kind-down` | 0s | disposable cluster removed |
 
-On a second fresh cluster, setup took 43s. The first E2E used
-`BINARY=/tmp/openmeshguard-m4-determinism/openmeshguard` and completed in 25s;
-the second used the default binary and completed in 37s. All eight normalized
-report SHA-256 values were identical, and both runs recorded the same 80
-approved scanner API events. Teardown took 0s.
-
-The audit contained 71 cluster-scanner list events, nine namespace-scanner
-list events, and exactly one separate audit-probe create event with a 403.
+Both consecutive clean runs recorded exactly 234 approved scanner API events
+and no other scanner calls. The final audit artifact contains 217
+cluster-scanner list events, 17 namespace-scanner list events, and exactly one
+separate audit-probe create event with a 403.
 After the proof boundary it contained zero fixture-manager and zero
 `kubernetes-admin` events. The `system:basic-user` binding remained absent,
 and all three allowed default roles were verified as non-resource `get` only.
 No token-bearing kubeconfig directory remained after any run.
 
 The pinned Istio minor now provides the version input needed by the M2 deferred
-root-namespace-selector decision. M4 does not change that resolver behavior;
+root-namespace-selector decision. M5 does not change that resolver behavior;
 the version-specific semantics remain deferred.

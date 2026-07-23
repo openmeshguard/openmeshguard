@@ -8,9 +8,9 @@ import (
 )
 
 const (
-	mtlsVersion = "mtls/v2"
+	mtlsVersion  = "mtls/v3"
+	authzVersion = "authz/v6"
 
-	authzNotImplementedReason             = "authorization resolver not yet implemented (M5)"
 	dataPlaneUnknownReason                = "data plane membership unavailable"
 	peerAuthenticationUnavailableReason   = "PeerAuthentication resources unavailable"
 	ztunnelUnavailableReason              = "ztunnel availability unavailable"
@@ -20,7 +20,7 @@ const (
 	ambientDisableUnsupportedReason       = "ambient PeerAuthentication DISABLE mode is unsupported by Istio"
 )
 
-// ResolverV2 implements the mtls/v2 effective mTLS semantics.
+// ResolverV2 implements the current composite resolver semantics.
 type ResolverV2 struct{}
 
 // New returns the current resolver implementation.
@@ -29,7 +29,7 @@ func New() ResolverV2 {
 }
 
 func (ResolverV2) Version() string {
-	return mtlsVersion
+	return mtlsVersion + "," + authzVersion
 }
 
 func (ResolverV2) ResolveMTLS(in WorkloadInput) MTLSResult {
@@ -112,14 +112,6 @@ func (ResolverV2) ResolveMTLS(in WorkloadInput) MTLSResult {
 		ByPort:                 byPort,
 		ClientTLSContradiction: contradiction,
 		Chain:                  orderChain(chain),
-	}
-}
-
-func (ResolverV2) ResolveAuthz(WorkloadInput) AuthzResult {
-	return AuthzResult{
-		Effective:     AuthzUnknown,
-		Chain:         []Step{},
-		UnknownReason: authzNotImplementedReason,
 	}
 }
 
@@ -284,25 +276,30 @@ func applyPortOverrides(
 	workloadPeerAuthentication *PeerAuthenticationView,
 	ports []int32,
 ) (MTLSEffective, map[int32]MTLSEffective, []Step, error) {
-	if workloadPeerAuthentication == nil || len(workloadPeerAuthentication.PortLevelModes) == 0 {
-		return parent, nil, nil, nil
-	}
-	if len(ports) == 0 {
+	if ports == nil {
+		if workloadPeerAuthentication == nil || len(workloadPeerAuthentication.PortLevelModes) == 0 {
+			return parent, nil, nil, nil
+		}
 		return MTLSUnknown, nil, nil, fmt.Errorf("%s on %s/%s", workloadPortsUnavailableReason, workloadPeerAuthentication.Namespace, workloadPeerAuthentication.Name)
 	}
 
 	claimedPorts := int32Set(ports)
+	orderedPorts := sortedInt32Keys(claimedPorts)
+	byPort := make(map[int32]MTLSEffective, len(orderedPorts))
+	for _, port := range orderedPorts {
+		byPort[port] = parent
+	}
+	if workloadPeerAuthentication == nil || len(workloadPeerAuthentication.PortLevelModes) == 0 {
+		return parent, byPort, nil, nil
+	}
 	for port := range workloadPeerAuthentication.PortLevelModes {
 		if !claimedPorts[port] {
 			return MTLSUnknown, nil, nil, fmt.Errorf("PeerAuthentication %s/%s portLevelMtls references unclaimed workload port %d", workloadPeerAuthentication.Namespace, workloadPeerAuthentication.Name, port)
 		}
 	}
 
-	orderedPorts := sortedInt32Keys(claimedPorts)
-	byPort := make(map[int32]MTLSEffective, len(orderedPorts))
 	var steps []Step
 	for _, port := range orderedPorts {
-		byPort[port] = parent
 		mode, ok := workloadPeerAuthentication.PortLevelModes[port]
 		if !ok {
 			continue

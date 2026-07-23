@@ -22,7 +22,7 @@
     "scope": {
       "allNamespaces": false,
       "namespaces": [
-        "omg-strict"
+        "omg-authz-root-local"
       ]
     },
     "dataSources": {
@@ -200,7 +200,7 @@
       ],
       "granted": false,
       "optional": true,
-      "impact": "ambient L7 waypoint enforceability may be unavailable without Gateway evidence; denied scope(s): namespace/omg-strict",
+      "impact": "ambient L7 waypoint enforceability may be unavailable without Gateway evidence; denied scope(s): namespace/omg-authz-root-local",
       "affectedControls": [
         "MG-AUTHZ-001",
         "MG-AUTHZ-002",
@@ -271,14 +271,14 @@
   ],
   "inventory": {
     "counts": {
-      "authorizationPolicies": 1,
+      "authorizationPolicies": 2,
       "daemonsets": 0,
       "deployments": 1,
       "destinationRules": 0,
       "endpointSlices": 1,
       "gateways": 0,
       "namespaces": 1,
-      "peerAuthentications": 2,
+      "peerAuthentications": 1,
       "pods": 1,
       "replicasets": 1,
       "services": 1,
@@ -296,8 +296,8 @@
   "workloadPostures": [
     {
       "workload": {
-        "namespace": "omg-strict",
-        "name": "strict-api",
+        "namespace": "omg-authz-root-local",
+        "name": "authz-root-local",
         "kind": "Deployment"
       },
       "dataPlaneMode": "sidecar",
@@ -321,21 +321,17 @@
             "namespace": "istio-system",
             "field": "spec.mtls.mode",
             "effect": "sets mesh-wide mTLS mode to STRICT"
-          },
-          {
-            "order": 3,
-            "kind": "PeerAuthentication",
-            "name": "default",
-            "namespace": "omg-strict",
-            "field": "spec.mtls.mode",
-            "effect": "sets namespace mTLS mode to STRICT"
           }
         ]
       },
       "authorization": {
-        "effective": "no-policy",
+        "effective": "default-deny-explicit-allow",
         "broadAllow": false,
-        "identityScoped": false,
+        "identityScoped": true,
+        "policiesInScope": [
+          "istio-system/authz-root-default-deny",
+          "omg-authz-root-local/allow-client"
+        ],
         "chain": [
           {
             "order": 1,
@@ -348,186 +344,29 @@
             "kind": "AuthorizationPolicy",
             "name": "authz-root-default-deny",
             "namespace": "istio-system",
-            "field": "spec.selector",
-            "effect": "selector does not match the workload; excludes policy from authorization evaluation"
+            "field": "spec.action",
+            "effect": "adds an ALLOW policy with no rules; activates default deny for unmatched requests"
+          },
+          {
+            "order": 3,
+            "kind": "AuthorizationPolicy",
+            "name": "allow-client",
+            "namespace": "omg-authz-root-local",
+            "field": "spec.action",
+            "effect": "adds explicit rules to the additive ALLOW union"
           }
         ]
       }
     }
   ],
-  "findings": [
-    {
-      "id": "MG-AUTHZ-001-51dc710d23e1",
-      "controlId": "MG-AUTHZ-001",
-      "title": "Mesh-managed workloads must have resolved authorization coverage",
-      "severity": "high",
-      "evidenceType": "config",
-      "status": "open",
-      "confidence": "resolved",
-      "dataPlaneMode": "sidecar",
-      "evidenceSources": [
-        "kubernetes-api",
-        "istio-crd"
-      ],
-      "resources": [
-        {
-          "kind": "Deployment",
-          "namespace": "omg-strict",
-          "name": "strict-api"
-        }
-      ],
-      "resolutionChain": [
-        {
-          "order": 1,
-          "kind": "AuthorizationDefault",
-          "field": "implicitEnablement",
-          "effect": "establishes Istio's implicit allow when no applicable ALLOW policy exists"
-        },
-        {
-          "order": 2,
-          "kind": "AuthorizationPolicy",
-          "name": "authz-root-default-deny",
-          "namespace": "istio-system",
-          "field": "spec.selector",
-          "effect": "selector does not match the workload; excludes policy from authorization evaluation"
-        }
-      ],
-      "reasoning": "omg-strict/strict-api has no resolved AuthorizationPolicy coverage.",
-      "remediation": {
-        "guidance": "Apply an AuthorizationPolicy that selects this workload and inspect the resolution chain to confirm its effective scope."
-      }
-    },
-    {
-      "id": "MG-AUTHZ-002-35c85047aa15",
-      "controlId": "MG-AUTHZ-002",
-      "title": "Workloads should resolve to default deny with explicit allow",
-      "severity": "high",
-      "evidenceType": "config",
-      "status": "open",
-      "confidence": "resolved",
-      "dataPlaneMode": "sidecar",
-      "evidenceSources": [
-        "kubernetes-api",
-        "istio-crd"
-      ],
-      "resources": [
-        {
-          "kind": "Deployment",
-          "namespace": "omg-strict",
-          "name": "strict-api"
-        }
-      ],
-      "resolutionChain": [
-        {
-          "order": 1,
-          "kind": "AuthorizationDefault",
-          "field": "implicitEnablement",
-          "effect": "establishes Istio's implicit allow when no applicable ALLOW policy exists"
-        },
-        {
-          "order": 2,
-          "kind": "AuthorizationPolicy",
-          "name": "authz-root-default-deny",
-          "namespace": "istio-system",
-          "field": "spec.selector",
-          "effect": "selector does not match the workload; excludes policy from authorization evaluation"
-        }
-      ],
-      "reasoning": "Authorization for omg-strict/strict-api resolves to no-policy, not default deny with explicit allow.",
-      "remediation": {
-        "guidance": "Establish an empty ALLOW policy for default deny and add narrowly scoped ALLOW rules for required traffic."
-      }
-    },
-    {
-      "id": "MG-AUTHZ-004-e1224b6d7c7d",
-      "controlId": "MG-AUTHZ-004",
-      "title": "Authorization access must be scoped to explicit identities",
-      "severity": "high",
-      "evidenceType": "config",
-      "status": "open",
-      "confidence": "resolved",
-      "dataPlaneMode": "sidecar",
-      "evidenceSources": [
-        "kubernetes-api",
-        "istio-crd"
-      ],
-      "resources": [
-        {
-          "kind": "Deployment",
-          "namespace": "omg-strict",
-          "name": "strict-api"
-        }
-      ],
-      "resolutionChain": [
-        {
-          "order": 1,
-          "kind": "AuthorizationDefault",
-          "field": "implicitEnablement",
-          "effect": "establishes Istio's implicit allow when no applicable ALLOW policy exists"
-        },
-        {
-          "order": 2,
-          "kind": "AuthorizationPolicy",
-          "name": "authz-root-default-deny",
-          "namespace": "istio-system",
-          "field": "spec.selector",
-          "effect": "selector does not match the workload; excludes policy from authorization evaluation"
-        }
-      ],
-      "reasoning": "Authorization access for omg-strict/strict-api is not scoped to explicit principals, namespaces, or workloads.",
-      "remediation": {
-        "guidance": "Scope ALLOW rules to approved principals, namespaces, service accounts, or workload identities."
-      }
-    },
-    {
-      "id": "MG-AUTHZ-005-6955419b2fad",
-      "controlId": "MG-AUTHZ-005",
-      "title": "Authorization coverage must resolve at workload level",
-      "severity": "high",
-      "evidenceType": "config",
-      "status": "open",
-      "confidence": "resolved",
-      "dataPlaneMode": "sidecar",
-      "evidenceSources": [
-        "kubernetes-api",
-        "istio-crd"
-      ],
-      "resources": [
-        {
-          "kind": "Deployment",
-          "namespace": "omg-strict",
-          "name": "strict-api"
-        }
-      ],
-      "resolutionChain": [
-        {
-          "order": 1,
-          "kind": "AuthorizationDefault",
-          "field": "implicitEnablement",
-          "effect": "establishes Istio's implicit allow when no applicable ALLOW policy exists"
-        },
-        {
-          "order": 2,
-          "kind": "AuthorizationPolicy",
-          "name": "authz-root-default-deny",
-          "namespace": "istio-system",
-          "field": "spec.selector",
-          "effect": "selector does not match the workload; excludes policy from authorization evaluation"
-        }
-      ],
-      "reasoning": "omg-strict/strict-api is not selected by any resolved AuthorizationPolicy.",
-      "remediation": {
-        "guidance": "Correct policy namespace, selector, or targetRefs so coverage reaches this workload rather than relying on policy resource presence alone."
-      }
-    }
-  ],
+  "findings": [],
   "scores": {
     "overall": null,
     "categories": [
       {
         "category": "authz",
-        "grade": "F",
-        "passRate": 0.42857142857142855,
+        "grade": "A",
+        "passRate": 1,
         "evaluated": 7
       },
       {

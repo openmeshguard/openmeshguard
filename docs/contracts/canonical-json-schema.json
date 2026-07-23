@@ -276,9 +276,11 @@
             }
           ],
           "properties": {
-            "effective": { "enum": ["default-deny-explicit-allow", "allow-only", "no-policy", "deny-present", "l7-policy-unenforced", "unknown"] },
+            "effective": { "enum": ["default-deny-explicit-allow", "allow-only", "no-policy", "deny-present", "waypoint-policy-unenforced", "not-in-mesh", "unknown"], "description": "Effective authorization posture. waypoint-policy-unenforced means at least one waypoint-attached AuthorizationPolicy has no ready waypoint in its enforcement path, whether its rules use L4 or L7 attributes. not-in-mesh means the workload is not enrolled in an Istio data plane, so Istio authorization is not enforced." },
+            "broadAllow": { "type": "boolean", "description": "When AuthorizationPolicy evidence was collected, true if an applicable ALLOW policy contains a structurally broad rule and false otherwise. Omitted when authorization evidence was unavailable." },
+            "identityScoped": { "type": "boolean", "description": "When AuthorizationPolicy evidence was collected, true if effective ALLOW access is constrained to explicit workload identities or no requests are allowed. Omitted when authorization or data-plane membership evidence was unavailable." },
             "policiesInScope": { "type": "array", "items": { "type": "string" } },
-            "l7Unenforced": { "type": "array", "items": { "type": "string" }, "description": "Policies requiring L7 attributes with no waypoint in the enforcement path." },
+            "waypointUnenforced": { "type": "array", "items": { "type": "string" }, "description": "Waypoint-attached AuthorizationPolicies with no ready waypoint in the enforcement path, whether their rules use L4 or L7 attributes." },
             "chain": { "type": "array", "items": { "$ref": "#/$defs/ResolutionStep" } },
             "unknownReason": { "type": "string", "minLength": 1, "description": "Required when effective is unknown: which input/permission was missing." }
           }

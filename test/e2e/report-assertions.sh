@@ -3,10 +3,13 @@
 assert_golden_case_bijection() {
 	report_guard_cases=$1
 	report_guard_goldens=$2
+	report_guard_include_degraded=${3:-false}
 	report_guard_declared=$(
 		{
 			awk -F '\t' 'NF > 0 {print $1}' "$report_guard_cases"
-			printf '%s\n' namespace-role-degraded
+			if [ "$report_guard_include_degraded" = true ]; then
+				printf '%s\n' namespace-role-degraded
+			fi
 		} | LC_ALL=C sort
 	)
 	report_guard_actual=$(

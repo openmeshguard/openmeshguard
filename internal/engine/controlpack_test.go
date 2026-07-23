@@ -453,6 +453,7 @@ func TestBuiltinMTLSCatalogMetadata(t *testing.T) {
 		{id: "MG-MTLS-001", title: "Mesh-managed workloads must resolve to strict mTLS"},
 		{id: "MG-MTLS-002", title: "Declared workload ports must resolve to strict mTLS"},
 		{id: "MG-MTLS-003", title: "Workloads must never resolve to globally disabled mTLS"},
+		{id: "MG-MTLS-007", title: "Client TLS must agree with resolved server mTLS"},
 	}
 
 	for _, tt := range tests {
@@ -463,6 +464,48 @@ func TestBuiltinMTLSCatalogMetadata(t *testing.T) {
 			}
 			if !reflect.DeepEqual(control.Frameworks, wantFrameworks) {
 				t.Fatalf("frameworks = %#v, want %#v", control.Frameworks, wantFrameworks)
+			}
+		})
+	}
+}
+
+func TestBuiltinAuthorizationCatalogMetadata(t *testing.T) {
+	packs, err := LoadBuiltins()
+	if err != nil {
+		t.Fatalf("LoadBuiltins returned error: %v", err)
+	}
+	accessEnforcement := []string{
+		"nist-csf-2.0/PR.AA-05",
+		"nist-sp-800-53-r5/AC-3",
+		"owasp-k8s-2025/K05",
+	}
+	leastPrivilege := []string{
+		"nist-csf-2.0/PR.AA-05",
+		"nist-sp-800-53-r5/AC-3",
+		"nist-sp-800-53-r5/AC-6",
+		"owasp-k8s-2025/K05",
+	}
+	tests := []struct {
+		id         string
+		title      string
+		frameworks []string
+	}{
+		{id: "MG-AUTHZ-001", title: "Mesh-managed workloads must have resolved authorization coverage", frameworks: accessEnforcement},
+		{id: "MG-AUTHZ-002", title: "Workloads should resolve to default deny with explicit allow", frameworks: leastPrivilege},
+		{id: "MG-AUTHZ-003", title: "Authorization policies must not grant structurally broad access", frameworks: leastPrivilege},
+		{id: "MG-AUTHZ-004", title: "Authorization access must be scoped to explicit identities", frameworks: leastPrivilege},
+		{id: "MG-AUTHZ-005", title: "Authorization coverage must resolve at workload level", frameworks: accessEnforcement},
+		{id: "MG-AUTHZ-006", title: "Waypoint-attached authorization must have a ready enforcement path", frameworks: accessEnforcement},
+		{id: "MG-AUTHZ-007", title: "Unenforced waypoint authorization must be reported", frameworks: accessEnforcement},
+	}
+	for _, tt := range tests {
+		t.Run(tt.id, func(t *testing.T) {
+			control := packWithControl(t, packs, tt.id).Controls[0]
+			if control.Title != tt.title || control.Category != "authz" || control.EvidenceType != "config" || control.Scope != "workload" {
+				t.Fatalf("control = %#v, want authz config workload control titled %q", control, tt.title)
+			}
+			if !reflect.DeepEqual(control.Frameworks, tt.frameworks) {
+				t.Fatalf("frameworks = %#v, want %#v", control.Frameworks, tt.frameworks)
 			}
 		})
 	}

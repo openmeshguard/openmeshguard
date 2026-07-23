@@ -3,8 +3,13 @@
   "generatedAt": "2000-01-01T00:00:00Z",
   "scanner": {
     "version": "dev",
-    "resolverVersion": "mtls/v2",
+    "resolverVersion": "mtls/v3,authz/v6",
     "controlPacks": [
+      {
+        "name": "builtin-authz",
+        "version": "0.1.1",
+        "source": "builtin"
+      },
       {
         "name": "builtin-mtls",
         "version": "0.1.0",
@@ -46,9 +51,17 @@
       "granted": true,
       "impact": "sidecar detection from running pods may be unavailable",
       "affectedControls": [
+        "MG-AUTHZ-001",
+        "MG-AUTHZ-002",
+        "MG-AUTHZ-003",
+        "MG-AUTHZ-004",
+        "MG-AUTHZ-005",
+        "MG-AUTHZ-006",
+        "MG-AUTHZ-007",
         "MG-MTLS-001",
         "MG-MTLS-002",
-        "MG-MTLS-003"
+        "MG-MTLS-003",
+        "MG-MTLS-007"
       ]
     },
     {
@@ -58,7 +71,18 @@
         "list"
       ],
       "granted": true,
-      "impact": "service inventory and multi-cluster gateway signals may be unavailable"
+      "impact": "service inventory, workload ports, policy targetRefs, and multi-cluster gateway signals may be unavailable",
+      "affectedControls": [
+        "MG-AUTHZ-001",
+        "MG-AUTHZ-002",
+        "MG-AUTHZ-003",
+        "MG-AUTHZ-004",
+        "MG-AUTHZ-005",
+        "MG-AUTHZ-006",
+        "MG-AUTHZ-007",
+        "MG-MTLS-002",
+        "MG-MTLS-007"
+      ]
     },
     {
       "apiGroup": "apps",
@@ -69,9 +93,17 @@
       "granted": true,
       "impact": "DaemonSet workload posture may be unavailable",
       "affectedControls": [
+        "MG-AUTHZ-001",
+        "MG-AUTHZ-002",
+        "MG-AUTHZ-003",
+        "MG-AUTHZ-004",
+        "MG-AUTHZ-005",
+        "MG-AUTHZ-006",
+        "MG-AUTHZ-007",
         "MG-MTLS-001",
         "MG-MTLS-002",
-        "MG-MTLS-003"
+        "MG-MTLS-003",
+        "MG-MTLS-007"
       ]
     },
     {
@@ -83,9 +115,17 @@
       "granted": true,
       "impact": "deployment workload posture may be unavailable",
       "affectedControls": [
+        "MG-AUTHZ-001",
+        "MG-AUTHZ-002",
+        "MG-AUTHZ-003",
+        "MG-AUTHZ-004",
+        "MG-AUTHZ-005",
+        "MG-AUTHZ-006",
+        "MG-AUTHZ-007",
         "MG-MTLS-001",
         "MG-MTLS-002",
-        "MG-MTLS-003"
+        "MG-MTLS-003",
+        "MG-MTLS-007"
       ]
     },
     {
@@ -97,9 +137,17 @@
       "granted": true,
       "impact": "standalone ReplicaSet workload posture may be unavailable",
       "affectedControls": [
+        "MG-AUTHZ-001",
+        "MG-AUTHZ-002",
+        "MG-AUTHZ-003",
+        "MG-AUTHZ-004",
+        "MG-AUTHZ-005",
+        "MG-AUTHZ-006",
+        "MG-AUTHZ-007",
         "MG-MTLS-001",
         "MG-MTLS-002",
-        "MG-MTLS-003"
+        "MG-MTLS-003",
+        "MG-MTLS-007"
       ]
     },
     {
@@ -111,9 +159,98 @@
       "granted": true,
       "impact": "StatefulSet workload posture may be unavailable",
       "affectedControls": [
+        "MG-AUTHZ-001",
+        "MG-AUTHZ-002",
+        "MG-AUTHZ-003",
+        "MG-AUTHZ-004",
+        "MG-AUTHZ-005",
+        "MG-AUTHZ-006",
+        "MG-AUTHZ-007",
         "MG-MTLS-001",
         "MG-MTLS-002",
-        "MG-MTLS-003"
+        "MG-MTLS-003",
+        "MG-MTLS-007"
+      ]
+    },
+    {
+      "apiGroup": "discovery.k8s.io",
+      "resource": "endpointslices",
+      "verbs": [
+        "list"
+      ],
+      "granted": true,
+      "impact": "selectorless Service attachment and workload port evidence may be unavailable",
+      "affectedControls": [
+        "MG-AUTHZ-001",
+        "MG-AUTHZ-002",
+        "MG-AUTHZ-003",
+        "MG-AUTHZ-004",
+        "MG-AUTHZ-005",
+        "MG-AUTHZ-006",
+        "MG-AUTHZ-007",
+        "MG-MTLS-002",
+        "MG-MTLS-007"
+      ]
+    },
+    {
+      "apiGroup": "gateway.networking.k8s.io",
+      "resource": "gateways",
+      "verbs": [
+        "list"
+      ],
+      "granted": false,
+      "optional": true,
+      "impact": "ambient L7 waypoint enforceability may be unavailable without Gateway evidence; denied scope(s): namespace/omg-not-in-mesh",
+      "affectedControls": [
+        "MG-AUTHZ-001",
+        "MG-AUTHZ-002",
+        "MG-AUTHZ-003",
+        "MG-AUTHZ-004",
+        "MG-AUTHZ-005",
+        "MG-AUTHZ-006",
+        "MG-AUTHZ-007"
+      ]
+    },
+    {
+      "apiGroup": "networking.istio.io",
+      "resource": "destinationrules",
+      "verbs": [
+        "list"
+      ],
+      "granted": true,
+      "impact": "client TLS contradiction posture resolves to unknown without DestinationRule evidence",
+      "affectedControls": [
+        "MG-MTLS-007"
+      ]
+    },
+    {
+      "apiGroup": "networking.istio.io",
+      "resource": "sidecars",
+      "verbs": [
+        "list"
+      ],
+      "granted": true,
+      "impact": "DestinationRule visibility may be unavailable without Sidecar egress scoping evidence",
+      "affectedControls": [
+        "MG-MTLS-007"
+      ]
+    },
+    {
+      "apiGroup": "security.istio.io",
+      "resource": "authorizationpolicies",
+      "verbs": [
+        "list"
+      ],
+      "granted": true,
+      "impact": "effective authorization posture resolves to unknown without AuthorizationPolicy evidence",
+      "affectedControls": [
+        "MG-AUTHZ-001",
+        "MG-AUTHZ-002",
+        "MG-AUTHZ-003",
+        "MG-AUTHZ-004",
+        "MG-AUTHZ-005",
+        "MG-AUTHZ-006",
+        "MG-AUTHZ-007"
       ]
     },
     {
@@ -127,19 +264,25 @@
       "affectedControls": [
         "MG-MTLS-001",
         "MG-MTLS-002",
-        "MG-MTLS-003"
+        "MG-MTLS-003",
+        "MG-MTLS-007"
       ]
     }
   ],
   "inventory": {
     "counts": {
+      "authorizationPolicies": 1,
       "daemonsets": 0,
       "deployments": 1,
+      "destinationRules": 0,
+      "endpointSlices": 1,
+      "gateways": 0,
       "namespaces": 1,
       "peerAuthentications": 1,
       "pods": 1,
       "replicasets": 1,
       "services": 1,
+      "sidecars": 0,
       "statefulsets": 0
     },
     "dataPlane": {
@@ -166,11 +309,186 @@
       "authorization": {
         "effective": "unknown",
         "chain": [],
-        "unknownReason": "authorization resolver not yet implemented (M5)"
+        "unknownReason": "data plane membership unavailable for authorization enforcement"
       }
     }
   ],
   "findings": [
+    {
+      "id": "MG-AUTHZ-001-c8e80262a3e5",
+      "controlId": "MG-AUTHZ-001",
+      "title": "Mesh-managed workloads must have resolved authorization coverage",
+      "severity": "high",
+      "evidenceType": "config",
+      "status": "unknown",
+      "confidence": "unavailable",
+      "dataPlaneMode": "unknown",
+      "evidenceSources": [
+        "kubernetes-api"
+      ],
+      "resources": [
+        {
+          "kind": "Deployment",
+          "namespace": "omg-not-in-mesh",
+          "name": "outside-api"
+        }
+      ],
+      "reasoning": "Control MG-AUTHZ-001 could not determine applicability for omg-not-in-mesh/outside-api: dataPlaneMode unavailable: data plane mode unavailable.",
+      "remediation": {
+        "guidance": "Apply an AuthorizationPolicy that selects this workload and inspect the resolution chain to confirm its effective scope."
+      },
+      "unknownReason": "dataPlaneMode unavailable: data plane mode unavailable"
+    },
+    {
+      "id": "MG-AUTHZ-002-9a779d7cf663",
+      "controlId": "MG-AUTHZ-002",
+      "title": "Workloads should resolve to default deny with explicit allow",
+      "severity": "high",
+      "evidenceType": "config",
+      "status": "unknown",
+      "confidence": "unavailable",
+      "dataPlaneMode": "unknown",
+      "evidenceSources": [
+        "kubernetes-api"
+      ],
+      "resources": [
+        {
+          "kind": "Deployment",
+          "namespace": "omg-not-in-mesh",
+          "name": "outside-api"
+        }
+      ],
+      "reasoning": "Control MG-AUTHZ-002 could not determine applicability for omg-not-in-mesh/outside-api: dataPlaneMode unavailable: data plane mode unavailable.",
+      "remediation": {
+        "guidance": "Establish an empty ALLOW policy for default deny and add narrowly scoped ALLOW rules for required traffic."
+      },
+      "unknownReason": "dataPlaneMode unavailable: data plane mode unavailable"
+    },
+    {
+      "id": "MG-AUTHZ-003-ea1af6087bca",
+      "controlId": "MG-AUTHZ-003",
+      "title": "Authorization policies must not grant structurally broad access",
+      "severity": "high",
+      "evidenceType": "config",
+      "status": "unknown",
+      "confidence": "unavailable",
+      "dataPlaneMode": "unknown",
+      "evidenceSources": [
+        "kubernetes-api"
+      ],
+      "resources": [
+        {
+          "kind": "Deployment",
+          "namespace": "omg-not-in-mesh",
+          "name": "outside-api"
+        }
+      ],
+      "reasoning": "Control MG-AUTHZ-003 could not determine applicability for omg-not-in-mesh/outside-api: dataPlaneMode unavailable: data plane mode unavailable.",
+      "remediation": {
+        "guidance": "Replace empty rules and wildcard principals or namespaces with the narrow identities and operations the workload requires."
+      },
+      "unknownReason": "dataPlaneMode unavailable: data plane mode unavailable"
+    },
+    {
+      "id": "MG-AUTHZ-004-a5bb215bfddd",
+      "controlId": "MG-AUTHZ-004",
+      "title": "Authorization access must be scoped to explicit identities",
+      "severity": "high",
+      "evidenceType": "config",
+      "status": "unknown",
+      "confidence": "unavailable",
+      "dataPlaneMode": "unknown",
+      "evidenceSources": [
+        "kubernetes-api"
+      ],
+      "resources": [
+        {
+          "kind": "Deployment",
+          "namespace": "omg-not-in-mesh",
+          "name": "outside-api"
+        }
+      ],
+      "reasoning": "Control MG-AUTHZ-004 could not determine applicability for omg-not-in-mesh/outside-api: dataPlaneMode unavailable: data plane mode unavailable.",
+      "remediation": {
+        "guidance": "Scope ALLOW rules to approved principals, namespaces, service accounts, or workload identities."
+      },
+      "unknownReason": "dataPlaneMode unavailable: data plane mode unavailable"
+    },
+    {
+      "id": "MG-AUTHZ-005-1d24fa688c51",
+      "controlId": "MG-AUTHZ-005",
+      "title": "Authorization coverage must resolve at workload level",
+      "severity": "high",
+      "evidenceType": "config",
+      "status": "unknown",
+      "confidence": "unavailable",
+      "dataPlaneMode": "unknown",
+      "evidenceSources": [
+        "kubernetes-api"
+      ],
+      "resources": [
+        {
+          "kind": "Deployment",
+          "namespace": "omg-not-in-mesh",
+          "name": "outside-api"
+        }
+      ],
+      "reasoning": "Control MG-AUTHZ-005 could not determine applicability for omg-not-in-mesh/outside-api: dataPlaneMode unavailable: data plane mode unavailable.",
+      "remediation": {
+        "guidance": "Correct policy namespace, selector, or targetRefs so coverage reaches this workload rather than relying on policy resource presence alone."
+      },
+      "unknownReason": "dataPlaneMode unavailable: data plane mode unavailable"
+    },
+    {
+      "id": "MG-AUTHZ-006-11bba23a911e",
+      "controlId": "MG-AUTHZ-006",
+      "title": "Waypoint-attached authorization must have a ready enforcement path",
+      "severity": "high",
+      "evidenceType": "config",
+      "status": "unknown",
+      "confidence": "unavailable",
+      "dataPlaneMode": "unknown",
+      "evidenceSources": [
+        "kubernetes-api"
+      ],
+      "resources": [
+        {
+          "kind": "Deployment",
+          "namespace": "omg-not-in-mesh",
+          "name": "outside-api"
+        }
+      ],
+      "reasoning": "Control MG-AUTHZ-006 could not determine applicability for omg-not-in-mesh/outside-api: dataPlaneMode unavailable: data plane mode unavailable.",
+      "remediation": {
+        "guidance": "Attach the policy with targetRefs and select a ready waypoint whose scope includes the workload."
+      },
+      "unknownReason": "dataPlaneMode unavailable: data plane mode unavailable"
+    },
+    {
+      "id": "MG-AUTHZ-007-4f1892eea385",
+      "controlId": "MG-AUTHZ-007",
+      "title": "Unenforced waypoint authorization must be reported",
+      "severity": "high",
+      "evidenceType": "config",
+      "status": "unknown",
+      "confidence": "unavailable",
+      "dataPlaneMode": "unknown",
+      "evidenceSources": [
+        "kubernetes-api"
+      ],
+      "resources": [
+        {
+          "kind": "Deployment",
+          "namespace": "omg-not-in-mesh",
+          "name": "outside-api"
+        }
+      ],
+      "reasoning": "Control MG-AUTHZ-007 could not determine applicability for omg-not-in-mesh/outside-api: dataPlaneMode unavailable: data plane mode unavailable.",
+      "remediation": {
+        "guidance": "Provision or repair the selected waypoint and confirm that policy targetRefs attach through that enforcement path."
+      },
+      "unknownReason": "dataPlaneMode unavailable: data plane mode unavailable"
+    },
     {
       "id": "MG-MTLS-001-26bc57d2a79a",
       "controlId": "MG-MTLS-001",
@@ -245,16 +563,47 @@
         "guidance": "Apply or correct PeerAuthentication so the workload no longer resolves to DISABLE, then inspect the attached resolution chain."
       },
       "unknownReason": "dataPlaneMode unavailable: data plane mode unavailable"
+    },
+    {
+      "id": "MG-MTLS-007-cfe1f1f42975",
+      "controlId": "MG-MTLS-007",
+      "title": "Client TLS must agree with resolved server mTLS",
+      "severity": "high",
+      "evidenceType": "config",
+      "status": "unknown",
+      "confidence": "unavailable",
+      "dataPlaneMode": "unknown",
+      "evidenceSources": [
+        "kubernetes-api"
+      ],
+      "resources": [
+        {
+          "kind": "Deployment",
+          "namespace": "omg-not-in-mesh",
+          "name": "outside-api"
+        }
+      ],
+      "reasoning": "Control MG-MTLS-007 could not determine applicability for omg-not-in-mesh/outside-api: dataPlaneMode unavailable: data plane mode unavailable.",
+      "remediation": {
+        "guidance": "Correct DestinationRule TLS mode or the server-side PeerAuthentication posture so client and server settings agree."
+      },
+      "unknownReason": "dataPlaneMode unavailable: data plane mode unavailable"
     }
   ],
   "scores": {
     "overall": null,
     "categories": [
       {
+        "category": "authz",
+        "grade": "unknown",
+        "passRate": null,
+        "unknown": 7
+      },
+      {
         "category": "mtls",
         "grade": "unknown",
         "passRate": null,
-        "unknown": 3
+        "unknown": 4
       }
     ]
   }

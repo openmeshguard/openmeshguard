@@ -8,14 +8,19 @@ import (
 	"strings"
 	"sync"
 
+	istionetworkingv1 "istio.io/client-go/pkg/apis/networking/v1"
+	istiosecurityv1 "istio.io/client-go/pkg/apis/security/v1"
 	istiosecurityv1beta1 "istio.io/client-go/pkg/apis/security/v1beta1"
 	istioclient "istio.io/client-go/pkg/clientset/versioned"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	discoveryv1 "k8s.io/api/discovery/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/client-go/kubernetes"
+	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
+	gatewayclient "sigs.k8s.io/gateway-api/pkg/client/clientset/versioned"
 )
 
 const (
@@ -27,14 +32,16 @@ const (
 type Collector struct {
 	kube          kubernetes.Interface
 	istio         istioclient.Interface
+	gateway       gatewayclient.Interface
 	maxConcurrent int
 }
 
-// New returns a collector using typed Kubernetes and Istio clients.
-func New(kube kubernetes.Interface, istio istioclient.Interface) *Collector {
+// New returns a collector using typed Kubernetes, Istio, and Gateway API clients.
+func New(kube kubernetes.Interface, istio istioclient.Interface, gateway gatewayclient.Interface) *Collector {
 	return &Collector{
 		kube:          kube,
 		istio:         istio,
+		gateway:       gateway,
 		maxConcurrent: defaultMaxConcurrentLists,
 	}
 }
@@ -47,11 +54,11 @@ func (c *Collector) SetMaxConcurrentLists(value int) {
 	}
 }
 
-// Collect lists the M1 resource set. Permission-like failures are recorded and
+// Collect lists the current typed resource set. Permission-like failures are recorded and
 // degraded; non-permission API failures are returned.
 func (c *Collector) Collect(ctx context.Context, scope Scope) (Snapshot, error) {
-	if c == nil || c.kube == nil || c.istio == nil {
-		return Snapshot{}, errors.New("collector requires Kubernetes and Istio clients")
+	if c == nil || c.kube == nil || c.istio == nil || c.gateway == nil {
+		return Snapshot{}, errors.New("collector requires Kubernetes, Istio, and Gateway API clients")
 	}
 
 	var err error
@@ -70,7 +77,7 @@ func (c *Collector) Collect(ctx context.Context, scope Scope) (Snapshot, error) 
 		defer mu.Unlock()
 		snapshot.PermissionSummary = append(snapshot.PermissionSummary, permission)
 	}
-	markScopedAvailability := func(availability *PeerAuthenticationAvailability, namespace string, available bool) {
+	markScopedAvailability := func(availability *ScopedAvailability, namespace string, available bool) {
 		if namespace == metav1.NamespaceAll {
 			availability.AllNamespaces = available
 			return
@@ -90,10 +97,40 @@ func (c *Collector) Collect(ctx context.Context, scope Scope) (Snapshot, error) 
 		defer mu.Unlock()
 		markScopedAvailability(&snapshot.ReplicaSetAvailability, namespace, available)
 	}
+	markServicesAvailable := func(namespace string, available bool) {
+		mu.Lock()
+		defer mu.Unlock()
+		markScopedAvailability(&snapshot.ServiceAvailability, namespace, available)
+	}
+	markEndpointSlicesAvailable := func(namespace string, available bool) {
+		mu.Lock()
+		defer mu.Unlock()
+		markScopedAvailability(&snapshot.EndpointSliceAvailability, namespace, available)
+	}
 	markPeerAuthenticationsAvailable := func(namespace string, available bool) {
 		mu.Lock()
 		defer mu.Unlock()
 		markScopedAvailability(&snapshot.PeerAuthAvailability, namespace, available)
+	}
+	markDestinationRulesAvailable := func(namespace string, available bool) {
+		mu.Lock()
+		defer mu.Unlock()
+		markScopedAvailability(&snapshot.DestinationRuleAvailability, namespace, available)
+	}
+	markSidecarsAvailable := func(namespace string, available bool) {
+		mu.Lock()
+		defer mu.Unlock()
+		markScopedAvailability(&snapshot.SidecarAvailability, namespace, available)
+	}
+	markAuthorizationPoliciesAvailable := func(namespace string, available bool) {
+		mu.Lock()
+		defer mu.Unlock()
+		markScopedAvailability(&snapshot.AuthorizationPolicyAvailability, namespace, available)
+	}
+	markGatewaysAvailable := func(namespace string, available bool) {
+		mu.Lock()
+		defer mu.Unlock()
+		markScopedAvailability(&snapshot.GatewayAvailability, namespace, available)
 	}
 	appendDegraded := func(meta resourceMeta, scopeName string, err error) error {
 		if !isDegradedListError(err) {
@@ -138,7 +175,7 @@ func (c *Collector) Collect(ctx context.Context, scope Scope) (Snapshot, error) 
 				appendPermission(podMeta.permissionForScope(true, permissionScopeName(ns)))
 				return nil
 			},
-			c.listTask(serviceMeta, permissionScopeName(ns), func(ctx context.Context) error {
+			func(ctx context.Context) error {
 				items, err := listPages(ctx, func(ctx context.Context, opts metav1.ListOptions) ([]corev1.Service, string, error) {
 					list, err := c.kube.CoreV1().Services(ns).List(ctx, opts)
 					if err != nil {
@@ -146,13 +183,36 @@ func (c *Collector) Collect(ctx context.Context, scope Scope) (Snapshot, error) 
 					}
 					return list.Items, list.Continue, nil
 				})
-				if err == nil {
-					mu.Lock()
-					snapshot.Services = append(snapshot.Services, items...)
-					mu.Unlock()
+				if err != nil {
+					markServicesAvailable(ns, false)
+					return appendDegraded(serviceMeta, permissionScopeName(ns), err)
 				}
-				return err
-			}, appendPermission, appendDegraded),
+				mu.Lock()
+				snapshot.Services = append(snapshot.Services, items...)
+				mu.Unlock()
+				markServicesAvailable(ns, true)
+				appendPermission(serviceMeta.permissionForScope(true, permissionScopeName(ns)))
+				return nil
+			},
+			func(ctx context.Context) error {
+				items, err := listPages(ctx, func(ctx context.Context, opts metav1.ListOptions) ([]discoveryv1.EndpointSlice, string, error) {
+					list, err := c.kube.DiscoveryV1().EndpointSlices(ns).List(ctx, opts)
+					if err != nil {
+						return nil, "", err
+					}
+					return list.Items, list.Continue, nil
+				})
+				if err != nil {
+					markEndpointSlicesAvailable(ns, false)
+					return appendDegraded(endpointSliceMeta, permissionScopeName(ns), err)
+				}
+				mu.Lock()
+				snapshot.EndpointSlices = append(snapshot.EndpointSlices, items...)
+				mu.Unlock()
+				markEndpointSlicesAvailable(ns, true)
+				appendPermission(endpointSliceMeta.permissionForScope(true, permissionScopeName(ns)))
+				return nil
+			},
 			c.listTask(deploymentMeta, permissionScopeName(ns), func(ctx context.Context) error {
 				items, err := listPages(ctx, func(ctx context.Context, opts metav1.ListOptions) ([]appsv1.Deployment, string, error) {
 					list, err := c.kube.AppsV1().Deployments(ns).List(ctx, opts)
@@ -219,27 +279,110 @@ func (c *Collector) Collect(ctx context.Context, scope Scope) (Snapshot, error) 
 			}, appendPermission, appendDegraded),
 		)
 	}
-	for _, namespace := range peerAuthenticationNamespaces(scope) {
+	for _, namespace := range policyNamespaces(scope) {
 		ns := namespace
-		tasks = append(tasks, func(ctx context.Context) error {
-			items, err := listPages(ctx, func(ctx context.Context, opts metav1.ListOptions) ([]*istiosecurityv1beta1.PeerAuthentication, string, error) {
-				list, err := c.istio.SecurityV1beta1().PeerAuthentications(ns).List(ctx, opts)
+		tasks = append(tasks,
+			func(ctx context.Context) error {
+				items, err := listPages(ctx, func(ctx context.Context, opts metav1.ListOptions) ([]*istiosecurityv1beta1.PeerAuthentication, string, error) {
+					list, err := c.istio.SecurityV1beta1().PeerAuthentications(ns).List(ctx, opts)
+					if err != nil {
+						return nil, "", err
+					}
+					return list.Items, list.Continue, nil
+				})
 				if err != nil {
-					return nil, "", err
+					markPeerAuthenticationsAvailable(ns, false)
+					return appendDegraded(peerAuthenticationMeta, permissionScopeName(ns), err)
 				}
-				return list.Items, list.Continue, nil
-			})
-			if err != nil {
-				markPeerAuthenticationsAvailable(ns, false)
-				return appendDegraded(peerAuthenticationMeta, permissionScopeName(ns), err)
-			}
-			mu.Lock()
-			snapshot.PeerAuthentications = append(snapshot.PeerAuthentications, items...)
-			mu.Unlock()
-			markPeerAuthenticationsAvailable(ns, true)
-			appendPermission(peerAuthenticationMeta.permissionForScope(true, permissionScopeName(ns)))
-			return nil
-		})
+				mu.Lock()
+				snapshot.PeerAuthentications = append(snapshot.PeerAuthentications, items...)
+				mu.Unlock()
+				markPeerAuthenticationsAvailable(ns, true)
+				appendPermission(peerAuthenticationMeta.permissionForScope(true, permissionScopeName(ns)))
+				return nil
+			},
+			func(ctx context.Context) error {
+				items, err := listPages(ctx, func(ctx context.Context, opts metav1.ListOptions) ([]*istiosecurityv1.AuthorizationPolicy, string, error) {
+					list, err := c.istio.SecurityV1().AuthorizationPolicies(ns).List(ctx, opts)
+					if err != nil {
+						return nil, "", err
+					}
+					return list.Items, list.Continue, nil
+				})
+				if err != nil {
+					markAuthorizationPoliciesAvailable(ns, false)
+					return appendDegraded(authorizationPolicyMeta, permissionScopeName(ns), err)
+				}
+				mu.Lock()
+				snapshot.AuthorizationPolicies = append(snapshot.AuthorizationPolicies, items...)
+				mu.Unlock()
+				markAuthorizationPoliciesAvailable(ns, true)
+				appendPermission(authorizationPolicyMeta.permissionForScope(true, permissionScopeName(ns)))
+				return nil
+			},
+			func(ctx context.Context) error {
+				items, err := listPages(ctx, func(ctx context.Context, opts metav1.ListOptions) ([]*istionetworkingv1.DestinationRule, string, error) {
+					list, err := c.istio.NetworkingV1().DestinationRules(ns).List(ctx, opts)
+					if err != nil {
+						return nil, "", err
+					}
+					return list.Items, list.Continue, nil
+				})
+				if err != nil {
+					markDestinationRulesAvailable(ns, false)
+					return appendDegraded(destinationRuleMeta, permissionScopeName(ns), err)
+				}
+				mu.Lock()
+				snapshot.DestinationRules = append(snapshot.DestinationRules, items...)
+				mu.Unlock()
+				markDestinationRulesAvailable(ns, true)
+				appendPermission(destinationRuleMeta.permissionForScope(true, permissionScopeName(ns)))
+				return nil
+			},
+			func(ctx context.Context) error {
+				items, err := listPages(ctx, func(ctx context.Context, opts metav1.ListOptions) ([]*istionetworkingv1.Sidecar, string, error) {
+					list, err := c.istio.NetworkingV1().Sidecars(ns).List(ctx, opts)
+					if err != nil {
+						return nil, "", err
+					}
+					return list.Items, list.Continue, nil
+				})
+				if err != nil {
+					markSidecarsAvailable(ns, false)
+					return appendDegraded(sidecarMeta, permissionScopeName(ns), err)
+				}
+				mu.Lock()
+				snapshot.Sidecars = append(snapshot.Sidecars, items...)
+				mu.Unlock()
+				markSidecarsAvailable(ns, true)
+				appendPermission(sidecarMeta.permissionForScope(true, permissionScopeName(ns)))
+				return nil
+			},
+		)
+	}
+	for _, namespace := range workloadNamespaces(scope) {
+		ns := namespace
+		tasks = append(tasks,
+			func(ctx context.Context) error {
+				items, err := listPages(ctx, func(ctx context.Context, opts metav1.ListOptions) ([]gatewayv1.Gateway, string, error) {
+					list, err := c.gateway.GatewayV1().Gateways(ns).List(ctx, opts)
+					if err != nil {
+						return nil, "", err
+					}
+					return list.Items, list.Continue, nil
+				})
+				if err != nil {
+					markGatewaysAvailable(ns, false)
+					return appendDegraded(gatewayMeta, permissionScopeName(ns), err)
+				}
+				mu.Lock()
+				snapshot.Gateways = append(snapshot.Gateways, items...)
+				mu.Unlock()
+				markGatewaysAvailable(ns, true)
+				appendPermission(gatewayMeta.permissionForScope(true, permissionScopeName(ns)))
+				return nil
+			},
+		)
 	}
 
 	if err := c.runBounded(ctx, tasks); err != nil {
@@ -403,7 +546,7 @@ func workloadNamespaces(scope Scope) []string {
 	return scope.Namespaces
 }
 
-func peerAuthenticationNamespaces(scope Scope) []string {
+func policyNamespaces(scope Scope) []string {
 	if scope.AllNamespaces {
 		return []string{metav1.NamespaceAll}
 	}
@@ -535,7 +678,12 @@ var (
 	}
 	serviceMeta = resourceMeta{
 		resource: "services",
-		impact:   "service inventory and multi-cluster gateway signals may be unavailable",
+		impact:   "service inventory, workload ports, policy targetRefs, and multi-cluster gateway signals may be unavailable",
+	}
+	endpointSliceMeta = resourceMeta{
+		apiGroup: "discovery.k8s.io",
+		resource: "endpointslices",
+		impact:   "selectorless Service attachment and workload port evidence may be unavailable",
 	}
 	deploymentMeta = resourceMeta{
 		apiGroup: "apps",
@@ -561,5 +709,26 @@ var (
 		apiGroup: "security.istio.io",
 		resource: "peerauthentications",
 		impact:   "effective mTLS posture resolves to unknown without PeerAuthentication evidence",
+	}
+	destinationRuleMeta = resourceMeta{
+		apiGroup: "networking.istio.io",
+		resource: "destinationrules",
+		impact:   "client TLS contradiction posture resolves to unknown without DestinationRule evidence",
+	}
+	sidecarMeta = resourceMeta{
+		apiGroup: "networking.istio.io",
+		resource: "sidecars",
+		impact:   "DestinationRule visibility may be unavailable without Sidecar egress scoping evidence",
+	}
+	authorizationPolicyMeta = resourceMeta{
+		apiGroup: "security.istio.io",
+		resource: "authorizationpolicies",
+		impact:   "effective authorization posture resolves to unknown without AuthorizationPolicy evidence",
+	}
+	gatewayMeta = resourceMeta{
+		apiGroup: "gateway.networking.k8s.io",
+		resource: "gateways",
+		optional: true,
+		impact:   "ambient L7 waypoint enforceability may be unavailable without Gateway evidence",
 	}
 )

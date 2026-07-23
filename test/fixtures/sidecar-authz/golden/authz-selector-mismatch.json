@@ -22,7 +22,7 @@
     "scope": {
       "allNamespaces": false,
       "namespaces": [
-        "omg-permissive"
+        "omg-authz-selector-mismatch"
       ]
     },
     "dataSources": {
@@ -200,7 +200,7 @@
       ],
       "granted": false,
       "optional": true,
-      "impact": "ambient L7 waypoint enforceability may be unavailable without Gateway evidence; denied scope(s): namespace/omg-permissive",
+      "impact": "ambient L7 waypoint enforceability may be unavailable without Gateway evidence; denied scope(s): namespace/omg-authz-selector-mismatch",
       "affectedControls": [
         "MG-AUTHZ-001",
         "MG-AUTHZ-002",
@@ -271,14 +271,14 @@
   ],
   "inventory": {
     "counts": {
-      "authorizationPolicies": 1,
+      "authorizationPolicies": 2,
       "daemonsets": 0,
       "deployments": 1,
       "destinationRules": 0,
       "endpointSlices": 1,
       "gateways": 0,
       "namespaces": 1,
-      "peerAuthentications": 2,
+      "peerAuthentications": 1,
       "pods": 1,
       "replicasets": 1,
       "services": 1,
@@ -296,15 +296,15 @@
   "workloadPostures": [
     {
       "workload": {
-        "namespace": "omg-permissive",
-        "name": "permissive-api",
+        "namespace": "omg-authz-selector-mismatch",
+        "name": "authz-selector-mismatch",
         "kind": "Deployment"
       },
       "dataPlaneMode": "sidecar",
       "mtls": {
-        "effective": "permissive",
+        "effective": "strict",
         "byPort": {
-          "8080": "permissive"
+          "8080": "strict"
         },
         "clientTLSContradiction": false,
         "chain": [
@@ -321,14 +321,6 @@
             "namespace": "istio-system",
             "field": "spec.mtls.mode",
             "effect": "sets mesh-wide mTLS mode to STRICT"
-          },
-          {
-            "order": 3,
-            "kind": "PeerAuthentication",
-            "name": "default",
-            "namespace": "omg-permissive",
-            "field": "spec.mtls.mode",
-            "effect": "sets namespace mTLS mode to PERMISSIVE"
           }
         ]
       },
@@ -350,6 +342,14 @@
             "namespace": "istio-system",
             "field": "spec.selector",
             "effect": "selector does not match the workload; excludes policy from authorization evaluation"
+          },
+          {
+            "order": 3,
+            "kind": "AuthorizationPolicy",
+            "name": "wrong-workload",
+            "namespace": "omg-authz-selector-mismatch",
+            "field": "spec.selector",
+            "effect": "selector does not match the workload; excludes policy from authorization evaluation"
           }
         ]
       }
@@ -357,7 +357,7 @@
   ],
   "findings": [
     {
-      "id": "MG-AUTHZ-001-2486eb6ca869",
+      "id": "MG-AUTHZ-001-7ebebbe83df4",
       "controlId": "MG-AUTHZ-001",
       "title": "Mesh-managed workloads must have resolved authorization coverage",
       "severity": "high",
@@ -372,8 +372,8 @@
       "resources": [
         {
           "kind": "Deployment",
-          "namespace": "omg-permissive",
-          "name": "permissive-api"
+          "namespace": "omg-authz-selector-mismatch",
+          "name": "authz-selector-mismatch"
         }
       ],
       "resolutionChain": [
@@ -390,15 +390,23 @@
           "namespace": "istio-system",
           "field": "spec.selector",
           "effect": "selector does not match the workload; excludes policy from authorization evaluation"
+        },
+        {
+          "order": 3,
+          "kind": "AuthorizationPolicy",
+          "name": "wrong-workload",
+          "namespace": "omg-authz-selector-mismatch",
+          "field": "spec.selector",
+          "effect": "selector does not match the workload; excludes policy from authorization evaluation"
         }
       ],
-      "reasoning": "omg-permissive/permissive-api has no resolved AuthorizationPolicy coverage.",
+      "reasoning": "omg-authz-selector-mismatch/authz-selector-mismatch has no resolved AuthorizationPolicy coverage.",
       "remediation": {
         "guidance": "Apply an AuthorizationPolicy that selects this workload and inspect the resolution chain to confirm its effective scope."
       }
     },
     {
-      "id": "MG-AUTHZ-002-05868e7d4966",
+      "id": "MG-AUTHZ-002-8e9b545d54c2",
       "controlId": "MG-AUTHZ-002",
       "title": "Workloads should resolve to default deny with explicit allow",
       "severity": "high",
@@ -413,8 +421,8 @@
       "resources": [
         {
           "kind": "Deployment",
-          "namespace": "omg-permissive",
-          "name": "permissive-api"
+          "namespace": "omg-authz-selector-mismatch",
+          "name": "authz-selector-mismatch"
         }
       ],
       "resolutionChain": [
@@ -431,15 +439,23 @@
           "namespace": "istio-system",
           "field": "spec.selector",
           "effect": "selector does not match the workload; excludes policy from authorization evaluation"
+        },
+        {
+          "order": 3,
+          "kind": "AuthorizationPolicy",
+          "name": "wrong-workload",
+          "namespace": "omg-authz-selector-mismatch",
+          "field": "spec.selector",
+          "effect": "selector does not match the workload; excludes policy from authorization evaluation"
         }
       ],
-      "reasoning": "Authorization for omg-permissive/permissive-api resolves to no-policy, not default deny with explicit allow.",
+      "reasoning": "Authorization for omg-authz-selector-mismatch/authz-selector-mismatch resolves to no-policy, not default deny with explicit allow.",
       "remediation": {
         "guidance": "Establish an empty ALLOW policy for default deny and add narrowly scoped ALLOW rules for required traffic."
       }
     },
     {
-      "id": "MG-AUTHZ-004-d4a602f84c47",
+      "id": "MG-AUTHZ-004-6009bb23a1fe",
       "controlId": "MG-AUTHZ-004",
       "title": "Authorization access must be scoped to explicit identities",
       "severity": "high",
@@ -454,8 +470,8 @@
       "resources": [
         {
           "kind": "Deployment",
-          "namespace": "omg-permissive",
-          "name": "permissive-api"
+          "namespace": "omg-authz-selector-mismatch",
+          "name": "authz-selector-mismatch"
         }
       ],
       "resolutionChain": [
@@ -472,15 +488,23 @@
           "namespace": "istio-system",
           "field": "spec.selector",
           "effect": "selector does not match the workload; excludes policy from authorization evaluation"
+        },
+        {
+          "order": 3,
+          "kind": "AuthorizationPolicy",
+          "name": "wrong-workload",
+          "namespace": "omg-authz-selector-mismatch",
+          "field": "spec.selector",
+          "effect": "selector does not match the workload; excludes policy from authorization evaluation"
         }
       ],
-      "reasoning": "Authorization access for omg-permissive/permissive-api is not scoped to explicit principals, namespaces, or workloads.",
+      "reasoning": "Authorization access for omg-authz-selector-mismatch/authz-selector-mismatch is not scoped to explicit principals, namespaces, or workloads.",
       "remediation": {
         "guidance": "Scope ALLOW rules to approved principals, namespaces, service accounts, or workload identities."
       }
     },
     {
-      "id": "MG-AUTHZ-005-02ecfb3e8a27",
+      "id": "MG-AUTHZ-005-44be77fb39a9",
       "controlId": "MG-AUTHZ-005",
       "title": "Authorization coverage must resolve at workload level",
       "severity": "high",
@@ -495,8 +519,8 @@
       "resources": [
         {
           "kind": "Deployment",
-          "namespace": "omg-permissive",
-          "name": "permissive-api"
+          "namespace": "omg-authz-selector-mismatch",
+          "name": "authz-selector-mismatch"
         }
       ],
       "resolutionChain": [
@@ -513,110 +537,19 @@
           "namespace": "istio-system",
           "field": "spec.selector",
           "effect": "selector does not match the workload; excludes policy from authorization evaluation"
+        },
+        {
+          "order": 3,
+          "kind": "AuthorizationPolicy",
+          "name": "wrong-workload",
+          "namespace": "omg-authz-selector-mismatch",
+          "field": "spec.selector",
+          "effect": "selector does not match the workload; excludes policy from authorization evaluation"
         }
       ],
-      "reasoning": "omg-permissive/permissive-api is not selected by any resolved AuthorizationPolicy.",
+      "reasoning": "omg-authz-selector-mismatch/authz-selector-mismatch is not selected by any resolved AuthorizationPolicy.",
       "remediation": {
         "guidance": "Correct policy namespace, selector, or targetRefs so coverage reaches this workload rather than relying on policy resource presence alone."
-      }
-    },
-    {
-      "id": "MG-MTLS-001-2f457a7bcb45",
-      "controlId": "MG-MTLS-001",
-      "title": "Mesh-managed workloads must resolve to strict mTLS",
-      "severity": "high",
-      "evidenceType": "config",
-      "status": "open",
-      "confidence": "resolved",
-      "dataPlaneMode": "sidecar",
-      "evidenceSources": [
-        "kubernetes-api",
-        "istio-crd"
-      ],
-      "resources": [
-        {
-          "kind": "Deployment",
-          "namespace": "omg-permissive",
-          "name": "permissive-api"
-        }
-      ],
-      "resolutionChain": [
-        {
-          "order": 1,
-          "kind": "MeshConfigDefault",
-          "field": "defaultPeerAuthenticationMode",
-          "effect": "defaults mesh mTLS mode to PERMISSIVE when no PeerAuthentication mode overrides it"
-        },
-        {
-          "order": 2,
-          "kind": "PeerAuthentication",
-          "name": "default",
-          "namespace": "istio-system",
-          "field": "spec.mtls.mode",
-          "effect": "sets mesh-wide mTLS mode to STRICT"
-        },
-        {
-          "order": 3,
-          "kind": "PeerAuthentication",
-          "name": "default",
-          "namespace": "omg-permissive",
-          "field": "spec.mtls.mode",
-          "effect": "sets namespace mTLS mode to PERMISSIVE"
-        }
-      ],
-      "reasoning": "Effective mTLS for omg-permissive/permissive-api resolves to permissive, not strict.",
-      "remediation": {
-        "guidance": "Apply or correct PeerAuthentication so the workload resolves to STRICT, then inspect the attached resolution chain.",
-        "suggestedYAML": "apiVersion: security.istio.io/v1\nkind: PeerAuthentication\nmetadata:\n  name: default\n  namespace: omg-permissive\nspec:\n  mtls:\n    mode: STRICT"
-      }
-    },
-    {
-      "id": "MG-MTLS-002-684b5380167f",
-      "controlId": "MG-MTLS-002",
-      "title": "Declared workload ports must resolve to strict mTLS",
-      "severity": "high",
-      "evidenceType": "config",
-      "status": "open",
-      "confidence": "resolved",
-      "dataPlaneMode": "sidecar",
-      "evidenceSources": [
-        "kubernetes-api",
-        "istio-crd"
-      ],
-      "resources": [
-        {
-          "kind": "Deployment",
-          "namespace": "omg-permissive",
-          "name": "permissive-api"
-        }
-      ],
-      "resolutionChain": [
-        {
-          "order": 1,
-          "kind": "MeshConfigDefault",
-          "field": "defaultPeerAuthenticationMode",
-          "effect": "defaults mesh mTLS mode to PERMISSIVE when no PeerAuthentication mode overrides it"
-        },
-        {
-          "order": 2,
-          "kind": "PeerAuthentication",
-          "name": "default",
-          "namespace": "istio-system",
-          "field": "spec.mtls.mode",
-          "effect": "sets mesh-wide mTLS mode to STRICT"
-        },
-        {
-          "order": 3,
-          "kind": "PeerAuthentication",
-          "name": "default",
-          "namespace": "omg-permissive",
-          "field": "spec.mtls.mode",
-          "effect": "sets namespace mTLS mode to PERMISSIVE"
-        }
-      ],
-      "reasoning": "Effective mTLS for omg-permissive/permissive-api permits plaintext on one or more declared workload ports.",
-      "remediation": {
-        "guidance": "Correct workload-level port mTLS overrides so every declared, Service-bound workload port resolves to STRICT."
       }
     }
   ],
@@ -631,8 +564,8 @@
       },
       {
         "category": "mtls",
-        "grade": "F",
-        "passRate": 0.5,
+        "grade": "A",
+        "passRate": 1,
         "evaluated": 4
       }
     ]

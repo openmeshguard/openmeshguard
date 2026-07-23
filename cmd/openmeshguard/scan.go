@@ -17,6 +17,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
+	gatewayclient "sigs.k8s.io/gateway-api/pkg/client/clientset/versioned"
 )
 
 type scanOptions struct {
@@ -106,8 +107,12 @@ func runScan(ctx context.Context, info versionInfo, opts scanOptions, stdout io.
 	if err != nil {
 		return fmt.Errorf("create Istio client: %w", err)
 	}
+	gatewayClient, err := gatewayclient.NewForConfig(restConfig)
+	if err != nil {
+		return fmt.Errorf("create Gateway API client: %w", err)
+	}
 
-	snapshot, err := collect.New(kubeClient, istioClient).Collect(ctx, collect.Scope{
+	snapshot, err := collect.New(kubeClient, istioClient, gatewayClient).Collect(ctx, collect.Scope{
 		AllNamespaces: opts.AllNamespaces,
 		Namespaces:    opts.Namespaces,
 		RootNamespace: opts.RootNamespace,
@@ -334,26 +339,39 @@ func permissionEvidenceImpact(permission collect.Permission) ([]string, []string
 		paths = append(paths, "namespace.labels", "namespace.meshEnrollment")
 		return paths, []string{"namespace"}
 	case "/pods":
-		paths = append(paths, "workload.dataPlaneMode", "workload.mtls")
+		paths = append(paths, "workload.dataPlaneMode", "workload.mtls", "workload.authorization")
 		return paths, []string{"workload", "namespace"}
+	case "/services":
+		paths = append(paths, "workload.mtls.byPort", "workload.mtls.clientTLSContradiction", "workload.authorization")
+	case "discovery.k8s.io/endpointslices":
+		paths = append(paths, "workload.mtls.byPort", "workload.mtls.clientTLSContradiction", "workload.authorization")
 	case "apps/deployments", "apps/replicasets", "apps/statefulsets", "apps/daemonsets":
 		return paths, []string{"workload"}
 	case "security.istio.io/peerauthentications":
 		paths = append(paths, "workload.mtls")
+	case "networking.istio.io/destinationrules", "networking.istio.io/sidecars":
+		paths = append(paths, "workload.mtls.clientTLSContradiction")
+	case "security.istio.io/authorizationpolicies", "gateway.networking.k8s.io/gateways":
+		paths = append(paths, "workload.authorization")
 	}
 	return paths, nil
 }
 
 func inventoryPathsForResource(apiGroup, resource string) []string {
 	countPaths := map[string]string{
-		"/namespaces":                           "counts.namespaces",
-		"/pods":                                 "counts.pods",
-		"/services":                             "counts.services",
-		"apps/deployments":                      "counts.deployments",
-		"apps/replicasets":                      "counts.replicasets",
-		"apps/statefulsets":                     "counts.statefulsets",
-		"apps/daemonsets":                       "counts.daemonsets",
-		"security.istio.io/peerauthentications": "counts.peerAuthentications",
+		"/namespaces":                             "counts.namespaces",
+		"/pods":                                   "counts.pods",
+		"/services":                               "counts.services",
+		"discovery.k8s.io/endpointslices":         "counts.endpointSlices",
+		"apps/deployments":                        "counts.deployments",
+		"apps/replicasets":                        "counts.replicasets",
+		"apps/statefulsets":                       "counts.statefulsets",
+		"apps/daemonsets":                         "counts.daemonsets",
+		"security.istio.io/peerauthentications":   "counts.peerAuthentications",
+		"networking.istio.io/destinationrules":    "counts.destinationRules",
+		"networking.istio.io/sidecars":            "counts.sidecars",
+		"security.istio.io/authorizationpolicies": "counts.authorizationPolicies",
+		"gateway.networking.k8s.io/gateways":      "counts.gateways",
 	}
 	key := apiGroup + "/" + resource
 	var paths []string

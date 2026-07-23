@@ -1,0 +1,171 @@
+apiVersion: openmeshguard.io/v1alpha1
+kind: ControlPack
+metadata:
+  name: builtin-authz
+  version: 0.1.1
+controls:
+  - id: MG-AUTHZ-001
+    title: Mesh-managed workloads must have resolved authorization coverage
+    category: authz
+    severity: high
+    evidenceType: config
+    scope: workload
+    environments: []
+    requires:
+      - authorization.effective
+    applicability: 'workload.dataPlaneMode != "not-applicable"'
+    expression: 'workload.authorization.effective != "no-policy"'
+    message: >-
+      {{ .Workload }} has no resolved AuthorizationPolicy coverage.
+    remediation:
+      guidance: >-
+        Apply an AuthorizationPolicy that selects this workload and inspect the
+        resolution chain to confirm its effective scope.
+    frameworks:
+      - nist-csf-2.0/PR.AA-05
+      - nist-sp-800-53-r5/AC-3
+      - owasp-k8s-2025/K05
+
+  - id: MG-AUTHZ-002
+    title: Workloads should resolve to default deny with explicit allow
+    category: authz
+    severity: high
+    evidenceType: config
+    scope: workload
+    environments: []
+    requires:
+      - authorization.effective
+    applicability: 'workload.dataPlaneMode != "not-applicable"'
+    expression: 'workload.authorization.effective == "default-deny-explicit-allow"'
+    message: >-
+      Authorization for {{ .Workload }} resolves to
+      {{ .Posture.Authorization.Effective }}, not default deny with explicit allow.
+    remediation:
+      guidance: >-
+        Establish an empty ALLOW policy for default deny and add narrowly scoped
+        ALLOW rules for required traffic.
+    frameworks:
+      - nist-csf-2.0/PR.AA-05
+      - nist-sp-800-53-r5/AC-3
+      - nist-sp-800-53-r5/AC-6
+      - owasp-k8s-2025/K05
+
+  - id: MG-AUTHZ-003
+    title: Authorization policies must not grant structurally broad access
+    category: authz
+    severity: high
+    evidenceType: config
+    scope: workload
+    environments: []
+    requires:
+      - authorization.effective
+      - authorization.broadAllow
+    applicability: 'workload.dataPlaneMode != "not-applicable"'
+    expression: '!workload.authorization.broadAllow'
+    message: >-
+      AuthorizationPolicy coverage for {{ .Workload }} includes an unrestricted
+      rule or wildcard source.
+    remediation:
+      guidance: >-
+        Replace empty rules and wildcard principals or namespaces with the
+        narrow identities and operations the workload requires.
+    frameworks:
+      - nist-csf-2.0/PR.AA-05
+      - nist-sp-800-53-r5/AC-3
+      - nist-sp-800-53-r5/AC-6
+      - owasp-k8s-2025/K05
+
+  - id: MG-AUTHZ-004
+    title: Authorization access must be scoped to explicit identities
+    category: authz
+    severity: high
+    evidenceType: config
+    scope: workload
+    environments: []
+    requires:
+      - authorization.effective
+      - authorization.identityScoped
+    applicability: 'workload.dataPlaneMode != "not-applicable"'
+    expression: 'workload.authorization.identityScoped'
+    message: >-
+      Authorization access for {{ .Workload }} is not scoped to explicit
+      principals, namespaces, or workloads.
+    remediation:
+      guidance: >-
+        Scope ALLOW rules to approved principals, namespaces, service accounts,
+        or workload identities.
+    frameworks:
+      - nist-csf-2.0/PR.AA-05
+      - nist-sp-800-53-r5/AC-3
+      - nist-sp-800-53-r5/AC-6
+      - owasp-k8s-2025/K05
+
+  - id: MG-AUTHZ-005
+    title: Authorization coverage must resolve at workload level
+    category: authz
+    severity: high
+    evidenceType: config
+    scope: workload
+    environments: []
+    requires:
+      - authorization.effective
+      - authorization.policiesInScope
+    applicability: 'workload.dataPlaneMode != "not-applicable"'
+    expression: 'workload.authorization.policiesInScope.size() > 0 && workload.authorization.effective != "no-policy"'
+    message: >-
+      {{ .Workload }} is not selected by any resolved AuthorizationPolicy.
+    remediation:
+      guidance: >-
+        Correct policy namespace, selector, or targetRefs so coverage reaches
+        this workload rather than relying on policy resource presence alone.
+    frameworks:
+      - nist-csf-2.0/PR.AA-05
+      - nist-sp-800-53-r5/AC-3
+      - owasp-k8s-2025/K05
+
+  - id: MG-AUTHZ-006
+    title: Waypoint-attached authorization must have a ready enforcement path
+    category: authz
+    severity: high
+    evidenceType: config
+    scope: workload
+    environments: []
+    requires:
+      - authorization.effective
+      - authorization.waypointUnenforced
+    applicability: 'workload.dataPlaneMode != "not-applicable"'
+    expression: 'workload.authorization.waypointUnenforced.size() == 0'
+    message: >-
+      Waypoint-attached authorization for {{ .Workload }} is not enforced by a
+      ready waypoint in the attachment path.
+    remediation:
+      guidance: >-
+        Attach the policy with targetRefs and select a ready waypoint whose
+        scope includes the workload.
+    frameworks:
+      - nist-csf-2.0/PR.AA-05
+      - nist-sp-800-53-r5/AC-3
+      - owasp-k8s-2025/K05
+
+  - id: MG-AUTHZ-007
+    title: Unenforced waypoint authorization must be reported
+    category: authz
+    severity: high
+    evidenceType: config
+    scope: workload
+    environments: []
+    requires:
+      - authorization.effective
+    applicability: 'workload.dataPlaneMode != "not-applicable"'
+    expression: 'workload.authorization.effective != "waypoint-policy-unenforced"'
+    message: >-
+      A waypoint-attached AuthorizationPolicy for {{ .Workload }} has no ready
+      waypoint in its enforcement path.
+    remediation:
+      guidance: >-
+        Provision or repair the selected waypoint and confirm that policy
+        targetRefs attach through that enforcement path.
+    frameworks:
+      - nist-csf-2.0/PR.AA-05
+      - nist-sp-800-53-r5/AC-3
+      - owasp-k8s-2025/K05

@@ -132,6 +132,112 @@ func TestBuiltinControlsCoverEveryOutcome(t *testing.T) {
 	}
 }
 
+func TestBuiltinAuthorizationControlsCoverEveryOutcome(t *testing.T) {
+	packs, err := LoadBuiltins()
+	if err != nil {
+		t.Fatalf("load built-ins: %v", err)
+	}
+
+	secure := workloadWithAuthz(resolver.AuthzDefaultDenyExplicitAllow, boolPointer(false), []string{"payments/default-deny", "payments/api"}, nil)
+	noPolicy := workloadWithAuthz(resolver.AuthzNoPolicy, boolPointer(false), nil, nil)
+	broad := workloadWithAuthz(resolver.AuthzAllowOnly, boolPointer(true), []string{"payments/allow-all"}, nil)
+	identityUnscoped := workloadWithAuthz(resolver.AuthzAllowOnly, boolPointer(false), []string{"payments/ip-restricted"}, nil)
+	identityUnscoped.Posture.Authz.IdentityScoped = boolPointer(false)
+	allowOnly := workloadWithAuthz(resolver.AuthzAllowOnly, boolPointer(false), []string{"payments/api"}, nil)
+	unenforced := workloadWithAuthz(resolver.AuthzWaypointUnenforced, boolPointer(false), []string{"payments/api"}, []string{"payments/api"})
+	unknown := workloadWithAuthz(resolver.AuthzUnknown, nil, nil, nil)
+	unknown.Posture.Authz.UnknownReason = "AuthorizationPolicy resources unavailable"
+	unknown.Posture.Authz.Chain = []resolver.Step{}
+	notApplicable := secure
+	notApplicable.Posture.Mode = resolver.ModeNotApplicable
+
+	tests := []struct {
+		name         string
+		controlID    string
+		workload     WorkloadInput
+		wantFindings int
+		wantStatus   string
+	}{
+		{name: "MG-AUTHZ-001 pass", controlID: "MG-AUTHZ-001", workload: secure},
+		{name: "MG-AUTHZ-001 fail", controlID: "MG-AUTHZ-001", workload: noPolicy, wantFindings: 1, wantStatus: statusOpen},
+		{name: "MG-AUTHZ-001 unknown", controlID: "MG-AUTHZ-001", workload: unknown, wantFindings: 1, wantStatus: statusUnknown},
+		{name: "MG-AUTHZ-001 not applicable", controlID: "MG-AUTHZ-001", workload: notApplicable, wantFindings: 1, wantStatus: statusNotApplicable},
+		{name: "MG-AUTHZ-002 pass", controlID: "MG-AUTHZ-002", workload: secure},
+		{name: "MG-AUTHZ-002 fail", controlID: "MG-AUTHZ-002", workload: allowOnly, wantFindings: 1, wantStatus: statusOpen},
+		{name: "MG-AUTHZ-002 unknown", controlID: "MG-AUTHZ-002", workload: unknown, wantFindings: 1, wantStatus: statusUnknown},
+		{name: "MG-AUTHZ-002 not applicable", controlID: "MG-AUTHZ-002", workload: notApplicable, wantFindings: 1, wantStatus: statusNotApplicable},
+		{name: "MG-AUTHZ-003 pass", controlID: "MG-AUTHZ-003", workload: secure},
+		{name: "MG-AUTHZ-003 fail", controlID: "MG-AUTHZ-003", workload: broad, wantFindings: 1, wantStatus: statusOpen},
+		{name: "MG-AUTHZ-003 unknown", controlID: "MG-AUTHZ-003", workload: unknown, wantFindings: 1, wantStatus: statusUnknown},
+		{name: "MG-AUTHZ-003 not applicable", controlID: "MG-AUTHZ-003", workload: notApplicable, wantFindings: 1, wantStatus: statusNotApplicable},
+		{name: "MG-AUTHZ-004 pass", controlID: "MG-AUTHZ-004", workload: secure},
+		{name: "MG-AUTHZ-004 fail", controlID: "MG-AUTHZ-004", workload: identityUnscoped, wantFindings: 1, wantStatus: statusOpen},
+		{name: "MG-AUTHZ-004 unknown", controlID: "MG-AUTHZ-004", workload: unknown, wantFindings: 1, wantStatus: statusUnknown},
+		{name: "MG-AUTHZ-004 not applicable", controlID: "MG-AUTHZ-004", workload: notApplicable, wantFindings: 1, wantStatus: statusNotApplicable},
+		{name: "MG-AUTHZ-005 pass", controlID: "MG-AUTHZ-005", workload: secure},
+		{name: "MG-AUTHZ-005 fail", controlID: "MG-AUTHZ-005", workload: noPolicy, wantFindings: 1, wantStatus: statusOpen},
+		{name: "MG-AUTHZ-005 unknown", controlID: "MG-AUTHZ-005", workload: unknown, wantFindings: 1, wantStatus: statusUnknown},
+		{name: "MG-AUTHZ-005 not applicable", controlID: "MG-AUTHZ-005", workload: notApplicable, wantFindings: 1, wantStatus: statusNotApplicable},
+		{name: "MG-AUTHZ-006 pass", controlID: "MG-AUTHZ-006", workload: secure},
+		{name: "MG-AUTHZ-006 fail", controlID: "MG-AUTHZ-006", workload: unenforced, wantFindings: 1, wantStatus: statusOpen},
+		{name: "MG-AUTHZ-006 unknown", controlID: "MG-AUTHZ-006", workload: unknown, wantFindings: 1, wantStatus: statusUnknown},
+		{name: "MG-AUTHZ-006 not applicable", controlID: "MG-AUTHZ-006", workload: notApplicable, wantFindings: 1, wantStatus: statusNotApplicable},
+		{name: "MG-AUTHZ-007 pass", controlID: "MG-AUTHZ-007", workload: secure},
+		{name: "MG-AUTHZ-007 fail", controlID: "MG-AUTHZ-007", workload: unenforced, wantFindings: 1, wantStatus: statusOpen},
+		{name: "MG-AUTHZ-007 unknown", controlID: "MG-AUTHZ-007", workload: unknown, wantFindings: 1, wantStatus: statusUnknown},
+		{name: "MG-AUTHZ-007 not applicable", controlID: "MG-AUTHZ-007", workload: notApplicable, wantFindings: 1, wantStatus: statusNotApplicable},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pack := packWithControl(t, packs, tt.controlID)
+			result, err := Evaluate([]Pack{pack}, Input{Workloads: []WorkloadInput{tt.workload}})
+			if err != nil {
+				t.Fatalf("Evaluate returned error: %v", err)
+			}
+			if len(result.Findings) != tt.wantFindings {
+				t.Fatalf("findings = %#v, want %d", result.Findings, tt.wantFindings)
+			}
+			if tt.wantFindings > 0 && result.Findings[0].Status != tt.wantStatus {
+				t.Fatalf("status = %q, want %q", result.Findings[0].Status, tt.wantStatus)
+			}
+		})
+	}
+}
+
+func TestBuiltinMTLS007CoversEveryOutcome(t *testing.T) {
+	packs, err := LoadBuiltins()
+	if err != nil {
+		t.Fatalf("load built-ins: %v", err)
+	}
+	pack := packWithControl(t, packs, "MG-MTLS-007")
+	tests := []struct {
+		name         string
+		workload     WorkloadInput
+		wantFindings int
+		wantStatus   string
+	}{
+		{name: "pass", workload: workloadWithMTLSContradiction(boolPointer(false))},
+		{name: "fail", workload: workloadWithMTLSContradiction(boolPointer(true)), wantFindings: 1, wantStatus: statusOpen},
+		{name: "unknown", workload: workloadWithMTLSContradiction(nil), wantFindings: 1, wantStatus: statusUnknown},
+		{name: "not applicable", workload: notInMeshWorkload(), wantFindings: 1, wantStatus: statusNotApplicable},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := Evaluate([]Pack{pack}, Input{Workloads: []WorkloadInput{tt.workload}})
+			if err != nil {
+				t.Fatalf("Evaluate returned error: %v", err)
+			}
+			if len(result.Findings) != tt.wantFindings {
+				t.Fatalf("findings = %#v, want %d", result.Findings, tt.wantFindings)
+			}
+			if tt.wantFindings > 0 && result.Findings[0].Status != tt.wantStatus {
+				t.Fatalf("status = %q, want %q", result.Findings[0].Status, tt.wantStatus)
+			}
+		})
+	}
+}
+
 func TestRealScanMissingProducersBecomeUnknownThroughRequires(t *testing.T) {
 	packs, err := LoadBuiltins()
 	if err != nil {
@@ -236,8 +342,15 @@ func TestEvaluateDeterministicIDsAndCategoryGrades(t *testing.T) {
 			t.Fatalf("finding ID changed: %q and %q", first.Findings[index].ID, second.Findings[index].ID)
 		}
 	}
-	if len(first.Scores) != 1 || first.Scores[0].PassRate == nil || *first.Scores[0].PassRate != 0.75 || first.Scores[0].Grade != "C" {
-		t.Fatalf("score = %#v, want mtls 75%% grade C", first.Scores)
+	if len(first.Scores) != 2 {
+		t.Fatalf("scores = %#v, want mTLS and authorization categories", first.Scores)
+	}
+	authzScore, mtlsScore := first.Scores[0], first.Scores[1]
+	if authzScore.Category != "authz" || authzScore.PassRate == nil || *authzScore.PassRate != 1 || authzScore.Grade != "A" {
+		t.Fatalf("authorization score = %#v, want 100%% grade A", authzScore)
+	}
+	if mtlsScore.Category != "mtls" || mtlsScore.PassRate == nil || *mtlsScore.PassRate != float64(5)/6 || mtlsScore.Grade != "B" {
+		t.Fatalf("mTLS score = %#v, want 5/6 grade B", mtlsScore)
 	}
 }
 
@@ -771,18 +884,18 @@ controls:
     severity: high
     evidenceType: config
     scope: workload
-    requires: [mtls.effective, authorization.policiesInScope, authorization.l7Unenforced]
+    requires: [mtls.effective, authorization.policiesInScope, authorization.waypointUnenforced]
     applicability: 'true'
-    expression: 'workload["mtls"]["effective"] == "strict" && workload.authorization.policiesInScope.size() > 1 && workload.authorization.l7Unenforced.size() == 0'
+    expression: 'workload["mtls"]["effective"] == "strict" && workload.authorization.policiesInScope.size() > 1 && workload.authorization.waypointUnenforced.size() == 0'
     message: 'Authorization posture for {{ .Workload }} is incomplete.'
     remediation: {guidance: Correct authorization policy.}
 `)
 	workload := workloadWithMTLS(resolver.MTLSStrict, nil)
 	workload.Posture.Authz = resolver.AuthzResult{
-		Effective:       resolver.AuthzAllowOnly,
-		PoliciesInScope: []string{"payments/default", "payments/api"},
-		L7Unenforced:    []string{"payments/api"},
-		Chain:           []resolver.Step{{Order: 1, Kind: "AuthorizationPolicy", Name: "api", Namespace: "payments", Effect: "selects workload"}},
+		Effective:          resolver.AuthzAllowOnly,
+		PoliciesInScope:    []string{"payments/default", "payments/api"},
+		WaypointUnenforced: []string{"payments/api"},
+		Chain:              []resolver.Step{{Order: 1, Kind: "AuthorizationPolicy", Name: "api", Namespace: "payments", Effect: "selects workload"}},
 	}
 	result, err := Evaluate([]Pack{pack}, Input{Workloads: []WorkloadInput{workload}})
 	if err != nil {
@@ -794,6 +907,51 @@ controls:
 	chain := result.Findings[0].ResolutionChain
 	if len(chain) != 2 || chain[0].Order != 1 || chain[1].Order != 2 || chain[0].Kind != "PeerAuthentication" || chain[1].Kind != "AuthorizationPolicy" {
 		t.Fatalf("resolution chain = %#v, want globally ordered mTLS and authz evidence", chain)
+	}
+}
+
+func TestCanonicalAuthorizationBroadAllowAvailability(t *testing.T) {
+	pack := decodePackForTest(t, `
+apiVersion: openmeshguard.io/v1alpha1
+kind: ControlPack
+metadata: {name: canonical-authz-broad-allow, version: 1.0.0}
+controls:
+  - id: ACME-AUTHZ-002
+    title: Authorization must not be broad
+    category: authz
+    severity: high
+    evidenceType: config
+    scope: workload
+    requires: [authorization.effective, authorization.broadAllow]
+    applicability: 'true'
+    expression: '!workload.authorization.broadAllow'
+    message: 'Authorization for {{ .Workload }} is broad.'
+    remediation: {guidance: Narrow the policy.}
+`)
+	tests := []struct {
+		name         string
+		broadAllow   *bool
+		wantFindings int
+		wantStatus   string
+	}{
+		{name: "known false passes", broadAllow: boolPointer(false)},
+		{name: "known true fails", broadAllow: boolPointer(true), wantFindings: 1, wantStatus: statusOpen},
+		{name: "unavailable is unknown", wantFindings: 1, wantStatus: statusUnknown},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			workload := workloadWithAuthz(resolver.AuthzAllowOnly, tt.broadAllow, []string{"payments/api"}, nil)
+			result, err := Evaluate([]Pack{pack}, Input{Workloads: []WorkloadInput{workload}})
+			if err != nil {
+				t.Fatalf("Evaluate returned error: %v", err)
+			}
+			if len(result.Findings) != tt.wantFindings {
+				t.Fatalf("findings = %#v, want %d", result.Findings, tt.wantFindings)
+			}
+			if tt.wantFindings > 0 && result.Findings[0].Status != tt.wantStatus {
+				t.Fatalf("status = %q, want %q", result.Findings[0].Status, tt.wantStatus)
+			}
+		})
 	}
 }
 
@@ -994,13 +1152,52 @@ func workloadWithMTLS(effective resolver.MTLSEffective, byPort map[int32]resolve
 			Ref:  resolver.WorkloadRef{Cluster: "cluster-a", Namespace: "payments", Name: "api", Kind: "Deployment"},
 			Mode: resolver.ModeSidecar,
 			MTLS: resolver.MTLSResult{
-				Effective: effective,
-				ByPort:    byPort,
-				Chain:     []resolver.Step{{Order: 1, Kind: "PeerAuthentication", Namespace: "payments", Name: "default", Effect: "sets effective mTLS"}},
+				Effective:              effective,
+				ByPort:                 byPort,
+				ClientTLSContradiction: boolPointer(false),
+				Chain:                  []resolver.Step{{Order: 1, Kind: "PeerAuthentication", Namespace: "payments", Name: "default", Effect: "sets effective mTLS"}},
 			},
-			Authz: resolver.AuthzResult{Effective: resolver.AuthzUnknown, Chain: []resolver.Step{}, UnknownReason: "authorization resolver not yet implemented (M5)"},
+			Authz: secureAuthzResult(),
 		},
 		Namespace: NamespaceInput{Name: "payments", Labels: map[string]string{"team": "payments"}},
+	}
+}
+
+func workloadWithAuthz(
+	effective resolver.AuthzEffective,
+	broadAllow *bool,
+	policiesInScope []string,
+	waypointUnenforced []string,
+) WorkloadInput {
+	workload := workloadWithMTLS(resolver.MTLSStrict, map[int32]resolver.MTLSEffective{})
+	workload.Posture.Authz = resolver.AuthzResult{
+		Effective:          effective,
+		BroadAllow:         broadAllow,
+		IdentityScoped:     optionalNegation(broadAllow),
+		PoliciesInScope:    policiesInScope,
+		WaypointUnenforced: waypointUnenforced,
+		Chain: []resolver.Step{{
+			Order: 1, Kind: "AuthorizationPolicy", Namespace: "payments", Name: "default-deny", Effect: "sets effective authorization",
+		}},
+	}
+	return workload
+}
+
+func workloadWithMTLSContradiction(contradiction *bool) WorkloadInput {
+	workload := workloadWithMTLS(resolver.MTLSStrict, map[int32]resolver.MTLSEffective{})
+	workload.Posture.MTLS.ClientTLSContradiction = contradiction
+	return workload
+}
+
+func secureAuthzResult() resolver.AuthzResult {
+	return resolver.AuthzResult{
+		Effective:       resolver.AuthzDefaultDenyExplicitAllow,
+		BroadAllow:      boolPointer(false),
+		IdentityScoped:  boolPointer(true),
+		PoliciesInScope: []string{"payments/default-deny", "payments/api"},
+		Chain: []resolver.Step{{
+			Order: 1, Kind: "AuthorizationPolicy", Namespace: "payments", Name: "default-deny", Effect: "sets effective authorization",
+		}},
 	}
 }
 
@@ -1026,4 +1223,11 @@ func notInMeshWorkload() WorkloadInput {
 
 func boolPointer(value bool) *bool {
 	return &value
+}
+
+func optionalNegation(value *bool) *bool {
+	if value == nil {
+		return nil
+	}
+	return boolPointer(!*value)
 }

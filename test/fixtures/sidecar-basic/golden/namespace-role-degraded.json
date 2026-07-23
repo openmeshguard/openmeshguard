@@ -3,8 +3,13 @@
   "generatedAt": "2000-01-01T00:00:00Z",
   "scanner": {
     "version": "dev",
-    "resolverVersion": "mtls/v2",
+    "resolverVersion": "mtls/v3,authz/v6",
     "controlPacks": [
+      {
+        "name": "builtin-authz",
+        "version": "0.1.1",
+        "source": "builtin"
+      },
       {
         "name": "builtin-mtls",
         "version": "0.1.0",
@@ -46,9 +51,17 @@
       "granted": true,
       "impact": "sidecar detection from running pods may be unavailable",
       "affectedControls": [
+        "MG-AUTHZ-001",
+        "MG-AUTHZ-002",
+        "MG-AUTHZ-003",
+        "MG-AUTHZ-004",
+        "MG-AUTHZ-005",
+        "MG-AUTHZ-006",
+        "MG-AUTHZ-007",
         "MG-MTLS-001",
         "MG-MTLS-002",
-        "MG-MTLS-003"
+        "MG-MTLS-003",
+        "MG-MTLS-007"
       ]
     },
     {
@@ -58,7 +71,18 @@
         "list"
       ],
       "granted": true,
-      "impact": "service inventory and multi-cluster gateway signals may be unavailable"
+      "impact": "service inventory, workload ports, policy targetRefs, and multi-cluster gateway signals may be unavailable",
+      "affectedControls": [
+        "MG-AUTHZ-001",
+        "MG-AUTHZ-002",
+        "MG-AUTHZ-003",
+        "MG-AUTHZ-004",
+        "MG-AUTHZ-005",
+        "MG-AUTHZ-006",
+        "MG-AUTHZ-007",
+        "MG-MTLS-002",
+        "MG-MTLS-007"
+      ]
     },
     {
       "apiGroup": "apps",
@@ -69,9 +93,17 @@
       "granted": true,
       "impact": "DaemonSet workload posture may be unavailable",
       "affectedControls": [
+        "MG-AUTHZ-001",
+        "MG-AUTHZ-002",
+        "MG-AUTHZ-003",
+        "MG-AUTHZ-004",
+        "MG-AUTHZ-005",
+        "MG-AUTHZ-006",
+        "MG-AUTHZ-007",
         "MG-MTLS-001",
         "MG-MTLS-002",
-        "MG-MTLS-003"
+        "MG-MTLS-003",
+        "MG-MTLS-007"
       ]
     },
     {
@@ -83,9 +115,17 @@
       "granted": true,
       "impact": "deployment workload posture may be unavailable",
       "affectedControls": [
+        "MG-AUTHZ-001",
+        "MG-AUTHZ-002",
+        "MG-AUTHZ-003",
+        "MG-AUTHZ-004",
+        "MG-AUTHZ-005",
+        "MG-AUTHZ-006",
+        "MG-AUTHZ-007",
         "MG-MTLS-001",
         "MG-MTLS-002",
-        "MG-MTLS-003"
+        "MG-MTLS-003",
+        "MG-MTLS-007"
       ]
     },
     {
@@ -97,9 +137,17 @@
       "granted": true,
       "impact": "standalone ReplicaSet workload posture may be unavailable",
       "affectedControls": [
+        "MG-AUTHZ-001",
+        "MG-AUTHZ-002",
+        "MG-AUTHZ-003",
+        "MG-AUTHZ-004",
+        "MG-AUTHZ-005",
+        "MG-AUTHZ-006",
+        "MG-AUTHZ-007",
         "MG-MTLS-001",
         "MG-MTLS-002",
-        "MG-MTLS-003"
+        "MG-MTLS-003",
+        "MG-MTLS-007"
       ]
     },
     {
@@ -111,9 +159,98 @@
       "granted": true,
       "impact": "StatefulSet workload posture may be unavailable",
       "affectedControls": [
+        "MG-AUTHZ-001",
+        "MG-AUTHZ-002",
+        "MG-AUTHZ-003",
+        "MG-AUTHZ-004",
+        "MG-AUTHZ-005",
+        "MG-AUTHZ-006",
+        "MG-AUTHZ-007",
         "MG-MTLS-001",
         "MG-MTLS-002",
-        "MG-MTLS-003"
+        "MG-MTLS-003",
+        "MG-MTLS-007"
+      ]
+    },
+    {
+      "apiGroup": "discovery.k8s.io",
+      "resource": "endpointslices",
+      "verbs": [
+        "list"
+      ],
+      "granted": true,
+      "impact": "selectorless Service attachment and workload port evidence may be unavailable",
+      "affectedControls": [
+        "MG-AUTHZ-001",
+        "MG-AUTHZ-002",
+        "MG-AUTHZ-003",
+        "MG-AUTHZ-004",
+        "MG-AUTHZ-005",
+        "MG-AUTHZ-006",
+        "MG-AUTHZ-007",
+        "MG-MTLS-002",
+        "MG-MTLS-007"
+      ]
+    },
+    {
+      "apiGroup": "gateway.networking.k8s.io",
+      "resource": "gateways",
+      "verbs": [
+        "list"
+      ],
+      "granted": false,
+      "optional": true,
+      "impact": "ambient L7 waypoint enforceability may be unavailable without Gateway evidence; denied scope(s): namespace/omg-strict",
+      "affectedControls": [
+        "MG-AUTHZ-001",
+        "MG-AUTHZ-002",
+        "MG-AUTHZ-003",
+        "MG-AUTHZ-004",
+        "MG-AUTHZ-005",
+        "MG-AUTHZ-006",
+        "MG-AUTHZ-007"
+      ]
+    },
+    {
+      "apiGroup": "networking.istio.io",
+      "resource": "destinationrules",
+      "verbs": [
+        "list"
+      ],
+      "granted": false,
+      "impact": "client TLS contradiction posture resolves to unknown without DestinationRule evidence; denied scope(s): namespace/istio-system",
+      "affectedControls": [
+        "MG-MTLS-007"
+      ]
+    },
+    {
+      "apiGroup": "networking.istio.io",
+      "resource": "sidecars",
+      "verbs": [
+        "list"
+      ],
+      "granted": false,
+      "impact": "DestinationRule visibility may be unavailable without Sidecar egress scoping evidence; denied scope(s): namespace/istio-system",
+      "affectedControls": [
+        "MG-MTLS-007"
+      ]
+    },
+    {
+      "apiGroup": "security.istio.io",
+      "resource": "authorizationpolicies",
+      "verbs": [
+        "list"
+      ],
+      "granted": false,
+      "impact": "effective authorization posture resolves to unknown without AuthorizationPolicy evidence; denied scope(s): namespace/istio-system",
+      "affectedControls": [
+        "MG-AUTHZ-001",
+        "MG-AUTHZ-002",
+        "MG-AUTHZ-003",
+        "MG-AUTHZ-004",
+        "MG-AUTHZ-005",
+        "MG-AUTHZ-006",
+        "MG-AUTHZ-007"
       ]
     },
     {
@@ -127,19 +264,25 @@
       "affectedControls": [
         "MG-MTLS-001",
         "MG-MTLS-002",
-        "MG-MTLS-003"
+        "MG-MTLS-003",
+        "MG-MTLS-007"
       ]
     }
   ],
   "inventory": {
     "counts": {
+      "authorizationPolicies": 0,
       "daemonsets": 0,
       "deployments": 1,
+      "destinationRules": 0,
+      "endpointSlices": 1,
+      "gateways": 0,
       "namespaces": 0,
       "peerAuthentications": 1,
       "pods": 1,
       "replicasets": 1,
       "services": 1,
+      "sidecars": 0,
       "statefulsets": 0
     },
     "dataPlane": {
@@ -166,11 +309,186 @@
       "authorization": {
         "effective": "unknown",
         "chain": [],
-        "unknownReason": "authorization resolver not yet implemented (M5)"
+        "unknownReason": "AuthorizationPolicy resources unavailable"
       }
     }
   ],
   "findings": [
+    {
+      "id": "MG-AUTHZ-001-51dc710d23e1",
+      "controlId": "MG-AUTHZ-001",
+      "title": "Mesh-managed workloads must have resolved authorization coverage",
+      "severity": "high",
+      "evidenceType": "config",
+      "status": "unknown",
+      "confidence": "unavailable",
+      "dataPlaneMode": "sidecar",
+      "evidenceSources": [
+        "kubernetes-api"
+      ],
+      "resources": [
+        {
+          "kind": "Deployment",
+          "namespace": "omg-strict",
+          "name": "strict-api"
+        }
+      ],
+      "reasoning": "Control MG-AUTHZ-001 could not be evaluated for omg-strict/strict-api: authorization.effective unavailable: AuthorizationPolicy resources unavailable.",
+      "remediation": {
+        "guidance": "Apply an AuthorizationPolicy that selects this workload and inspect the resolution chain to confirm its effective scope."
+      },
+      "unknownReason": "authorization.effective unavailable: AuthorizationPolicy resources unavailable"
+    },
+    {
+      "id": "MG-AUTHZ-002-35c85047aa15",
+      "controlId": "MG-AUTHZ-002",
+      "title": "Workloads should resolve to default deny with explicit allow",
+      "severity": "high",
+      "evidenceType": "config",
+      "status": "unknown",
+      "confidence": "unavailable",
+      "dataPlaneMode": "sidecar",
+      "evidenceSources": [
+        "kubernetes-api"
+      ],
+      "resources": [
+        {
+          "kind": "Deployment",
+          "namespace": "omg-strict",
+          "name": "strict-api"
+        }
+      ],
+      "reasoning": "Control MG-AUTHZ-002 could not be evaluated for omg-strict/strict-api: authorization.effective unavailable: AuthorizationPolicy resources unavailable.",
+      "remediation": {
+        "guidance": "Establish an empty ALLOW policy for default deny and add narrowly scoped ALLOW rules for required traffic."
+      },
+      "unknownReason": "authorization.effective unavailable: AuthorizationPolicy resources unavailable"
+    },
+    {
+      "id": "MG-AUTHZ-003-a71fa38f6f1a",
+      "controlId": "MG-AUTHZ-003",
+      "title": "Authorization policies must not grant structurally broad access",
+      "severity": "high",
+      "evidenceType": "config",
+      "status": "unknown",
+      "confidence": "unavailable",
+      "dataPlaneMode": "sidecar",
+      "evidenceSources": [
+        "kubernetes-api"
+      ],
+      "resources": [
+        {
+          "kind": "Deployment",
+          "namespace": "omg-strict",
+          "name": "strict-api"
+        }
+      ],
+      "reasoning": "Control MG-AUTHZ-003 could not be evaluated for omg-strict/strict-api: authorization.effective unavailable: AuthorizationPolicy resources unavailable; authorization.broadAllow unavailable: authorization broad-allow evidence unavailable.",
+      "remediation": {
+        "guidance": "Replace empty rules and wildcard principals or namespaces with the narrow identities and operations the workload requires."
+      },
+      "unknownReason": "authorization.effective unavailable: AuthorizationPolicy resources unavailable; authorization.broadAllow unavailable: authorization broad-allow evidence unavailable"
+    },
+    {
+      "id": "MG-AUTHZ-004-e1224b6d7c7d",
+      "controlId": "MG-AUTHZ-004",
+      "title": "Authorization access must be scoped to explicit identities",
+      "severity": "high",
+      "evidenceType": "config",
+      "status": "unknown",
+      "confidence": "unavailable",
+      "dataPlaneMode": "sidecar",
+      "evidenceSources": [
+        "kubernetes-api"
+      ],
+      "resources": [
+        {
+          "kind": "Deployment",
+          "namespace": "omg-strict",
+          "name": "strict-api"
+        }
+      ],
+      "reasoning": "Control MG-AUTHZ-004 could not be evaluated for omg-strict/strict-api: authorization.effective unavailable: AuthorizationPolicy resources unavailable; authorization.identityScoped unavailable: authorization identity-scope evidence unavailable.",
+      "remediation": {
+        "guidance": "Scope ALLOW rules to approved principals, namespaces, service accounts, or workload identities."
+      },
+      "unknownReason": "authorization.effective unavailable: AuthorizationPolicy resources unavailable; authorization.identityScoped unavailable: authorization identity-scope evidence unavailable"
+    },
+    {
+      "id": "MG-AUTHZ-005-6955419b2fad",
+      "controlId": "MG-AUTHZ-005",
+      "title": "Authorization coverage must resolve at workload level",
+      "severity": "high",
+      "evidenceType": "config",
+      "status": "unknown",
+      "confidence": "unavailable",
+      "dataPlaneMode": "sidecar",
+      "evidenceSources": [
+        "kubernetes-api"
+      ],
+      "resources": [
+        {
+          "kind": "Deployment",
+          "namespace": "omg-strict",
+          "name": "strict-api"
+        }
+      ],
+      "reasoning": "Control MG-AUTHZ-005 could not be evaluated for omg-strict/strict-api: authorization.effective unavailable: AuthorizationPolicy resources unavailable; authorization.policiesInScope unavailable: AuthorizationPolicy resources unavailable.",
+      "remediation": {
+        "guidance": "Correct policy namespace, selector, or targetRefs so coverage reaches this workload rather than relying on policy resource presence alone."
+      },
+      "unknownReason": "authorization.effective unavailable: AuthorizationPolicy resources unavailable; authorization.policiesInScope unavailable: AuthorizationPolicy resources unavailable"
+    },
+    {
+      "id": "MG-AUTHZ-006-6bab1c797a40",
+      "controlId": "MG-AUTHZ-006",
+      "title": "Waypoint-attached authorization must have a ready enforcement path",
+      "severity": "high",
+      "evidenceType": "config",
+      "status": "unknown",
+      "confidence": "unavailable",
+      "dataPlaneMode": "sidecar",
+      "evidenceSources": [
+        "kubernetes-api"
+      ],
+      "resources": [
+        {
+          "kind": "Deployment",
+          "namespace": "omg-strict",
+          "name": "strict-api"
+        }
+      ],
+      "reasoning": "Control MG-AUTHZ-006 could not be evaluated for omg-strict/strict-api: authorization.effective unavailable: AuthorizationPolicy resources unavailable; authorization.waypointUnenforced unavailable: AuthorizationPolicy resources unavailable.",
+      "remediation": {
+        "guidance": "Attach the policy with targetRefs and select a ready waypoint whose scope includes the workload."
+      },
+      "unknownReason": "authorization.effective unavailable: AuthorizationPolicy resources unavailable; authorization.waypointUnenforced unavailable: AuthorizationPolicy resources unavailable"
+    },
+    {
+      "id": "MG-AUTHZ-007-0d3640d3d6d2",
+      "controlId": "MG-AUTHZ-007",
+      "title": "Unenforced waypoint authorization must be reported",
+      "severity": "high",
+      "evidenceType": "config",
+      "status": "unknown",
+      "confidence": "unavailable",
+      "dataPlaneMode": "sidecar",
+      "evidenceSources": [
+        "kubernetes-api"
+      ],
+      "resources": [
+        {
+          "kind": "Deployment",
+          "namespace": "omg-strict",
+          "name": "strict-api"
+        }
+      ],
+      "reasoning": "Control MG-AUTHZ-007 could not be evaluated for omg-strict/strict-api: authorization.effective unavailable: AuthorizationPolicy resources unavailable.",
+      "remediation": {
+        "guidance": "Provision or repair the selected waypoint and confirm that policy targetRefs attach through that enforcement path."
+      },
+      "unknownReason": "authorization.effective unavailable: AuthorizationPolicy resources unavailable"
+    },
     {
       "id": "MG-MTLS-001-e80e3a041279",
       "controlId": "MG-MTLS-001",
@@ -245,16 +563,47 @@
         "guidance": "Apply or correct PeerAuthentication so the workload no longer resolves to DISABLE, then inspect the attached resolution chain."
       },
       "unknownReason": "mtls.effective unavailable: PeerAuthentication resources unavailable"
+    },
+    {
+      "id": "MG-MTLS-007-42760521d74f",
+      "controlId": "MG-MTLS-007",
+      "title": "Client TLS must agree with resolved server mTLS",
+      "severity": "high",
+      "evidenceType": "config",
+      "status": "unknown",
+      "confidence": "unavailable",
+      "dataPlaneMode": "sidecar",
+      "evidenceSources": [
+        "kubernetes-api"
+      ],
+      "resources": [
+        {
+          "kind": "Deployment",
+          "namespace": "omg-strict",
+          "name": "strict-api"
+        }
+      ],
+      "reasoning": "Control MG-MTLS-007 could not be evaluated for omg-strict/strict-api: mtls.clientTLSContradiction unavailable: DestinationRule collection unavailable.",
+      "remediation": {
+        "guidance": "Correct DestinationRule TLS mode or the server-side PeerAuthentication posture so client and server settings agree."
+      },
+      "unknownReason": "mtls.clientTLSContradiction unavailable: DestinationRule collection unavailable"
     }
   ],
   "scores": {
     "overall": null,
     "categories": [
       {
+        "category": "authz",
+        "grade": "unknown",
+        "passRate": null,
+        "unknown": 7
+      },
+      {
         "category": "mtls",
         "grade": "unknown",
         "passRate": null,
-        "unknown": 3
+        "unknown": 4
       }
     ]
   }

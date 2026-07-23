@@ -37,10 +37,13 @@ chmod 600 "$E2E_ADMIN_KUBECONFIG"
 
 started=$(date +%s)
 results="$E2E_STATE_DIR/results"
-goldens="$E2E_ROOT/test/fixtures/sidecar-basic/golden"
-cases="$E2E_ROOT/test/fixtures/sidecar-basic/cases.tsv"
+basic_fixtures="$E2E_ROOT/test/fixtures/sidecar-basic"
+authz_fixtures="$E2E_ROOT/test/fixtures/sidecar-authz"
+cases="$E2E_STATE_DIR/all-cases.tsv"
 mkdir -p "$results"
 find "$results" -mindepth 1 -delete
+awk -F '\t' 'BEGIN {OFS="\t"} NF > 0 {print "sidecar-basic", $1, $2, $3, $4, $5}' "$basic_fixtures/cases.tsv" >"$cases"
+awk -F '\t' 'BEGIN {OFS="\t"} NF > 0 {print "sidecar-authz", $1, $2, $3, $4, $5}' "$authz_fixtures/cases.tsv" >>"$cases"
 kubeconfigs=$(mktemp -d "$E2E_STATE_DIR/kubeconfigs.XXXXXX")
 chmod 700 "$kubeconfigs"
 scanner_home="$kubeconfigs/scanner-home"
@@ -258,9 +261,10 @@ normalize_report() {
 }
 
 compare_golden() {
-	name=$1
+	group=$1
+	name=$2
 	actual="$results/$name.json"
-	golden="$goldens/$name.json"
+	golden="$E2E_ROOT/test/fixtures/$group/golden/$name.json"
 	update_golden=$(printenv UPDATE_GOLDEN 2>/dev/null || true)
 	if [ "$update_golden" = 1 ]; then
 		cp "$actual" "$golden"
@@ -304,20 +308,21 @@ capture_audit() {
 }
 
 assert_schema_test_available
-assert_golden_case_bijection "$cases" "$goldens"
+assert_golden_case_bijection "$basic_fixtures/cases.tsv" "$basic_fixtures/golden" true
+assert_golden_case_bijection "$authz_fixtures/cases.tsv" "$authz_fixtures/golden"
 
 echo "e2e: bootstrap distinct fixture-manager, scanner, and audit-probe identities"
 admin_kubectl apply -f "$E2E_ROOT/test/e2e/harness-bootstrap.yaml" >/dev/null
 make_sa_kubeconfig "$E2E_FIXTURE_MANAGER" "$kubeconfigs/fixture-manager.yaml" ""
 
 echo "e2e: reset and apply sidecar fixtures and published RBAC profiles"
-while IFS="$tab" read -r name namespace deployment proxy expected_findings; do
+while IFS="$tab" read -r group name namespace deployment proxy expected_findings; do
 	fixture_kubectl delete namespace "$namespace" --ignore-not-found --wait=false >/dev/null
 done <"$cases"
 attempt=0
 while :; do
 	remaining=0
-	while IFS="$tab" read -r name namespace deployment proxy expected_findings; do
+	while IFS="$tab" read -r group name namespace deployment proxy expected_findings; do
 		if fixture_kubectl get namespace "$namespace" >/dev/null 2>&1; then
 			remaining=1
 		fi
@@ -332,13 +337,14 @@ while :; do
 	fi
 	sleep 1
 done
-fixture_kubectl apply -f "$E2E_ROOT/test/fixtures/sidecar-basic/manifests.yaml" >/dev/null
+fixture_kubectl apply -f "$basic_fixtures/manifests.yaml" >/dev/null
+fixture_kubectl apply -f "$authz_fixtures/manifests.yaml" >/dev/null
 fixture_kubectl apply -f "$E2E_ROOT/deploy/rbac/cluster-role.yaml" >/dev/null
 fixture_kubectl -n omg-strict apply -f "$E2E_ROOT/deploy/rbac/namespace-role.yaml" >/dev/null
 fixture_kubectl apply -f "$E2E_ROOT/test/e2e/scanner-bindings.yaml" >/dev/null
 
 echo "e2e: wait for fixture workloads and verify sidecar enrollment"
-while IFS="$tab" read -r name namespace deployment proxy expected_findings; do
+while IFS="$tab" read -r group name namespace deployment proxy expected_findings; do
 	fixture_kubectl -n "$namespace" rollout status "deployment/$deployment" --timeout=300s >/dev/null
 	pods="$kubeconfigs/$name-pods.json"
 	fixture_kubectl -n "$namespace" get pods -o json >"$pods"
@@ -484,7 +490,7 @@ if [ -e "$kubeconfigs/audit-probe.yaml" ]; then
 fi
 
 echo "e2e: scan namespace fixtures and compare canonical JSON goldens"
-while IFS="$tab" read -r name namespace deployment proxy expected_findings; do
+while IFS="$tab" read -r group name namespace deployment proxy expected_findings; do
 	scan_fixture "$name" "$namespace" "$kubeconfigs/scanner-cluster.yaml"
 done <"$cases"
 
@@ -494,7 +500,7 @@ assert_json "cluster scan workload targets are globally ordered" "$results/clust
 	[.workloadPostures[].workload | "\(.namespace)/\(.kind)/\(.name)"] as $targets |
 	$targets == ($targets | sort)
 '
-while IFS="$tab" read -r name namespace deployment proxy expected_findings; do
+while IFS="$tab" read -r group name namespace deployment proxy expected_findings; do
 	if ! jq -e --arg namespace "$namespace" --arg deployment "$deployment" '
 		any(.workloadPostures[];
 		  .workload.namespace == $namespace and
@@ -542,19 +548,19 @@ capture_audit "$results/audit-namespace.jsonl"
 rm -f "$kubeconfigs/scanner-namespace.yaml"
 awk '1' "$results/audit-cluster.jsonl" "$results/audit-namespace.jsonl" >"$results/audit.jsonl"
 
-while IFS="$tab" read -r name namespace deployment proxy expected_findings; do
-	assert_json "$name emits one workload posture and at least one finding" "$results/$name.json" '
+while IFS="$tab" read -r group name namespace deployment proxy expected_findings; do
+	assert_json "$name emits one workload posture and a findings array" "$results/$name.json" '
 		(.workloadPostures | length) == 1 and
-		(.findings | length) > 0
+		(.findings | type) == "array"
 	'
 	assert_report_update_guard "$name" "$results/$name.json" "$expected_findings"
 done <"$cases"
-assert_json "namespace Role scan emits one workload posture and all three built-in findings" "$results/namespace-role-degraded.json" '
+assert_json "namespace Role scan emits one workload posture and all built-in findings" "$results/namespace-role-degraded.json" '
 	(.workloadPostures | length) == 1 and
-	(.findings | length) == 3
+	(.findings | length) == 11
 '
 assert_report_update_guard namespace-role-degraded "$results/namespace-role-degraded.json" \
-	"MG-MTLS-001=unknown,MG-MTLS-002=unknown,MG-MTLS-003=unknown"
+	"MG-AUTHZ-001=unknown,MG-AUTHZ-002=unknown,MG-AUTHZ-003=unknown,MG-AUTHZ-004=unknown,MG-AUTHZ-005=unknown,MG-AUTHZ-006=unknown,MG-AUTHZ-007=unknown,MG-MTLS-001=unknown,MG-MTLS-002=unknown,MG-MTLS-003=unknown,MG-MTLS-007=unknown"
 
 assert_json "strict namespace resolves strict" "$results/strict.json" '
 	.workloadPostures | length == 1 and .[0].mtls.effective == "strict"
@@ -573,19 +579,63 @@ assert_json "workload policy overrides namespace strict" "$results/workload-conf
 	  .status == "open"
 	)
 '
-assert_json "port override remains honest unknown without workload-port evidence" "$results/port-level-override.json" '
+assert_json "port override resolves from observed Service-bound workload ports" "$results/port-level-override.json" '
 	.workloadPostures | length == 1 and
 	.[0].workload == {"namespace": "omg-port-override", "name": "port-api", "kind": "Deployment"} and
 	.[0].dataPlaneMode == "sidecar" and
-	.[0].mtls.effective == "unknown" and
-	.[0].mtls.chain == [] and
-	.[0].mtls.unknownReason == "workload ports unavailable for port-level PeerAuthentication on omg-port-override/port-override" and
-	.[0].authorization.effective == "unknown"
+	.[0].mtls.effective == "disabled" and
+	.[0].mtls.byPort == {"8080": "disabled"} and
+	.[0].mtls.clientTLSContradiction == false and
+	any(.[0].mtls.chain[]; .kind == "PeerAuthentication" and .name == "port-override" and .field == "spec.portLevelMtls[\"8080\"].mode") and
+	.[0].authorization.effective == "no-policy"
 '
-assert_json "DestinationRule contradiction remains unavailable evidence" "$results/dr-contradiction.json" '
+assert_json "DestinationRule contradiction resolves from collected client TLS" "$results/dr-contradiction.json" '
 	.workloadPostures | length == 1 and
 	.[0].mtls.effective == "strict" and
-	(.[0].mtls | has("clientTLSContradiction") | not)
+	.[0].mtls.byPort == {"8080": "strict"} and
+	.[0].mtls.clientTLSContradiction == true and
+	any(.[0].mtls.chain[]; .kind == "DestinationRule" and .name == "dr-api" and (.effect | contains("conflicts")))
+'
+assert_json "root default deny and local allow merge additively" "$results/authz-root-local.json" '
+	.workloadPostures | length == 1 and
+	.[0].authorization.effective == "default-deny-explicit-allow" and
+	.[0].authorization.broadAllow == false and
+	.[0].authorization.identityScoped == true and
+	.[0].authorization.policiesInScope == ["istio-system/authz-root-default-deny", "omg-authz-root-local/allow-client"] and
+	([.[0].authorization.chain[].kind] == ["AuthorizationDefault", "AuthorizationPolicy", "AuthorizationPolicy"]) and
+	(.[0].authorization.chain[1].effect | contains("no rules")) and
+	(.[0].authorization.chain[2].effect | contains("explicit rules"))
+'
+assert_json "empty allow rule is distinct from an empty default-deny policy" "$results/authz-broad.json" '
+	. as $report |
+	($report.workloadPostures | length) == 1 and
+	$report.workloadPostures[0].authorization.effective == "default-deny-explicit-allow" and
+	$report.workloadPostures[0].authorization.broadAllow == true and
+	$report.workloadPostures[0].authorization.identityScoped == false and
+	any($report.findings[]; .controlId == "MG-AUTHZ-003" and .status == "open") and
+	any($report.findings[]; .controlId == "MG-AUTHZ-004" and .status == "open")
+'
+assert_json "DENY remains additive ahead of ALLOW" "$results/authz-deny.json" '
+	.workloadPostures | length == 1 and
+	.[0].authorization.effective == "deny-present" and
+	.[0].authorization.identityScoped == true and
+	([.[0].authorization.chain[].kind] == ["AuthorizationDefault", "AuthorizationPolicy", "AuthorizationPolicy", "AuthorizationPolicy"]) and
+	(.[0].authorization.chain[1].effect | contains("DENY overrides")) and
+	(.[0].authorization.chain[2].effect | contains("excludes policy")) and
+	(.[0].authorization.chain[3].effect | contains("ALLOW union"))
+'
+assert_json "allow-only policy remains distinct from explicit default deny" "$results/authz-allow-only.json" '
+	.workloadPostures | length == 1 and
+	.[0].authorization.effective == "allow-only" and
+	.[0].authorization.broadAllow == false and
+	.[0].authorization.identityScoped == true
+'
+assert_json "selector mismatch is explicit in the authorization chain" "$results/authz-selector-mismatch.json" '
+	.workloadPostures | length == 1 and
+	.[0].authorization.effective == "no-policy" and
+	.[0].authorization.identityScoped == false and
+	((.[0].authorization.policiesInScope // []) == []) and
+	any(.[0].authorization.chain[]; .field == "spec.selector" and (.effect | contains("excludes policy")))
 '
 assert_json "injection-disabled fixture remains honest membership unknown" "$results/not-in-mesh.json" '
 	.workloadPostures | length == 1 and
@@ -608,10 +658,10 @@ if ! assert_scanner_audit "$results/audit.jsonl"; then
 	exit 1
 fi
 
-while IFS="$tab" read -r name namespace deployment proxy expected_findings; do
-	compare_golden "$name"
+while IFS="$tab" read -r group name namespace deployment proxy expected_findings; do
+	compare_golden "$group" "$name"
 done <"$cases"
-compare_golden namespace-role-degraded
+compare_golden sidecar-basic namespace-role-degraded
 
 events=$(jq -s \
 	--arg cluster_user "system:serviceaccount:$E2E_HARNESS_NAMESPACE:$E2E_CLUSTER_SCANNER" \
