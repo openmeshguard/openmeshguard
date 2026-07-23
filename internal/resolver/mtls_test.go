@@ -7,8 +7,8 @@ import (
 )
 
 func TestResolverV2Version(t *testing.T) {
-	if got := New().Version(); got != "mtls/v2,authz/v3" {
-		t.Fatalf("Version() = %q, want mtls/v2,authz/v3", got)
+	if got := New().Version(); got != "mtls/v3,authz/v3" {
+		t.Fatalf("Version() = %q, want mtls/v3,authz/v3", got)
 	}
 }
 

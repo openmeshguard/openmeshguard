@@ -8,7 +8,7 @@ import (
 )
 
 const (
-	mtlsVersion  = "mtls/v2"
+	mtlsVersion  = "mtls/v3"
 	authzVersion = "authz/v3"
 
 	dataPlaneUnknownReason                = "data plane membership unavailable"
