@@ -395,6 +395,49 @@ func TestCollectorTracksReplicaSetAvailabilityPerNamespace(t *testing.T) {
 	}
 }
 
+func TestSnapshotClientProxiesAvailable(t *testing.T) {
+	resources := []struct {
+		apiGroup string
+		resource string
+	}{
+		{resource: "pods"},
+		{apiGroup: "apps", resource: "deployments"},
+		{apiGroup: "apps", resource: "replicasets"},
+		{apiGroup: "apps", resource: "statefulsets"},
+		{apiGroup: "apps", resource: "daemonsets"},
+	}
+	for _, denied := range resources {
+		t.Run(denied.resource, func(t *testing.T) {
+			permissions := make([]Permission, 0, len(resources))
+			for _, resource := range resources {
+				permissions = append(permissions, Permission{
+					APIGroup: resource.apiGroup,
+					Resource: resource.resource,
+					Verbs:    []string{"list"},
+					Granted:  resource != denied,
+				})
+			}
+			snapshot := Snapshot{PermissionSummary: permissions}
+			if snapshot.ClientProxiesAvailable() {
+				t.Fatalf("ClientProxiesAvailable = true after %s denial", denied.resource)
+			}
+		})
+	}
+
+	snapshot := Snapshot{}
+	for _, resource := range resources {
+		snapshot.PermissionSummary = append(snapshot.PermissionSummary, Permission{
+			APIGroup: resource.apiGroup,
+			Resource: resource.resource,
+			Verbs:    []string{"list"},
+			Granted:  true,
+		})
+	}
+	if !snapshot.ClientProxiesAvailable() {
+		t.Fatal("ClientProxiesAvailable = false with complete client resource evidence")
+	}
+}
+
 func TestListPagesRestartsOnceWhenContinueTokenExpires(t *testing.T) {
 	var continues []string
 	items, err := listPages(context.Background(), func(_ context.Context, opts metav1.ListOptions) ([]string, string, error) {

@@ -224,7 +224,7 @@ func (b *workloadBuilder) destinationRulesFor(
 	services []corev1.Service,
 	podSpecs []corev1.PodSpec,
 ) ([]resolver.DestinationRuleView, bool) {
-	if !b.servicesKnown(namespace) || !b.destinationRulesKnown(namespace) {
+	if !b.clientProxiesKnown || !b.servicesKnown(namespace) || !b.destinationRulesKnown(namespace) {
 		return nil, false
 	}
 	out := make([]resolver.DestinationRuleView, 0)

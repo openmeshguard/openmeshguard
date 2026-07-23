@@ -97,6 +97,38 @@ func TestBuildPolicyInputs(t *testing.T) {
 			},
 		},
 		{
+			name: "incomplete client controller discovery makes DestinationRule evidence unavailable",
+			mutate: func(snapshot *collect.Snapshot) {
+				snapshot.Deployments = nil
+				snapshot.Pods = []corev1.Pod{{
+					ObjectMeta: metav1.ObjectMeta{Name: "api-1", Namespace: "payments", Labels: map[string]string{"app": "api"}},
+					Spec: corev1.PodSpec{Containers: []corev1.Container{
+						{Name: "api", Ports: []corev1.ContainerPort{{Name: "http", ContainerPort: 8080}}},
+						{Name: "istio-proxy"},
+					}},
+				}}
+				snapshot.Namespaces = append(snapshot.Namespaces, namespaceForPolicyTest("clients"))
+				snapshot.Services = []corev1.Service{serviceForWorkload("payments", "api", "api", "http")}
+				snapshot.DestinationRules = []*istionetworkingv1.DestinationRule{
+					destinationRule("clients", "caller-plaintext", "api.payments.svc.cluster.local", nil, map[string]string{"app": "caller"}, networkingapi.ClientTLSSettings_DISABLE),
+				}
+				snapshot.DestinationRuleAvailability.Namespaces["clients"] = true
+				snapshot.SidecarAvailability.Namespaces["clients"] = true
+				snapshot.PermissionSummary = append(snapshot.PermissionSummary, collect.Permission{
+					APIGroup: "apps", Resource: "deployments", Verbs: []string{"list"}, Granted: false,
+				})
+			},
+			assert: func(t *testing.T, workload resolver.WorkloadInput) {
+				if workload.DestinationRulesKnown || workload.DestRules != nil {
+					t.Fatalf("DestinationRule input = known %t, rules %#v; want unavailable client evidence", workload.DestinationRulesKnown, workload.DestRules)
+				}
+				result := resolver.New().ResolveMTLS(workload)
+				if result.ClientTLSContradiction != nil {
+					t.Fatalf("client TLS contradiction = %#v, want unknown", result.ClientTLSContradiction)
+				}
+			},
+		},
+		{
 			name: "service namespace DestinationRule wins over root namespace rule",
 			mutate: func(snapshot *collect.Snapshot) {
 				addClientProxy(snapshot, "clients", map[string]string{"app": "caller"})

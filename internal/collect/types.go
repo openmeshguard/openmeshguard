@@ -238,8 +238,48 @@ func (s Snapshot) ReplicaSetsAvailableFor(namespace string) bool {
 	return available
 }
 
+// ClientProxiesAvailable reports whether every resource collection used to
+// discover sidecar client proxies was complete. A gap in any scanned namespace
+// can hide a client-selected DestinationRule, so contradiction evidence must
+// remain unavailable rather than becoming a known false.
+func (s Snapshot) ClientProxiesAvailable() bool {
+	if scopedAvailabilityHasDenial(s.PodAvailability) ||
+		scopedAvailabilityHasDenial(s.ReplicaSetAvailability) {
+		return false
+	}
+	resources := []struct {
+		apiGroup string
+		resource string
+	}{
+		{resource: "pods"},
+		{apiGroup: "apps", resource: "deployments"},
+		{apiGroup: "apps", resource: "replicasets"},
+		{apiGroup: "apps", resource: "statefulsets"},
+		{apiGroup: "apps", resource: "daemonsets"},
+	}
+	for _, candidate := range resources {
+		available, seen := s.resourcePermissionAvailable(candidate.apiGroup, candidate.resource)
+		if seen && !available {
+			return false
+		}
+	}
+	return true
+}
+
 func hasScopedAvailabilityDetails(availability ScopedAvailability) bool {
 	return availability.AllNamespaces || len(availability.Namespaces) > 0
+}
+
+func scopedAvailabilityHasDenial(availability ScopedAvailability) bool {
+	if availability.AllNamespaces {
+		return false
+	}
+	for _, available := range availability.Namespaces {
+		if !available {
+			return true
+		}
+	}
+	return false
 }
 
 func scopedAvailableFor(availability ScopedAvailability, namespace string) bool {

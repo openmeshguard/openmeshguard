@@ -48,6 +48,7 @@ func Build(snapshot collect.Snapshot) Result {
 		authorizationPolicies: authorizationPolicies,
 		gateways:              gateways,
 		clientProxies:         projectClientProxies(snapshot),
+		clientProxiesKnown:    snapshot.ClientProxiesAvailable(),
 		coveredPods:           map[string]struct{}{},
 		rootNamespace:         rootNamespace,
 		replicaSetOwners:      replicaSetDeploymentOwners(snapshot.ReplicaSets),
@@ -173,6 +174,7 @@ type workloadBuilder struct {
 	authorizationPolicies             []authorizationPolicyProjection
 	gateways                          []gatewayProjection
 	clientProxies                     []clientProxy
+	clientProxiesKnown                bool
 	coveredPods                       map[string]struct{}
 	rootNamespace                     string
 	replicaSetOwners                  map[string]string
