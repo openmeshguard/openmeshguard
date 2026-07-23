@@ -1,10 +1,12 @@
 package output
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
 	"github.com/openmeshguard/openmeshguard/internal/engine"
+	"github.com/openmeshguard/openmeshguard/internal/normalize"
 	"github.com/openmeshguard/openmeshguard/internal/resolver"
 )
 
@@ -33,10 +35,13 @@ func TestEngineFindingsReplaceProvisionalPathEndToEnd(t *testing.T) {
 					"mtls.clientTLSContradiction": {Available: true},
 				},
 			},
-			wantCount: 2,
+			wantCount: 5,
 			wantStatuses: map[string]string{
 				"MG-MTLS-001": "open",
 				"MG-MTLS-002": "open",
+				"MG-MTLS-005": "not-applicable",
+				"MG-MTLS-006": "not-applicable",
+				"MG-GW-005":   "not-applicable",
 			},
 		},
 		{
@@ -45,7 +50,7 @@ func TestEngineFindingsReplaceProvisionalPathEndToEnd(t *testing.T) {
 				Posture:   workloadPosture(resolver.ModeNotApplicable, resolver.MTLSNotInMesh, nil),
 				Namespace: engine.NamespaceInput{Name: "payments"},
 			},
-			wantCount: 11,
+			wantCount: 14,
 			wantStatuses: map[string]string{
 				"MG-AUTHZ-001": "not-applicable",
 				"MG-AUTHZ-002": "not-applicable",
@@ -57,7 +62,10 @@ func TestEngineFindingsReplaceProvisionalPathEndToEnd(t *testing.T) {
 				"MG-MTLS-001":  "not-applicable",
 				"MG-MTLS-002":  "not-applicable",
 				"MG-MTLS-003":  "not-applicable",
+				"MG-MTLS-005":  "not-applicable",
+				"MG-MTLS-006":  "not-applicable",
 				"MG-MTLS-007":  "not-applicable",
+				"MG-GW-005":    "not-applicable",
 			},
 		},
 		{
@@ -66,11 +74,14 @@ func TestEngineFindingsReplaceProvisionalPathEndToEnd(t *testing.T) {
 				Posture:   workloadPosture(resolver.ModeSidecar, resolver.MTLSDisabled, nil),
 				Namespace: engine.NamespaceInput{Name: "payments"},
 			},
-			wantCount: 3,
+			wantCount: 6,
 			wantStatuses: map[string]string{
 				"MG-MTLS-001": "open",
 				"MG-MTLS-002": "unknown",
 				"MG-MTLS-003": "open",
+				"MG-MTLS-005": "not-applicable",
+				"MG-MTLS-006": "not-applicable",
+				"MG-GW-005":   "not-applicable",
 			},
 		},
 	}
@@ -137,6 +148,37 @@ func TestDefaultOutputMakesUnwiredEvidenceUnknown(t *testing.T) {
 	}
 	if _, exists := statuses["MG-MTLS-003"]; exists {
 		t.Fatalf("MG-MTLS-003 status = %q, want no finding for known non-disabled posture", statuses["MG-MTLS-003"])
+	}
+}
+
+func TestInventoryZtunnelNodesTotalPreservesUnknown(t *testing.T) {
+	present := true
+	covered := 1
+	waypoints := 2
+	report := buildReport(ScanInput{Inventory: normalize.Inventory{
+		DataPlaneMode: resolver.ModeAmbient,
+		Ztunnel: normalize.ZtunnelInventory{
+			Present:      &present,
+			NodesCovered: &covered,
+			NodesTotal:   nil,
+		},
+		Waypoints: &waypoints,
+	}}, nil, engine.Result{})
+	encoded, err := json.Marshal(report.Inventory.DataPlane)
+	if err != nil {
+		t.Fatalf("marshal data plane inventory: %v", err)
+	}
+	got := string(encoded)
+	for _, fragment := range []string{
+		`"mode":"ambient"`,
+		`"present":true`,
+		`"nodesCovered":1`,
+		`"nodesTotal":null`,
+		`"waypoints":2`,
+	} {
+		if !strings.Contains(got, fragment) {
+			t.Fatalf("data plane inventory = %s, want fragment %s", got, fragment)
+		}
 	}
 }
 

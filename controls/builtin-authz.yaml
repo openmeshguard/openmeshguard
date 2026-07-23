@@ -2,7 +2,7 @@ apiVersion: openmeshguard.io/v1alpha1
 kind: ControlPack
 metadata:
   name: builtin-authz
-  version: 0.1.1
+  version: 0.2.0
 controls:
   - id: MG-AUTHZ-001
     title: Mesh-managed workloads must have resolved authorization coverage
@@ -165,6 +165,32 @@ controls:
       guidance: >-
         Provision or repair the selected waypoint and confirm that policy
         targetRefs attach through that enforcement path.
+    frameworks:
+      - nist-csf-2.0/PR.AA-05
+      - nist-sp-800-53-r5/AC-3
+      - owasp-k8s-2025/K05
+
+  - id: MG-GW-005
+    title: Ambient waypoint authorization must have explicit ready enrollment
+    category: exposure
+    severity: high
+    evidenceType: config
+    scope: workload
+    environments: []
+    requires:
+      - authorization.effective
+      - authorization.waypointUnenforced
+    applicability: 'workload.dataPlaneMode == "ambient"'
+    expression: >-
+      workload.authorization.effective != "waypoint-policy-unenforced" &&
+      workload.authorization.waypointUnenforced.size() == 0
+    message: >-
+      {{ .Workload }} has waypoint-attached authorization without an explicit,
+      ready waypoint enforcement path.
+    remediation:
+      guidance: >-
+        Set istio.io/use-waypoint to a waypoint whose scope covers the target
+        and wait for its Gateway Programmed condition to become true.
     frameworks:
       - nist-csf-2.0/PR.AA-05
       - nist-sp-800-53-r5/AC-3

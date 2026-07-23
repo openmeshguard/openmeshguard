@@ -453,6 +453,8 @@ func TestBuiltinMTLSCatalogMetadata(t *testing.T) {
 		{id: "MG-MTLS-001", title: "Mesh-managed workloads must resolve to strict mTLS"},
 		{id: "MG-MTLS-002", title: "Declared workload ports must resolve to strict mTLS"},
 		{id: "MG-MTLS-003", title: "Workloads must never resolve to globally disabled mTLS"},
+		{id: "MG-MTLS-005", title: "Ambient workloads must have validated L4 mTLS posture"},
+		{id: "MG-MTLS-006", title: "Ambient workloads must have healthy ztunnel node coverage"},
 		{id: "MG-MTLS-007", title: "Client TLS must agree with resolved server mTLS"},
 	}
 
@@ -467,6 +469,7 @@ func TestBuiltinMTLSCatalogMetadata(t *testing.T) {
 			}
 		})
 	}
+
 }
 
 func TestBuiltinAuthorizationCatalogMetadata(t *testing.T) {
@@ -508,6 +511,17 @@ func TestBuiltinAuthorizationCatalogMetadata(t *testing.T) {
 				t.Fatalf("frameworks = %#v, want %#v", control.Frameworks, tt.frameworks)
 			}
 		})
+	}
+
+	gateway := packWithControl(t, packs, "MG-GW-005").Controls[0]
+	if gateway.Title != "Ambient waypoint authorization must have explicit ready enrollment" ||
+		gateway.Category != "exposure" ||
+		gateway.EvidenceType != "config" ||
+		gateway.Scope != "workload" {
+		t.Fatalf("MG-GW-005 metadata = %#v", gateway)
+	}
+	if !reflect.DeepEqual(gateway.Frameworks, accessEnforcement) {
+		t.Fatalf("MG-GW-005 frameworks = %#v, want %#v", gateway.Frameworks, accessEnforcement)
 	}
 }
 

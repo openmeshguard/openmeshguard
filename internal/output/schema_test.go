@@ -208,14 +208,18 @@ func TestGeneratedScanOutputMatchesSchema(t *testing.T) {
 	if !seenSuggestedYAML {
 		t.Fatal("generated findings missing rendered suggestedYAML remediation")
 	}
-	if len(generated.Scores.Categories) != 2 {
-		t.Fatalf("score categories = %#v, want authorization and mTLS categories", generated.Scores.Categories)
+	if len(generated.Scores.Categories) != 3 {
+		t.Fatalf("score categories = %#v, want authorization, exposure, and mTLS categories", generated.Scores.Categories)
 	}
 	authzCategory := generated.Scores.Categories[0]
 	if authzCategory.Category != "authz" || authzCategory.Grade != "unknown" || authzCategory.PassRate != nil || authzCategory.Unknown != 7 {
 		t.Fatalf("generated authorization category = %#v, want seven unknown evaluations", authzCategory)
 	}
-	mtlsCategory := generated.Scores.Categories[1]
+	exposureCategory := generated.Scores.Categories[1]
+	if exposureCategory.Category != "exposure" || exposureCategory.Grade != "unknown" || exposureCategory.PassRate != nil {
+		t.Fatalf("generated exposure category = %#v, want no applicable evaluations", exposureCategory)
+	}
+	mtlsCategory := generated.Scores.Categories[2]
 	if mtlsCategory.Category != "mtls" || mtlsCategory.Grade != "F" || mtlsCategory.PassRate == nil || *mtlsCategory.PassRate != 0.5 {
 		t.Fatalf("generated mTLS category = %#v, want F grade at 50%% pass rate", mtlsCategory)
 	}

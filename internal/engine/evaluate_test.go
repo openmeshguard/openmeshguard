@@ -13,6 +13,14 @@ func TestBuiltinControlsCoverEveryOutcome(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load built-ins: %v", err)
 	}
+	ambientStrict := workloadWithMTLS(resolver.MTLSStrict, nil)
+	ambientStrict.Posture.Mode = resolver.ModeAmbient
+	ambientPermissive := workloadWithMTLS(resolver.MTLSPermissive, nil)
+	ambientPermissive.Posture.Mode = resolver.ModeAmbient
+	ambientUncovered := workloadWithMTLS(resolver.MTLSNotInMesh, nil)
+	ambientUncovered.Posture.Mode = resolver.ModeAmbient
+	ambientUnknown := unknownWorkload("ztunnel availability unavailable")
+	ambientUnknown.Posture.Mode = resolver.ModeAmbient
 
 	tests := []struct {
 		name          string
@@ -98,6 +106,56 @@ func TestBuiltinControlsCoverEveryOutcome(t *testing.T) {
 			workload:     notInMeshWorkload(),
 			wantFindings: 1, wantStatus: statusNotApplicable, wantGrade: "unknown",
 		},
+		{
+			name:      "MG-MTLS-005 pass",
+			controlID: "MG-MTLS-005",
+			workload:  ambientStrict,
+			wantGrade: "A",
+		},
+		{
+			name:         "MG-MTLS-005 fail",
+			controlID:    "MG-MTLS-005",
+			workload:     ambientPermissive,
+			wantFindings: 1, wantStatus: statusOpen, wantGrade: "F",
+		},
+		{
+			name:         "MG-MTLS-005 unknown",
+			controlID:    "MG-MTLS-005",
+			workload:     ambientUnknown,
+			wantFindings: 1, wantStatus: statusUnknown,
+			unknownReason: "ztunnel availability unavailable", wantGrade: "unknown",
+		},
+		{
+			name:         "MG-MTLS-005 not applicable to sidecar",
+			controlID:    "MG-MTLS-005",
+			workload:     workloadWithMTLS(resolver.MTLSStrict, nil),
+			wantFindings: 1, wantStatus: statusNotApplicable, wantGrade: "unknown",
+		},
+		{
+			name:      "MG-MTLS-006 pass",
+			controlID: "MG-MTLS-006",
+			workload:  ambientStrict,
+			wantGrade: "A",
+		},
+		{
+			name:         "MG-MTLS-006 fail",
+			controlID:    "MG-MTLS-006",
+			workload:     ambientUncovered,
+			wantFindings: 1, wantStatus: statusOpen, wantGrade: "F",
+		},
+		{
+			name:         "MG-MTLS-006 unknown",
+			controlID:    "MG-MTLS-006",
+			workload:     ambientUnknown,
+			wantFindings: 1, wantStatus: statusUnknown,
+			unknownReason: "ztunnel availability unavailable", wantGrade: "unknown",
+		},
+		{
+			name:         "MG-MTLS-006 not applicable to sidecar",
+			controlID:    "MG-MTLS-006",
+			workload:     workloadWithMTLS(resolver.MTLSStrict, nil),
+			wantFindings: 1, wantStatus: statusNotApplicable, wantGrade: "unknown",
+		},
 	}
 
 	for _, tt := range tests {
@@ -150,6 +208,12 @@ func TestBuiltinAuthorizationControlsCoverEveryOutcome(t *testing.T) {
 	unknown.Posture.Authz.Chain = []resolver.Step{}
 	notApplicable := secure
 	notApplicable.Posture.Mode = resolver.ModeNotApplicable
+	ambientSecure := secure
+	ambientSecure.Posture.Mode = resolver.ModeAmbient
+	ambientUnenforced := unenforced
+	ambientUnenforced.Posture.Mode = resolver.ModeAmbient
+	ambientUnknown := unknown
+	ambientUnknown.Posture.Mode = resolver.ModeAmbient
 
 	tests := []struct {
 		name         string
@@ -186,6 +250,10 @@ func TestBuiltinAuthorizationControlsCoverEveryOutcome(t *testing.T) {
 		{name: "MG-AUTHZ-007 fail", controlID: "MG-AUTHZ-007", workload: unenforced, wantFindings: 1, wantStatus: statusOpen},
 		{name: "MG-AUTHZ-007 unknown", controlID: "MG-AUTHZ-007", workload: unknown, wantFindings: 1, wantStatus: statusUnknown},
 		{name: "MG-AUTHZ-007 not applicable", controlID: "MG-AUTHZ-007", workload: notApplicable, wantFindings: 1, wantStatus: statusNotApplicable},
+		{name: "MG-GW-005 pass", controlID: "MG-GW-005", workload: ambientSecure},
+		{name: "MG-GW-005 fail", controlID: "MG-GW-005", workload: ambientUnenforced, wantFindings: 1, wantStatus: statusOpen},
+		{name: "MG-GW-005 unknown", controlID: "MG-GW-005", workload: ambientUnknown, wantFindings: 1, wantStatus: statusUnknown},
+		{name: "MG-GW-005 not applicable to sidecar", controlID: "MG-GW-005", workload: secure, wantFindings: 1, wantStatus: statusNotApplicable},
 	}
 
 	for _, tt := range tests {
@@ -342,12 +410,15 @@ func TestEvaluateDeterministicIDsAndCategoryGrades(t *testing.T) {
 			t.Fatalf("finding ID changed: %q and %q", first.Findings[index].ID, second.Findings[index].ID)
 		}
 	}
-	if len(first.Scores) != 2 {
-		t.Fatalf("scores = %#v, want mTLS and authorization categories", first.Scores)
+	if len(first.Scores) != 3 {
+		t.Fatalf("scores = %#v, want authorization, exposure, and mTLS categories", first.Scores)
 	}
-	authzScore, mtlsScore := first.Scores[0], first.Scores[1]
+	authzScore, exposureScore, mtlsScore := first.Scores[0], first.Scores[1], first.Scores[2]
 	if authzScore.Category != "authz" || authzScore.PassRate == nil || *authzScore.PassRate != 1 || authzScore.Grade != "A" {
 		t.Fatalf("authorization score = %#v, want 100%% grade A", authzScore)
+	}
+	if exposureScore.Category != "exposure" || exposureScore.PassRate != nil || exposureScore.Grade != "unknown" {
+		t.Fatalf("exposure score = %#v, want no applicable evaluations", exposureScore)
 	}
 	if mtlsScore.Category != "mtls" || mtlsScore.PassRate == nil || *mtlsScore.PassRate != float64(5)/6 || mtlsScore.Grade != "B" {
 		t.Fatalf("mTLS score = %#v, want 5/6 grade B", mtlsScore)
