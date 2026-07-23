@@ -144,7 +144,7 @@ func TestBuiltinAuthorizationControlsCoverEveryOutcome(t *testing.T) {
 	identityUnscoped := workloadWithAuthz(resolver.AuthzAllowOnly, boolPointer(false), []string{"payments/ip-restricted"}, nil)
 	identityUnscoped.Posture.Authz.IdentityScoped = boolPointer(false)
 	allowOnly := workloadWithAuthz(resolver.AuthzAllowOnly, boolPointer(false), []string{"payments/api"}, nil)
-	unenforced := workloadWithAuthz(resolver.AuthzL7Unenforced, boolPointer(false), []string{"payments/api"}, []string{"payments/api"})
+	unenforced := workloadWithAuthz(resolver.AuthzWaypointUnenforced, boolPointer(false), []string{"payments/api"}, []string{"payments/api"})
 	unknown := workloadWithAuthz(resolver.AuthzUnknown, nil, nil, nil)
 	unknown.Posture.Authz.UnknownReason = "AuthorizationPolicy resources unavailable"
 	unknown.Posture.Authz.Chain = []resolver.Step{}
@@ -884,18 +884,18 @@ controls:
     severity: high
     evidenceType: config
     scope: workload
-    requires: [mtls.effective, authorization.policiesInScope, authorization.l7Unenforced]
+    requires: [mtls.effective, authorization.policiesInScope, authorization.waypointUnenforced]
     applicability: 'true'
-    expression: 'workload["mtls"]["effective"] == "strict" && workload.authorization.policiesInScope.size() > 1 && workload.authorization.l7Unenforced.size() == 0'
+    expression: 'workload["mtls"]["effective"] == "strict" && workload.authorization.policiesInScope.size() > 1 && workload.authorization.waypointUnenforced.size() == 0'
     message: 'Authorization posture for {{ .Workload }} is incomplete.'
     remediation: {guidance: Correct authorization policy.}
 `)
 	workload := workloadWithMTLS(resolver.MTLSStrict, nil)
 	workload.Posture.Authz = resolver.AuthzResult{
-		Effective:       resolver.AuthzAllowOnly,
-		PoliciesInScope: []string{"payments/default", "payments/api"},
-		L7Unenforced:    []string{"payments/api"},
-		Chain:           []resolver.Step{{Order: 1, Kind: "AuthorizationPolicy", Name: "api", Namespace: "payments", Effect: "selects workload"}},
+		Effective:          resolver.AuthzAllowOnly,
+		PoliciesInScope:    []string{"payments/default", "payments/api"},
+		WaypointUnenforced: []string{"payments/api"},
+		Chain:              []resolver.Step{{Order: 1, Kind: "AuthorizationPolicy", Name: "api", Namespace: "payments", Effect: "selects workload"}},
 	}
 	result, err := Evaluate([]Pack{pack}, Input{Workloads: []WorkloadInput{workload}})
 	if err != nil {
@@ -1167,15 +1167,15 @@ func workloadWithAuthz(
 	effective resolver.AuthzEffective,
 	broadAllow *bool,
 	policiesInScope []string,
-	l7Unenforced []string,
+	waypointUnenforced []string,
 ) WorkloadInput {
 	workload := workloadWithMTLS(resolver.MTLSStrict, map[int32]resolver.MTLSEffective{})
 	workload.Posture.Authz = resolver.AuthzResult{
-		Effective:       effective,
-		BroadAllow:      broadAllow,
-		IdentityScoped:  optionalNegation(broadAllow),
-		PoliciesInScope: policiesInScope,
-		L7Unenforced:    l7Unenforced,
+		Effective:          effective,
+		BroadAllow:         broadAllow,
+		IdentityScoped:     optionalNegation(broadAllow),
+		PoliciesInScope:    policiesInScope,
+		WaypointUnenforced: waypointUnenforced,
 		Chain: []resolver.Step{{
 			Order: 1, Kind: "AuthorizationPolicy", Namespace: "payments", Name: "default-deny", Effect: "sets effective authorization",
 		}},

@@ -2,7 +2,7 @@ apiVersion: openmeshguard.io/v1alpha1
 kind: ControlPack
 metadata:
   name: builtin-authz
-  version: 0.1.0
+  version: 0.1.1
 controls:
   - id: MG-AUTHZ-001
     title: Mesh-managed workloads must have resolved authorization coverage
@@ -124,7 +124,7 @@ controls:
       - owasp-k8s-2025/K05
 
   - id: MG-AUTHZ-006
-    title: Ambient L7 authorization must be enforced by a waypoint
+    title: Waypoint-attached authorization must have a ready enforcement path
     category: authz
     severity: high
     evidenceType: config
@@ -132,15 +132,15 @@ controls:
     environments: []
     requires:
       - authorization.effective
-      - authorization.l7Unenforced
+      - authorization.waypointUnenforced
     applicability: 'workload.dataPlaneMode != "not-applicable"'
-    expression: 'workload.authorization.l7Unenforced.size() == 0'
+    expression: 'workload.authorization.waypointUnenforced.size() == 0'
     message: >-
-      Ambient L7 authorization for {{ .Workload }} is not enforced by a ready
-      waypoint in the attachment path.
+      Waypoint-attached authorization for {{ .Workload }} is not enforced by a
+      ready waypoint in the attachment path.
     remediation:
       guidance: >-
-        Attach the L7 policy with targetRefs and select a ready waypoint whose
+        Attach the policy with targetRefs and select a ready waypoint whose
         scope includes the workload.
     frameworks:
       - nist-csf-2.0/PR.AA-05
@@ -148,7 +148,7 @@ controls:
       - owasp-k8s-2025/K05
 
   - id: MG-AUTHZ-007
-    title: L7 authorization without an enforcement path must be reported
+    title: Unenforced waypoint authorization must be reported
     category: authz
     severity: high
     evidenceType: config
@@ -157,10 +157,10 @@ controls:
     requires:
       - authorization.effective
     applicability: 'workload.dataPlaneMode != "not-applicable"'
-    expression: 'workload.authorization.effective != "l7-policy-unenforced"'
+    expression: 'workload.authorization.effective != "waypoint-policy-unenforced"'
     message: >-
-      L7 AuthorizationPolicy for {{ .Workload }} has no ready waypoint in its
-      enforcement path.
+      A waypoint-attached AuthorizationPolicy for {{ .Workload }} has no ready
+      waypoint in its enforcement path.
     remediation:
       guidance: >-
         Provision or repair the selected waypoint and confirm that policy

@@ -588,7 +588,7 @@ func defaultWorkloadAvailability(workload WorkloadInput, namespace NamespaceInpu
 		}
 		setDefaultAvailability(availability, "workload.authorization.effective", Availability{Reason: reason})
 		setDefaultAvailability(availability, "workload.authorization.policiesInScope", Availability{Reason: reason})
-		setDefaultAvailability(availability, "workload.authorization.l7Unenforced", Availability{Reason: reason})
+		setDefaultAvailability(availability, "workload.authorization.waypointUnenforced", Availability{Reason: reason})
 	}
 	if workload.Posture.Authz.BroadAllow == nil {
 		setDefaultAvailability(availability, "workload.authorization.broadAllow", Availability{Reason: "authorization broad-allow evidence unavailable"})
@@ -640,9 +640,9 @@ func workloadValue(workload WorkloadInput, availability map[string]Availability)
 	value["mtls"] = mtls
 
 	authz := map[string]any{
-		"policiesInScope": workload.Posture.Authz.PoliciesInScope,
-		"l7Unenforced":    workload.Posture.Authz.L7Unenforced,
-		"chain":           resolutionStepsValue(workload.Posture.Authz.Chain),
+		"policiesInScope":    workload.Posture.Authz.PoliciesInScope,
+		"waypointUnenforced": workload.Posture.Authz.WaypointUnenforced,
+		"chain":              resolutionStepsValue(workload.Posture.Authz.Chain),
 	}
 	if workload.Posture.Authz.UnknownReason != "" {
 		authz["unknownReason"] = workload.Posture.Authz.UnknownReason

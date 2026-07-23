@@ -38,7 +38,7 @@ const (
 	AuthzAllowOnly                AuthzEffective = "allow-only"
 	AuthzNoPolicy                 AuthzEffective = "no-policy"
 	AuthzDenyPresent              AuthzEffective = "deny-present"
-	AuthzL7Unenforced             AuthzEffective = "l7-policy-unenforced"
+	AuthzWaypointUnenforced       AuthzEffective = "waypoint-policy-unenforced"
 	AuthzUnknown                  AuthzEffective = "unknown"
 )
 
@@ -173,13 +173,13 @@ type MTLSResult struct {
 }
 
 type AuthzResult struct {
-	Effective       AuthzEffective `json:"effective"`
-	BroadAllow      *bool          `json:"broadAllow,omitempty"`
-	IdentityScoped  *bool          `json:"identityScoped,omitempty"`
-	PoliciesInScope []string       `json:"policiesInScope,omitempty"` // "namespace/name"
-	L7Unenforced    []string       `json:"l7Unenforced,omitempty"`
-	Chain           []Step         `json:"chain"`
-	UnknownReason   string         `json:"unknownReason,omitempty"`
+	Effective          AuthzEffective `json:"effective"`
+	BroadAllow         *bool          `json:"broadAllow,omitempty"`
+	IdentityScoped     *bool          `json:"identityScoped,omitempty"`
+	PoliciesInScope    []string       `json:"policiesInScope,omitempty"` // "namespace/name"
+	WaypointUnenforced []string       `json:"waypointUnenforced,omitempty"`
+	Chain              []Step         `json:"chain"`
+	UnknownReason      string         `json:"unknownReason,omitempty"`
 }
 
 type WorkloadResult struct {

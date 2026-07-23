@@ -467,7 +467,7 @@ func TestBuildPolicyInputs(t *testing.T) {
 				}
 				workload.DataPlaneMode = resolver.ModeAmbient
 				result := resolver.New().ResolveAuthz(workload)
-				if result.Effective != resolver.AuthzL7Unenforced || len(result.L7Unenforced) != 1 {
+				if result.Effective != resolver.AuthzWaypointUnenforced || len(result.WaypointUnenforced) != 1 {
 					t.Fatalf("authorization = %#v, want b-waypoint unenforced", result)
 				}
 				if got := result.Chain[len(result.Chain)-1]; got.Name != "b-waypoint" {

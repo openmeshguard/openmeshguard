@@ -51,7 +51,7 @@ func (ResolverV2) ResolveAuthz(in WorkloadInput) AuthzResult {
 		Effect: "establishes Istio's implicit allow when no applicable ALLOW policy exists",
 	}}
 	var policiesInScope []string
-	var l7Unenforced []string
+	var waypointUnenforced []string
 	broadAllow := false
 	identityScoped := true
 	hasCustom := false
@@ -97,29 +97,29 @@ func (ResolverV2) ResolveAuthz(in WorkloadInput) AuthzResult {
 		policiesInScope = append(policiesInScope, policyRef)
 		step := authzPolicyStep(policy, action)
 
+		if in.DataPlaneMode == ModeAmbient && policy.TargetsWaypoint {
+			waypointStep, enforced, unavailable := resolveWaypointEnforcement(policy.TargetWaypoint, policy)
+			chain = append(chain, step, waypointStep)
+			if unavailable && unknownReason == "" {
+				unknownReason = waypointEvidenceUnavailableReason
+			}
+			if !enforced && !unavailable {
+				waypointUnenforced = append(waypointUnenforced, policyRef)
+			}
+			updateAuthzActionState(action, policy, &hasCustom, &hasDeny, &hasEmptyAllow, &hasExplicitAllow, &broadAllow, &identityScoped)
+			continue
+		}
+
 		if policy.RequiresL7 {
 			switch in.DataPlaneMode {
 			case ModeSidecar:
 				step.Effect += "; the sidecar enforces its L7 attributes"
 			case ModeAmbient:
-				if !policy.TargetsWaypoint {
-					// Istio documents selector-based L7 policy at ztunnel as
-					// fail-safe DENY, not as silently unenforced.
-					// https://istio.io/latest/docs/ambient/usage/l7-features/
-					hasDeny = true
-					step.Effect += "; ambient ztunnel converts selector-based L7 policy to fail-safe DENY"
-				} else {
-					waypointStep, enforced, unavailable := resolveWaypointEnforcement(policy.TargetWaypoint, policy)
-					chain = append(chain, step, waypointStep)
-					if unavailable && unknownReason == "" {
-						unknownReason = waypointEvidenceUnavailableReason
-					}
-					if !enforced && !unavailable {
-						l7Unenforced = append(l7Unenforced, policyRef)
-					}
-					updateAuthzActionState(action, policy, &hasCustom, &hasDeny, &hasEmptyAllow, &hasExplicitAllow, &broadAllow, &identityScoped)
-					continue
-				}
+				// Istio documents selector-based L7 policy at ztunnel as
+				// fail-safe DENY, not as silently unenforced.
+				// https://istio.io/latest/docs/ambient/usage/l7-features/
+				hasDeny = true
+				step.Effect += "; ambient ztunnel converts selector-based L7 policy to fail-safe DENY"
 			default:
 				step.Effect += "; workload is outside an enforceable Istio data plane"
 			}
@@ -131,7 +131,7 @@ func (ResolverV2) ResolveAuthz(in WorkloadInput) AuthzResult {
 
 	chain = orderChain(chain)
 	policiesInScope = uniqueStrings(policiesInScope)
-	l7Unenforced = uniqueStrings(l7Unenforced)
+	waypointUnenforced = uniqueStrings(waypointUnenforced)
 	knownBroadAllow := broadAllow
 	knownIdentityScoped := hasEmptyAllow
 	if hasExplicitAllow {
@@ -141,14 +141,14 @@ func (ResolverV2) ResolveAuthz(in WorkloadInput) AuthzResult {
 	if unknownReason != "" {
 		return unknownAuthz(unknownReason, policiesInScope, chain, &knownBroadAllow, &knownIdentityScoped)
 	}
-	if len(l7Unenforced) > 0 {
+	if len(waypointUnenforced) > 0 {
 		return AuthzResult{
-			Effective:       AuthzL7Unenforced,
-			BroadAllow:      &knownBroadAllow,
-			IdentityScoped:  &knownIdentityScoped,
-			PoliciesInScope: policiesInScope,
-			L7Unenforced:    l7Unenforced,
-			Chain:           chain,
+			Effective:          AuthzWaypointUnenforced,
+			BroadAllow:         &knownBroadAllow,
+			IdentityScoped:     &knownIdentityScoped,
+			PoliciesInScope:    policiesInScope,
+			WaypointUnenforced: waypointUnenforced,
+			Chain:              chain,
 		}
 	}
 	if hasDeny || (hasEmptyAllow && !hasExplicitAllow) {
@@ -272,21 +272,21 @@ func resolveWaypointEnforcement(waypoint *WaypointView, policy AuthorizationPoli
 		Field: "istio.io/use-waypoint",
 	}
 	if waypoint == nil {
-		step.Effect = fmt.Sprintf("no waypoint serves the workload; L7 policy %s/%s is not enforced", policy.Namespace, policy.Name)
+		step.Effect = fmt.Sprintf("no waypoint serves the workload; waypoint-attached policy %s/%s is not enforced", policy.Namespace, policy.Name)
 		return step, false, false
 	}
 	step.Name = waypoint.Name
 	step.Namespace = waypoint.Namespace
 	if !waypoint.Known {
-		step.Effect = fmt.Sprintf("waypoint evidence is unavailable for L7 policy %s/%s", policy.Namespace, policy.Name)
+		step.Effect = fmt.Sprintf("waypoint evidence is unavailable for waypoint-attached policy %s/%s", policy.Namespace, policy.Name)
 		return step, false, true
 	}
 	step.Field = "status.conditions[Programmed]"
 	if !waypoint.Ready {
-		step.Effect = fmt.Sprintf("selected %s waypoint is not ready; L7 policy %s/%s is not enforced", waypoint.Scope, policy.Namespace, policy.Name)
+		step.Effect = fmt.Sprintf("selected %s waypoint is not ready; waypoint-attached policy %s/%s is not enforced", waypoint.Scope, policy.Namespace, policy.Name)
 		return step, false, false
 	}
-	step.Effect = fmt.Sprintf("selected %s waypoint is ready and enforces L7 policy %s/%s", waypoint.Scope, policy.Namespace, policy.Name)
+	step.Effect = fmt.Sprintf("selected %s waypoint is ready and enforces waypoint-attached policy %s/%s", waypoint.Scope, policy.Namespace, policy.Name)
 	return step, true, false
 }
 

@@ -113,7 +113,7 @@ func TestResolverV2ResolveAuthz(t *testing.T) {
 			in: authzWorkload(ModeAmbient,
 				waypointAuthzPolicy("payments", "http-get", true),
 			),
-			wantEffective:  AuthzL7Unenforced,
+			wantEffective:  AuthzWaypointUnenforced,
 			wantBroadAllow: &falseValue,
 			wantIdentity:   &trueValue,
 			wantPolicies:   []string{"payments/http-get"},
@@ -121,7 +121,69 @@ func TestResolverV2ResolveAuthz(t *testing.T) {
 			wantChain: []Step{
 				authzDefaultStep(1),
 				authzPolicyStepWant(2, "payments", "http-get", "adds explicit rules to the additive ALLOW union"),
-				{Order: 3, Kind: "Waypoint", Field: "istio.io/use-waypoint", Effect: "no waypoint serves the workload; L7 policy payments/http-get is not enforced"},
+				{Order: 3, Kind: "Waypoint", Field: "istio.io/use-waypoint", Effect: "no waypoint serves the workload; waypoint-attached policy payments/http-get is not enforced"},
+			},
+		},
+		{
+			name: "ambient targetRef L4 policy without waypoint is unenforced",
+			in: authzWorkload(ModeAmbient,
+				waypointL4AuthzPolicy("payments", "tcp-principal", true),
+			),
+			wantEffective:  AuthzWaypointUnenforced,
+			wantBroadAllow: &falseValue,
+			wantIdentity:   &trueValue,
+			wantPolicies:   []string{"payments/tcp-principal"},
+			wantUnenforced: []string{"payments/tcp-principal"},
+			wantChain: []Step{
+				authzDefaultStep(1),
+				authzPolicyStepWant(2, "payments", "tcp-principal", "adds explicit rules to the additive ALLOW union"),
+				{Order: 3, Kind: "Waypoint", Field: "istio.io/use-waypoint", Effect: "no waypoint serves the workload; waypoint-attached policy payments/tcp-principal is not enforced"},
+			},
+		},
+		{
+			name: "ambient targetRef L4 policy with ready waypoint is enforced",
+			in: authzWorkloadWithWaypoint(ModeAmbient, &WaypointView{
+				Name: "payments", Namespace: "payments", Known: true, Ready: true, Scope: "service",
+			}, waypointL4AuthzPolicy("payments", "tcp-principal", true)),
+			wantEffective:  AuthzAllowOnly,
+			wantBroadAllow: &falseValue,
+			wantIdentity:   &trueValue,
+			wantPolicies:   []string{"payments/tcp-principal"},
+			wantChain: []Step{
+				authzDefaultStep(1),
+				authzPolicyStepWant(2, "payments", "tcp-principal", "adds explicit rules to the additive ALLOW union"),
+				{Order: 3, Kind: "Waypoint", Namespace: "payments", Name: "payments", Field: "status.conditions[Programmed]", Effect: "selected service waypoint is ready and enforces waypoint-attached policy payments/tcp-principal"},
+			},
+		},
+		{
+			name: "ambient targetRef L4 policy with unready waypoint is unenforced",
+			in: authzWorkloadWithWaypoint(ModeAmbient, &WaypointView{
+				Name: "payments", Namespace: "payments", Known: true, Ready: false, Scope: "service",
+			}, waypointL4AuthzPolicy("payments", "tcp-principal", true)),
+			wantEffective:  AuthzWaypointUnenforced,
+			wantBroadAllow: &falseValue,
+			wantIdentity:   &trueValue,
+			wantPolicies:   []string{"payments/tcp-principal"},
+			wantUnenforced: []string{"payments/tcp-principal"},
+			wantChain: []Step{
+				authzDefaultStep(1),
+				authzPolicyStepWant(2, "payments", "tcp-principal", "adds explicit rules to the additive ALLOW union"),
+				{Order: 3, Kind: "Waypoint", Namespace: "payments", Name: "payments", Field: "status.conditions[Programmed]", Effect: "selected service waypoint is not ready; waypoint-attached policy payments/tcp-principal is not enforced"},
+			},
+		},
+		{
+			name: "ambient targetRef L4 policy with unavailable waypoint evidence is unknown",
+			in: authzWorkloadWithWaypoint(ModeAmbient, &WaypointView{Known: false},
+				waypointL4AuthzPolicy("payments", "tcp-principal", true)),
+			wantEffective:  AuthzUnknown,
+			wantBroadAllow: &falseValue,
+			wantIdentity:   &trueValue,
+			wantPolicies:   []string{"payments/tcp-principal"},
+			wantUnknown:    waypointEvidenceUnavailableReason,
+			wantChain: []Step{
+				authzDefaultStep(1),
+				authzPolicyStepWant(2, "payments", "tcp-principal", "adds explicit rules to the additive ALLOW union"),
+				{Order: 3, Kind: "Waypoint", Field: "istio.io/use-waypoint", Effect: "waypoint evidence is unavailable for waypoint-attached policy payments/tcp-principal"},
 			},
 		},
 		{
@@ -136,7 +198,7 @@ func TestResolverV2ResolveAuthz(t *testing.T) {
 			wantChain: []Step{
 				authzDefaultStep(1),
 				authzPolicyStepWant(2, "payments", "http-get", "adds explicit rules to the additive ALLOW union"),
-				{Order: 3, Kind: "Waypoint", Namespace: "payments", Name: "payments", Field: "status.conditions[Programmed]", Effect: "selected service waypoint is ready and enforces L7 policy payments/http-get"},
+				{Order: 3, Kind: "Waypoint", Namespace: "payments", Name: "payments", Field: "status.conditions[Programmed]", Effect: "selected service waypoint is ready and enforces waypoint-attached policy payments/http-get"},
 			},
 		},
 		{
@@ -144,7 +206,7 @@ func TestResolverV2ResolveAuthz(t *testing.T) {
 			in: authzWorkloadWithWaypoint(ModeAmbient, &WaypointView{
 				Name: "payments", Namespace: "payments", Known: true, Ready: false, Scope: "service",
 			}, waypointAuthzPolicy("payments", "mixed-rules", true)),
-			wantEffective:  AuthzL7Unenforced,
+			wantEffective:  AuthzWaypointUnenforced,
 			wantBroadAllow: &falseValue,
 			wantIdentity:   &trueValue,
 			wantPolicies:   []string{"payments/mixed-rules"},
@@ -152,7 +214,7 @@ func TestResolverV2ResolveAuthz(t *testing.T) {
 			wantChain: []Step{
 				authzDefaultStep(1),
 				authzPolicyStepWant(2, "payments", "mixed-rules", "adds explicit rules to the additive ALLOW union"),
-				{Order: 3, Kind: "Waypoint", Namespace: "payments", Name: "payments", Field: "status.conditions[Programmed]", Effect: "selected service waypoint is not ready; L7 policy payments/mixed-rules is not enforced"},
+				{Order: 3, Kind: "Waypoint", Namespace: "payments", Name: "payments", Field: "status.conditions[Programmed]", Effect: "selected service waypoint is not ready; waypoint-attached policy payments/mixed-rules is not enforced"},
 			},
 		},
 		{
@@ -262,7 +324,7 @@ func TestResolverV2ResolveAuthz(t *testing.T) {
 			wantChain: []Step{
 				authzDefaultStep(1),
 				authzPolicyStepWant(2, "payments", "http-get", "adds explicit rules to the additive ALLOW union"),
-				{Order: 3, Kind: "Waypoint", Field: "istio.io/use-waypoint", Effect: "waypoint evidence is unavailable for L7 policy payments/http-get"},
+				{Order: 3, Kind: "Waypoint", Field: "istio.io/use-waypoint", Effect: "waypoint evidence is unavailable for waypoint-attached policy payments/http-get"},
 			},
 		},
 		{
@@ -368,8 +430,8 @@ func TestResolverV2ResolveAuthz(t *testing.T) {
 			if !reflect.DeepEqual(result.PoliciesInScope, tt.wantPolicies) {
 				t.Fatalf("policiesInScope = %#v, want %#v", result.PoliciesInScope, tt.wantPolicies)
 			}
-			if !reflect.DeepEqual(result.L7Unenforced, tt.wantUnenforced) {
-				t.Fatalf("l7Unenforced = %#v, want %#v", result.L7Unenforced, tt.wantUnenforced)
+			if !reflect.DeepEqual(result.WaypointUnenforced, tt.wantUnenforced) {
+				t.Fatalf("waypointUnenforced = %#v, want %#v", result.WaypointUnenforced, tt.wantUnenforced)
 			}
 			if result.UnknownReason != tt.wantUnknown {
 				t.Fatalf("unknownReason = %q, want %q", result.UnknownReason, tt.wantUnknown)
@@ -414,6 +476,13 @@ func waypointAuthzPolicy(namespace, name string, hasRules bool) AuthorizationPol
 	return AuthorizationPolicyView{
 		Name: name, Namespace: namespace, Action: "ALLOW", HasRules: hasRules,
 		TargetsWaypoint: true, RequiresL7: true, IdentityScoped: hasRules,
+	}
+}
+
+func waypointL4AuthzPolicy(namespace, name string, hasRules bool) AuthorizationPolicyView {
+	return AuthorizationPolicyView{
+		Name: name, Namespace: namespace, Action: "ALLOW", HasRules: hasRules,
+		TargetsWaypoint: true, IdentityScoped: hasRules,
 	}
 }
 

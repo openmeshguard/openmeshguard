@@ -495,8 +495,8 @@ func TestBuiltinAuthorizationCatalogMetadata(t *testing.T) {
 		{id: "MG-AUTHZ-003", title: "Authorization policies must not grant structurally broad access", frameworks: leastPrivilege},
 		{id: "MG-AUTHZ-004", title: "Authorization access must be scoped to explicit identities", frameworks: leastPrivilege},
 		{id: "MG-AUTHZ-005", title: "Authorization coverage must resolve at workload level", frameworks: accessEnforcement},
-		{id: "MG-AUTHZ-006", title: "Ambient L7 authorization must be enforced by a waypoint", frameworks: accessEnforcement},
-		{id: "MG-AUTHZ-007", title: "L7 authorization without an enforcement path must be reported", frameworks: accessEnforcement},
+		{id: "MG-AUTHZ-006", title: "Waypoint-attached authorization must have a ready enforcement path", frameworks: accessEnforcement},
+		{id: "MG-AUTHZ-007", title: "Unenforced waypoint authorization must be reported", frameworks: accessEnforcement},
 	}
 	for _, tt := range tests {
 		t.Run(tt.id, func(t *testing.T) {
