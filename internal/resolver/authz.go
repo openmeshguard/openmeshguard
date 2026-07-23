@@ -22,6 +22,16 @@ const (
 // Empty ALLOW policy and rules: [{}] distinction:
 // https://istio.io/latest/docs/reference/config/security/authorization-policy/
 func (ResolverV2) ResolveAuthz(in WorkloadInput) AuthzResult {
+	if in.DataPlaneMode == ModeNotApplicable {
+		return AuthzResult{
+			Effective: AuthzNotInMesh,
+			Chain: orderChain([]Step{{
+				Kind:   "DataPlane",
+				Field:  "dataPlaneMode",
+				Effect: "workload is not enrolled in an Istio data plane, so Istio authorization is not enforced",
+			}}),
+		}
+	}
 	if in.AuthzPolicies == nil {
 		return unknownAuthz(authorizationPoliciesUnavailableReason, nil, nil, nil, nil)
 	}

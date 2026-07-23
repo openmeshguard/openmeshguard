@@ -426,6 +426,28 @@ func TestResolverV2ResolveAuthz(t *testing.T) {
 			wantChain:      []Step{},
 		},
 		{
+			name:           "not applicable data plane ignores configured authorization policy",
+			in:             authzWorkload(ModeNotApplicable, authzPolicy("payments", "allow-api", "ALLOW", true)),
+			wantEffective:  AuthzNotInMesh,
+			wantBroadAllow: nil,
+			wantIdentity:   nil,
+			wantChain: []Step{{
+				Order: 1, Kind: "DataPlane", Field: "dataPlaneMode",
+				Effect: "workload is not enrolled in an Istio data plane, so Istio authorization is not enforced",
+			}},
+		},
+		{
+			name:           "not applicable data plane does not require policy collection evidence",
+			in:             WorkloadInput{Ref: workloadRef(), DataPlaneMode: ModeNotApplicable},
+			wantEffective:  AuthzNotInMesh,
+			wantBroadAllow: nil,
+			wantIdentity:   nil,
+			wantChain: []Step{{
+				Order: 1, Kind: "DataPlane", Field: "dataPlaneMode",
+				Effect: "workload is not enrolled in an Istio data plane, so Istio authorization is not enforced",
+			}},
+		},
+		{
 			name: "ruleless DENY never matches",
 			in: authzWorkload(ModeSidecar,
 				authzPolicy("payments", "deny-nothing", "DENY", false),

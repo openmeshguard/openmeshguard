@@ -163,7 +163,7 @@ The resolver computes, per workload (and per port where relevant):
 - Model AuthorizationPolicy evaluation order (CUSTOM → DENY → ALLOW) and the semantics of "no ALLOW policy present."
 - Resolve policy attachment scope: mesh root namespace, namespace, workload selector, and (ambient) waypoint attachment via `targetRefs`.
 - Distinguish L4-enforceable rules (ztunnel) from L7 rules that require a waypoint, and flag L7-requiring policies with no waypoint in the enforcement path as **not enforced** rather than "present."
-- Output per workload: `default-deny + explicit allow`, `allow-only`, `no-policy`, `deny-present`, `waypoint-policy-unenforced`, with the evaluation chain as evidence.
+- Output per workload: `default-deny + explicit allow`, `allow-only`, `no-policy`, `deny-present`, `waypoint-policy-unenforced`, `not-in-mesh`, with the evaluation chain as evidence.
 
 **Scope resolution**
 

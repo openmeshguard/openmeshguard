@@ -39,6 +39,7 @@ const (
 	AuthzNoPolicy                 AuthzEffective = "no-policy"
 	AuthzDenyPresent              AuthzEffective = "deny-present"
 	AuthzWaypointUnenforced       AuthzEffective = "waypoint-policy-unenforced"
+	AuthzNotInMesh                AuthzEffective = "not-in-mesh"
 	AuthzUnknown                  AuthzEffective = "unknown"
 )
 
