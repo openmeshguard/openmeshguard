@@ -13,7 +13,9 @@ before execution.
 
 - the Kind CLI and its platform checksums;
 - the digest-pinned Kind node image (and therefore Kubernetes version); and
-- istioctl, its platform checksums, and the installed Istio control/data plane.
+- istioctl, its platform checksums, installed profile, and Istio control/data
+  plane; and
+- the Gateway API experimental CRD bundle and its SHA-256.
 
 Do not copy those values into scripts or workflows. Updating this file is the
 future version-matrix automation hook.
@@ -28,8 +30,8 @@ make kind-up e2e kind-down
 
 `kind-up` refuses to reuse an existing `openmeshguard-e2e` cluster. `e2e`
 always rebuilds the configured `BINARY`, passes its absolute path into the
-harness, resets the fixture namespaces, runs eight small golden scans plus one
-all-namespaces ClusterRole scan, schema-validates all nine reports, and
+harness, resets the fixture namespaces, runs 17 small golden scans plus one
+all-namespaces ClusterRole scan, schema-validates all 18 reports, and
 executes the RBAC/audit proofs. Kind writes its administrator credential only
 to protected `.e2e/admin.kubeconfig`; it never changes the user's default
 kubeconfig. `kind-down` deletes the disposable cluster and that credential.
@@ -73,20 +75,27 @@ port-level-override and DestinationRule-contradiction cases now resolve from
 collected Services, EndpointSlices, workload ports, DestinationRules, and
 client proxy context. The authorization group proves root/local union,
 structurally broad ALLOW, DENY precedence, allow-only scope, and selector
-exclusion through the same `cases.tsv`-driven golden path. Injection-disabled
-membership remains unknown until M6 owns ambient enrollment detection; M5
-does not infer ambient membership.
+exclusion through the same `cases.tsv`-driven golden path. Ambient fixtures
+prove namespace and Pod enrollment, ready ztunnel node coverage, ready,
+missing, and unavailable waypoint evidence, and a mixed ambient/sidecar
+namespace. Injection-disabled workloads now resolve conclusively outside both
+Istio data planes.
 
 ## RBAC identities and proof
 
-The harness keeps four identities visibly separate:
+The harness keeps five identities visibly separate:
 
 - `fixture-manager` is an ephemeral setup ServiceAccount bound to the
   disposable cluster's existing `cluster-admin` role. It applies and resets
   fixtures and is never used to scan.
-- `scanner-cluster` is bound to `openmeshguard-cluster-scan`.
+- `scanner-cluster` is bound to `openmeshguard-cluster-scan` plus the published
+  optional `openmeshguard-evidence-nodes` add-on.
 - `scanner-namespace` is bound to `openmeshguard-namespace-scan` only in
   `omg-strict`.
+- `scanner-waypoint-limited` reuses `openmeshguard-cluster-scan` through
+  RoleBindings limited to the ambient workload and mesh-root namespaces. It
+  can read workload and root policy evidence but cannot observe the selected
+  cross-namespace waypoint, proving the unavailable state end to end.
 - `audit-probe` has no RBAC binding. Its one denied ConfigMap create is the
   positive control for the API-server audit path, never a scanner call.
 
@@ -103,17 +112,18 @@ only non-resource `get` rules with no API groups or resources. Any other
 binding, or a widened default discovery role, fails the proof.
 
 The namespace scanner can read its workload namespace but cannot list the
-cluster-scoped Namespace object or root-namespace PeerAuthentication. Its
-golden contains denied permission-summary entries and three unknown mTLS
-findings instead of a failed scan.
+cluster-scoped Namespace or Node objects, cluster-wide ztunnel evidence, or
+root-namespace policy. Its golden keeps `ztunnel.nodesTotal` null and produces
+unknown or not-applicable findings instead of a failed scan.
 
 All ServiceAccount tokens last ten minutes. Token creation writes to a
 mode-0600 temporary file, `jq --rawfile` consumes it without placing the token
 in process arguments, and the token file is deleted immediately. Kubeconfigs
 are mode 0600 inside a mode-0700 random directory removed by an exit trap. The
 privileged fixture-manager and dedicated Kind-administrator kubeconfigs are
-deleted before any scanner starts. The cluster and namespace scans use separate
-proof phases; at each boundary the other scanner kubeconfig is absent. Each
+deleted before any scanner starts. The cluster phase contains only the cluster
+and waypoint-limited scanner credentials; both are removed before the isolated
+namespace-scanner phase. Each
 scanner child receives an empty environment with a fresh empty `HOME` and only
 its explicit scanner kubeconfig, so it cannot inherit `KUBECONFIG` or a default
 home. The scanner identities never request tokens or impersonate users.
@@ -123,7 +133,7 @@ home. The scanner identities never request tokens or impersonate users.
 M4 uses kube-apiserver audit logging inside Kind rather than an auditing proxy.
 This observes authenticated requests at the API server. The API server uses
 `blocking-strict` audit mode so a successful response cannot outrun the proof
-log. The metadata-only policy records the scanner identities, the separate
+log. The metadata-only policy records all three scanner identities, the separate
 unbound audit probe, the privileged fixture-manager, and Kind's pinned
 `kubernetes-admin` identity.
 
@@ -133,11 +143,11 @@ control proves those credentials would be visible if a scanner regression used
 them. The harness then deletes both privileged kubeconfigs, truncates at the
 cluster-scanner proof boundary, requires the probe's denied write event, and
 runs the cluster scanner. Between scanner phases it briefly exports the
-protected administrator kubeconfig to mint the namespace credential, deletes
-the administrator and cluster-scanner credentials, truncates again, and runs
-the namespace scanner. The two phase logs are combined before asserting:
+  protected administrator kubeconfig to mint the namespace credential, deletes
+  the administrator and cluster-phase scanner credentials, truncates again, and
+  runs the namespace scanner. The two phase logs are combined before asserting:
 
-- both scanner identities produced events;
+- all three scanner identities produced events;
 - every scanner event was `list` for a SPEC section 13 resource (the current
   bounded collector behavior is stricter than the product's get/list ceiling);
 - no scanner event targeted Secrets or any subresource;
@@ -150,7 +160,7 @@ the namespace scanner. The two phase logs are combined before asserting:
 The latest audit artifact is `.e2e/results/audit.jsonl`. CI also retains pod,
 event, control-plane, Kind, and audit diagnostics on failure.
 
-## Recorded M5 proof
+## Recorded M6a proof
 
 Recorded locally on 2026-07-22 (America/Chicago):
 
@@ -158,27 +168,27 @@ Recorded locally on 2026-07-22 (America/Chicago):
 |---|---|
 | Kind | v0.31.0 |
 | Kubernetes node | `kindest/node:v1.35.0@sha256:452d707d4862f52530247495d180205e029056831160e22870e37e3f6c1ac31f` |
-| Istio | 1.30.2 |
+| Istio | 1.30.2, ambient profile |
+| Gateway API | v1.5.1 experimental CRDs, SHA-256 `64ec76609a6ac885e0405dea79ca509c229fa019d342f0857aa8b6bdc8b8ba92` |
 
 The final clean lifecycle, guarded update, and determinism proof was:
 
 | Target | Duration | Result |
 |---|---:|---|
-| `make kind-up` | 43s | clean disposable cluster; pinned Kind, Kubernetes, and Istio versions verified |
-| `UPDATE_GOLDEN=1 make e2e` | 38s | guarded update changed 13 reviewed goldens; 14 reports schema-valid; both RBAC/audit proofs green |
-| first clean `make e2e` | 51s | all 13 goldens matched; 14 reports schema-valid; both RBAC/audit proofs green |
-| second clean `make e2e` | 51s | identical golden matches and audited event count |
+| `make kind-up` | 42s | clean disposable cluster; pinned Kind, Kubernetes, Istio ambient profile, and Gateway API bundle verified |
+| `UPDATE_GOLDEN=1 make e2e` | 52s | guarded update wrote 17 reviewed goldens; 18 reports schema-valid; both published RBAC proofs and the waypoint-evidence proof green |
+| first clean `make e2e` | 64s | all 17 goldens matched; 18 reports schema-valid; all RBAC/audit proofs green |
+| second clean `make e2e` | 62s | identical golden matches and audited event count |
 | `make kind-down` | 0s | disposable cluster removed |
 
-Both consecutive clean runs recorded exactly 234 approved scanner API events
-and no other scanner calls. The final audit artifact contains 217
-cluster-scanner list events, 17 namespace-scanner list events, and exactly one
-separate audit-probe create event with a 403.
+Both consecutive clean runs recorded exactly 356 approved scanner API events
+and no other scanner calls. The final audit artifact contains 316
+cluster-scanner lists, 20 waypoint-limited scanner lists, 20 namespace-scanner
+lists, and exactly one separate audit-probe create event with a 403.
 After the proof boundary it contained zero fixture-manager and zero
 `kubernetes-admin` events. The `system:basic-user` binding remained absent,
 and all three allowed default roles were verified as non-resource `get` only.
-No token-bearing kubeconfig directory remained after any run.
-
-The pinned Istio minor now provides the version input needed by the M2 deferred
-root-namespace-selector decision. M5 does not change that resolver behavior;
-the version-specific semantics remain deferred.
+No token-bearing kubeconfig directory remained after any run. The ready ambient
+golden records ztunnel coverage `1/1` and authorization `allow-only`; the same
+L7 policy with no ready waypoint records `waypoint-policy-unenforced`; the
+limited-evidence scan records Gateway evidence `unknown`.
