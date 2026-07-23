@@ -35,13 +35,20 @@ type Permission struct {
 type Snapshot struct {
 	RootNamespace                   string
 	Namespaces                      []corev1.Namespace
+	Nodes                           []corev1.Node
+	NodesKnown                      bool
 	Pods                            []corev1.Pod
 	PodAvailability                 PeerAuthenticationAvailability
+	ZtunnelPods                     []corev1.Pod
+	ZtunnelPodsKnown                bool
 	Deployments                     []appsv1.Deployment
 	ReplicaSets                     []appsv1.ReplicaSet
 	ReplicaSetAvailability          PeerAuthenticationAvailability
 	StatefulSets                    []appsv1.StatefulSet
 	DaemonSets                      []appsv1.DaemonSet
+	DaemonSetAvailability           PeerAuthenticationAvailability
+	ZtunnelDaemonSets               []appsv1.DaemonSet
+	ZtunnelDaemonSetsKnown          bool
 	Services                        []corev1.Service
 	ServiceAvailability             ScopedAvailability
 	EndpointSlices                  []discoveryv1.EndpointSlice
@@ -190,6 +197,26 @@ func (s Snapshot) GatewaysAvailableFor(namespace string) bool {
 	return s.scopedResourceAvailableFor(s.GatewayAvailability, []string{namespace}, "gateway.networking.k8s.io", "gateways")
 }
 
+// GatewaysAvailable reports whether every attempted Gateway API list scope
+// succeeded, which makes the aggregate waypoint count observable.
+func (s Snapshot) GatewaysAvailable() bool {
+	if hasScopedAvailabilityDetails(s.GatewayAvailability) {
+		if s.GatewayAvailability.AllNamespaces {
+			return true
+		}
+		seen := false
+		for _, available := range s.GatewayAvailability.Namespaces {
+			seen = true
+			if !available {
+				return false
+			}
+		}
+		return seen
+	}
+	available, seen := s.resourcePermissionAvailable("gateway.networking.k8s.io", "gateways")
+	return seen && available
+}
+
 func (s Snapshot) scopedResourceAvailableFor(
 	availability ScopedAvailability,
 	namespaces []string,
@@ -238,13 +265,29 @@ func (s Snapshot) ReplicaSetsAvailableFor(namespace string) bool {
 	return available
 }
 
+// DaemonSetsAvailableFor reports whether workload DaemonSet evidence was
+// available in the requested namespace. Dedicated cluster-wide ztunnel
+// discovery is tracked separately and must not make workload discovery
+// incomplete when a namespace-scoped identity cannot perform that list.
+func (s Snapshot) DaemonSetsAvailableFor(namespace string) bool {
+	if hasScopedAvailabilityDetails(s.DaemonSetAvailability) {
+		return scopedAvailableFor(s.DaemonSetAvailability, namespace)
+	}
+	available, seen := s.resourcePermissionAvailable("apps", "daemonsets")
+	if !seen {
+		return true
+	}
+	return available
+}
+
 // ClientProxiesAvailable reports whether every resource collection used to
 // discover sidecar client proxies was complete. A gap in any scanned namespace
 // can hide a client-selected DestinationRule, so contradiction evidence must
 // remain unavailable rather than becoming a known false.
 func (s Snapshot) ClientProxiesAvailable() bool {
 	if scopedAvailabilityHasDenial(s.PodAvailability) ||
-		scopedAvailabilityHasDenial(s.ReplicaSetAvailability) {
+		scopedAvailabilityHasDenial(s.ReplicaSetAvailability) ||
+		scopedAvailabilityHasDenial(s.DaemonSetAvailability) {
 		return false
 	}
 	resources := []struct {
@@ -258,6 +301,18 @@ func (s Snapshot) ClientProxiesAvailable() bool {
 		{apiGroup: "apps", resource: "daemonsets"},
 	}
 	for _, candidate := range resources {
+		if candidate.apiGroup == "" && candidate.resource == "pods" &&
+			hasScopedAvailabilityDetails(s.PodAvailability) {
+			continue
+		}
+		if candidate.apiGroup == "apps" && candidate.resource == "replicasets" &&
+			hasScopedAvailabilityDetails(s.ReplicaSetAvailability) {
+			continue
+		}
+		if candidate.apiGroup == "apps" && candidate.resource == "daemonsets" &&
+			hasScopedAvailabilityDetails(s.DaemonSetAvailability) {
+			continue
+		}
 		available, seen := s.resourcePermissionAvailable(candidate.apiGroup, candidate.resource)
 		if seen && !available {
 			return false

@@ -28,13 +28,27 @@ import (
 func TestCollectorActionAuditOnlyGetListAndNeverSecrets(t *testing.T) {
 	kube := kubefake.NewSimpleClientset(
 		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "foo"}},
+		&corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "worker"}},
 		&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "api-1", Namespace: "foo"}},
+		&corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Name: "ztunnel-1", Namespace: "istio-system", Labels: map[string]string{"app": "ztunnel"}},
+			Spec:       corev1.PodSpec{NodeName: "worker"},
+			Status: corev1.PodStatus{Conditions: []corev1.PodCondition{{
+				Type: corev1.PodReady, Status: corev1.ConditionTrue,
+			}}},
+		},
 		&corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: "api", Namespace: "foo"}},
 		&discoveryv1.EndpointSlice{ObjectMeta: metav1.ObjectMeta{Name: "api-1", Namespace: "foo"}},
 		&appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "api", Namespace: "foo"}},
 		&appsv1.ReplicaSet{ObjectMeta: metav1.ObjectMeta{Name: "api-rs", Namespace: "foo"}},
 		&appsv1.StatefulSet{ObjectMeta: metav1.ObjectMeta{Name: "db", Namespace: "foo"}},
 		&appsv1.DaemonSet{ObjectMeta: metav1.ObjectMeta{Name: "node-agent", Namespace: "foo"}},
+		&appsv1.DaemonSet{
+			ObjectMeta: metav1.ObjectMeta{Name: "ztunnel", Namespace: "istio-system"},
+			Spec: appsv1.DaemonSetSpec{
+				Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "ztunnel"}},
+			},
+		},
 	)
 	istio := istiofake.NewSimpleClientset(
 		&istiosecurityv1beta1.PeerAuthentication{
@@ -75,6 +89,8 @@ func TestCollectorActionAuditOnlyGetListAndNeverSecrets(t *testing.T) {
 	}
 
 	seenResources := map[string]bool{}
+	seenZtunnelPods := false
+	daemonSetListActions := 0
 	actions := append([]ktesting.Action{}, kube.Actions()...)
 	actions = append(actions, istio.Actions()...)
 	actions = append(actions, gateway.Actions()...)
@@ -87,10 +103,20 @@ func TestCollectorActionAuditOnlyGetListAndNeverSecrets(t *testing.T) {
 			t.Fatalf("collector attempted forbidden secrets access: %#v", action)
 		}
 		seenResources[resource] = true
+		if listAction, ok := action.(ktesting.ListAction); ok &&
+			listAction.GetListRestrictions().Labels.String() == "app=ztunnel" {
+			if resource == "pods" {
+				seenZtunnelPods = true
+			}
+		}
+		if action.GetVerb() == "list" && resource == "daemonsets" {
+			daemonSetListActions++
+		}
 	}
 
 	for _, resource := range []string{
 		"namespaces",
+		"nodes",
 		"pods",
 		"services",
 		"endpointslices",
@@ -107,6 +133,26 @@ func TestCollectorActionAuditOnlyGetListAndNeverSecrets(t *testing.T) {
 		if !seenResources[resource] {
 			t.Fatalf("expected a read action for %s; saw %#v", resource, seenResources)
 		}
+	}
+	if !seenZtunnelPods || daemonSetListActions < 2 {
+		t.Fatalf(
+			"expected typed app=ztunnel Pod list and workload plus ztunnel DaemonSet lists; pods=%t daemonset lists=%d",
+			seenZtunnelPods,
+			daemonSetListActions,
+		)
+	}
+	if !snapshot.NodesKnown || len(snapshot.Nodes) != 1 {
+		t.Fatalf("node evidence = known:%t nodes:%d, want one known node", snapshot.NodesKnown, len(snapshot.Nodes))
+	}
+	if !snapshot.ZtunnelPodsKnown || len(snapshot.ZtunnelPods) != 1 ||
+		!snapshot.ZtunnelDaemonSetsKnown || len(snapshot.ZtunnelDaemonSets) != 1 {
+		t.Fatalf(
+			"ztunnel evidence = pods known:%t count:%d daemonsets known:%t count:%d",
+			snapshot.ZtunnelPodsKnown,
+			len(snapshot.ZtunnelPods),
+			snapshot.ZtunnelDaemonSetsKnown,
+			len(snapshot.ZtunnelDaemonSets),
+		)
 	}
 }
 
@@ -149,6 +195,52 @@ func TestCollectorDegradesForbiddenAndNotFound(t *testing.T) {
 	}
 	if snapshot.EndpointSlicesAvailableFor("foo") {
 		t.Fatal("EndpointSlicesAvailableFor(foo) = true after EndpointSlice list denial")
+	}
+}
+
+func TestCollectorKeepsOptionalNodeAndZtunnelEvidenceUnknownOnDenial(t *testing.T) {
+	kube := kubefake.NewSimpleClientset(&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "payments"}})
+	for _, resource := range []string{"nodes", "pods", "daemonsets"} {
+		resource := resource
+		kube.PrependReactor("list", resource, func(action ktesting.Action) (bool, runtime.Object, error) {
+			listAction, ok := action.(ktesting.ListAction)
+			isZtunnelList := resource == "pods" && ok &&
+				listAction.GetListRestrictions().Labels.String() == "app=ztunnel"
+			if resource == "daemonsets" {
+				isZtunnelList = action.GetNamespace() == ""
+			}
+			if resource != "nodes" && !isZtunnelList {
+				return false, nil, nil
+			}
+			return true, nil, apierrors.NewForbidden(
+				schema.GroupResource{Group: action.GetResource().Group, Resource: resource},
+				"",
+				errors.New("denied"),
+			)
+		})
+	}
+
+	snapshot, err := newTestCollector(kube, istiofake.NewSimpleClientset()).Collect(
+		context.Background(),
+		Scope{Namespaces: []string{"payments"}},
+	)
+	if err != nil {
+		t.Fatalf("collect: %v", err)
+	}
+	if snapshot.NodesKnown || snapshot.ZtunnelPodsKnown || snapshot.ZtunnelDaemonSetsKnown {
+		t.Fatalf(
+			"optional ambient evidence unexpectedly known: nodes=%t pods=%t daemonsets=%t",
+			snapshot.NodesKnown,
+			snapshot.ZtunnelPodsKnown,
+			snapshot.ZtunnelDaemonSetsKnown,
+		)
+	}
+	nodePermission := findPermission(t, snapshot.PermissionSummary, "", "nodes")
+	if nodePermission.Granted || !nodePermission.Optional {
+		t.Fatalf("node permission = %#v, want denied optional evidence", nodePermission)
+	}
+	if !snapshot.PodsAvailableFor("payments") || !snapshot.DaemonSetsAvailableFor("payments") {
+		t.Fatal("cluster-wide ztunnel denial degraded in-namespace workload discovery")
 	}
 }
 
@@ -493,13 +585,16 @@ func TestPermissionMetadataDoesNotEmbedControlCatalog(t *testing.T) {
 		meta resourceMeta
 	}{
 		{name: "namespaces", meta: namespaceMeta},
+		{name: "nodes", meta: nodeMeta},
 		{name: "pods", meta: podMeta},
+		{name: "ztunnel pods", meta: ztunnelPodMeta},
 		{name: "services", meta: serviceMeta},
 		{name: "endpointslices", meta: endpointSliceMeta},
 		{name: "deployments", meta: deploymentMeta},
 		{name: "replicasets", meta: replicaSetMeta},
 		{name: "statefulsets", meta: statefulSetMeta},
 		{name: "daemonsets", meta: daemonSetMeta},
+		{name: "ztunnel daemonsets", meta: ztunnelDaemonSetMeta},
 		{name: "peerauthentications", meta: peerAuthenticationMeta},
 		{name: "destinationrules", meta: destinationRuleMeta},
 		{name: "sidecars", meta: sidecarMeta},

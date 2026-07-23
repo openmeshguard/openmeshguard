@@ -97,6 +97,11 @@ func (c *Collector) Collect(ctx context.Context, scope Scope) (Snapshot, error) 
 		defer mu.Unlock()
 		markScopedAvailability(&snapshot.ReplicaSetAvailability, namespace, available)
 	}
+	markDaemonSetsAvailable := func(namespace string, available bool) {
+		mu.Lock()
+		defer mu.Unlock()
+		markScopedAvailability(&snapshot.DaemonSetAvailability, namespace, available)
+	}
 	markServicesAvailable := func(namespace string, available bool) {
 		mu.Lock()
 		defer mu.Unlock()
@@ -153,6 +158,67 @@ func (c *Collector) Collect(ctx context.Context, scope Scope) (Snapshot, error) 
 	}
 
 	var tasks []func(context.Context) error
+	tasks = append(tasks,
+		func(ctx context.Context) error {
+			items, err := listPages(ctx, func(ctx context.Context, opts metav1.ListOptions) ([]corev1.Node, string, error) {
+				list, err := c.kube.CoreV1().Nodes().List(ctx, opts)
+				if err != nil {
+					return nil, "", err
+				}
+				return list.Items, list.Continue, nil
+			})
+			if err != nil {
+				return appendDegraded(nodeMeta, clusterScopeName, err)
+			}
+			mu.Lock()
+			snapshot.Nodes = append(snapshot.Nodes, items...)
+			snapshot.NodesKnown = true
+			mu.Unlock()
+			appendPermission(nodeMeta.permissionForScope(true, clusterScopeName))
+			return nil
+		},
+		func(ctx context.Context) error {
+			items, err := listPages(ctx, func(ctx context.Context, opts metav1.ListOptions) ([]corev1.Pod, string, error) {
+				opts.LabelSelector = "app=ztunnel"
+				list, err := c.kube.CoreV1().Pods(metav1.NamespaceAll).List(ctx, opts)
+				if err != nil {
+					return nil, "", err
+				}
+				return list.Items, list.Continue, nil
+			})
+			if err != nil {
+				return appendDegraded(ztunnelPodMeta, permissionScopeName(metav1.NamespaceAll), err)
+			}
+			mu.Lock()
+			snapshot.ZtunnelPods = append(snapshot.ZtunnelPods, items...)
+			snapshot.ZtunnelPodsKnown = true
+			mu.Unlock()
+			appendPermission(ztunnelPodMeta.permissionForScope(true, permissionScopeName(metav1.NamespaceAll)))
+			return nil
+		},
+		func(ctx context.Context) error {
+			items, err := listPages(ctx, func(ctx context.Context, opts metav1.ListOptions) ([]appsv1.DaemonSet, string, error) {
+				list, err := c.kube.AppsV1().DaemonSets(metav1.NamespaceAll).List(ctx, opts)
+				if err != nil {
+					return nil, "", err
+				}
+				return list.Items, list.Continue, nil
+			})
+			if err != nil {
+				return appendDegraded(ztunnelDaemonSetMeta, permissionScopeName(metav1.NamespaceAll), err)
+			}
+			mu.Lock()
+			for _, item := range items {
+				if isZtunnelDaemonSet(item) {
+					snapshot.ZtunnelDaemonSets = append(snapshot.ZtunnelDaemonSets, item)
+				}
+			}
+			snapshot.ZtunnelDaemonSetsKnown = true
+			mu.Unlock()
+			appendPermission(ztunnelDaemonSetMeta.permissionForScope(true, permissionScopeName(metav1.NamespaceAll)))
+			return nil
+		},
+	)
 	for _, namespace := range workloadNamespaces(scope) {
 		ns := namespace
 		tasks = append(tasks,
@@ -262,7 +328,7 @@ func (c *Collector) Collect(ctx context.Context, scope Scope) (Snapshot, error) 
 				}
 				return err
 			}, appendPermission, appendDegraded),
-			c.listTask(daemonSetMeta, permissionScopeName(ns), func(ctx context.Context) error {
+			func(ctx context.Context) error {
 				items, err := listPages(ctx, func(ctx context.Context, opts metav1.ListOptions) ([]appsv1.DaemonSet, string, error) {
 					list, err := c.kube.AppsV1().DaemonSets(ns).List(ctx, opts)
 					if err != nil {
@@ -275,8 +341,14 @@ func (c *Collector) Collect(ctx context.Context, scope Scope) (Snapshot, error) 
 					snapshot.DaemonSets = append(snapshot.DaemonSets, items...)
 					mu.Unlock()
 				}
-				return err
-			}, appendPermission, appendDegraded),
+				if err != nil {
+					markDaemonSetsAvailable(ns, false)
+					return appendDegraded(daemonSetMeta, permissionScopeName(ns), err)
+				}
+				markDaemonSetsAvailable(ns, true)
+				appendPermission(daemonSetMeta.permissionForScope(true, permissionScopeName(ns)))
+				return nil
+			},
 		)
 	}
 	for _, namespace := range policyNamespaces(scope) {
@@ -391,6 +463,11 @@ func (c *Collector) Collect(ctx context.Context, scope Scope) (Snapshot, error) 
 	snapshot.PermissionSummary = mergePermissions(snapshot.PermissionSummary)
 
 	return snapshot, nil
+}
+
+func isZtunnelDaemonSet(daemonSet appsv1.DaemonSet) bool {
+	return daemonSet.Spec.Selector != nil &&
+		daemonSet.Spec.Selector.MatchLabels["app"] == "ztunnel"
 }
 
 func (c *Collector) collectNamespaces(ctx context.Context, scope Scope) ([]corev1.Namespace, error) {
@@ -596,9 +673,7 @@ func mergePermissions(permissions []Permission) []Permission {
 		existing.Verbs = mergeStrings(existing.Verbs, permission.Verbs)
 		existing.AffectedControls = mergeStrings(existing.AffectedControls, permission.AffectedControls)
 		existing.DeniedScopes = mergeStrings(existing.DeniedScopes, permission.DeniedScopes)
-		if existing.Impact == "" {
-			existing.Impact = permission.Impact
-		}
+		existing.Impact = mergeImpacts(existing.Impact, permission.Impact)
 		existing.Optional = existing.Optional && permission.Optional
 		merged[key] = existing
 	}
@@ -617,6 +692,18 @@ func mergePermissions(permissions []Permission) []Permission {
 		return out[i].Resource < out[j].Resource
 	})
 	return out
+}
+
+func mergeImpacts(left, right string) string {
+	impacts := mergeStrings(nonEmptyString(left), nonEmptyString(right))
+	return strings.Join(impacts, "; ")
+}
+
+func nonEmptyString(value string) []string {
+	if value == "" {
+		return nil
+	}
+	return []string{value}
 }
 
 func appendImpact(base, detail string) string {
@@ -672,9 +759,18 @@ var (
 		resource: "namespaces",
 		impact:   "namespace labels and environment/data-plane inference may be unavailable",
 	}
+	nodeMeta = resourceMeta{
+		resource: "nodes",
+		optional: true,
+		impact:   "ztunnel total-node coverage remains unknown without the optional nodes add-on",
+	}
 	podMeta = resourceMeta{
 		resource: "pods",
 		impact:   "sidecar detection from running pods may be unavailable",
+	}
+	ztunnelPodMeta = resourceMeta{
+		resource: "pods",
+		impact:   "per-node ztunnel readiness and ambient workload coverage may be unavailable",
 	}
 	serviceMeta = resourceMeta{
 		resource: "services",
@@ -704,6 +800,11 @@ var (
 		apiGroup: "apps",
 		resource: "daemonsets",
 		impact:   "DaemonSet workload posture may be unavailable",
+	}
+	ztunnelDaemonSetMeta = resourceMeta{
+		apiGroup: "apps",
+		resource: "daemonsets",
+		impact:   "ztunnel presence and ambient workload coverage may be unavailable",
 	}
 	peerAuthenticationMeta = resourceMeta{
 		apiGroup: "security.istio.io",

@@ -201,7 +201,7 @@ func TestBuildWorkloadNormalization(t *testing.T) {
 			},
 		},
 		{
-			name: "ambient stub returns unknown",
+			name: "detects ambient enrollment from namespace label",
 			snapshot: collect.Snapshot{
 				Namespaces: []corev1.Namespace{namespace("ambient", map[string]string{"istio.io/dataplane-mode": "ambient"})},
 				Pods: []corev1.Pod{{
@@ -211,12 +211,163 @@ func TestBuildWorkloadNormalization(t *testing.T) {
 				PermissionSummary: peerAuthenticationGrantedPermissions(),
 			},
 			assert: func(t *testing.T, result Result) {
-				if singleWorkload(t, result).DataPlaneMode != resolver.ModeUnknown {
-					t.Fatalf("ambient stub mode = %q, want unknown", result.Workloads[0].DataPlaneMode)
+				workload := singleWorkload(t, result)
+				if workload.DataPlaneMode != resolver.ModeAmbient {
+					t.Fatalf("ambient mode = %q, want ambient", workload.DataPlaneMode)
+				}
+				if workload.Namespace.AmbientEnrolled != resolver.True {
+					t.Fatalf("namespace ambient enrollment = %v, want true", workload.Namespace.AmbientEnrolled)
+				}
+				if workload.ZtunnelOnNode != resolver.Unobserved {
+					t.Fatalf("ztunnel on node = %v, want unobserved without ztunnel evidence", workload.ZtunnelOnNode)
 				}
 			},
 		},
 	})
+}
+
+func TestBuildAmbientEnrollmentAndZtunnelCoverage(t *testing.T) {
+	ready := corev1.PodCondition{Type: corev1.PodReady, Status: corev1.ConditionTrue}
+	base := collect.Snapshot{
+		Namespaces: []corev1.Namespace{namespace("ambient", map[string]string{"istio.io/dataplane-mode": "ambient"})},
+		Nodes:      []corev1.Node{{ObjectMeta: metav1.ObjectMeta{Name: "worker"}}},
+		NodesKnown: true,
+		Deployments: []appsv1.Deployment{
+			deployment("ambient", "api", map[string]string{"app": "api"}, corev1.PodSpec{}),
+		},
+		ReplicaSets: []appsv1.ReplicaSet{deploymentReplicaSet("ambient", "api-rs", "api")},
+		Pods: []corev1.Pod{
+			podForReplicaSet("ambient", "api-1", "api-rs", map[string]string{"app": "api"}, corev1.PodSpec{
+				NodeName: "worker", Containers: []corev1.Container{{Name: "api"}},
+			}),
+		},
+		ZtunnelDaemonSets:      []appsv1.DaemonSet{{ObjectMeta: metav1.ObjectMeta{Name: "ztunnel", Namespace: "istio-system"}}},
+		ZtunnelDaemonSetsKnown: true,
+		ZtunnelPods: []corev1.Pod{{
+			ObjectMeta: metav1.ObjectMeta{Name: "ztunnel-1", Namespace: "istio-system"},
+			Spec:       corev1.PodSpec{NodeName: "worker"},
+			Status:     corev1.PodStatus{Conditions: []corev1.PodCondition{ready}},
+		}},
+		ZtunnelPodsKnown:  true,
+		PermissionSummary: peerAuthenticationGrantedPermissions(),
+	}
+
+	tests := []struct {
+		name             string
+		mutate           func(*collect.Snapshot)
+		wantMode         resolver.DataPlaneMode
+		wantZtunnel      resolver.Tristate
+		wantCovered      int
+		wantTotalKnown   bool
+		wantAmbientState resolver.Tristate
+	}{
+		{
+			name:             "ready ztunnel covers ambient workload node",
+			wantMode:         resolver.ModeAmbient,
+			wantZtunnel:      resolver.True,
+			wantCovered:      1,
+			wantTotalKnown:   true,
+			wantAmbientState: resolver.True,
+		},
+		{
+			name: "pod none overrides ambient namespace",
+			mutate: func(snapshot *collect.Snapshot) {
+				snapshot.Pods[0].Labels["istio.io/dataplane-mode"] = "none"
+			},
+			wantMode:         resolver.ModeNotApplicable,
+			wantZtunnel:      resolver.Unobserved,
+			wantCovered:      1,
+			wantTotalKnown:   true,
+			wantAmbientState: resolver.True,
+		},
+		{
+			name: "pod ambient overrides unenrolled namespace",
+			mutate: func(snapshot *collect.Snapshot) {
+				snapshot.Namespaces[0].Labels = nil
+				snapshot.Pods[0].Labels["istio.io/dataplane-mode"] = "ambient"
+			},
+			wantMode:         resolver.ModeAmbient,
+			wantZtunnel:      resolver.True,
+			wantCovered:      1,
+			wantTotalKnown:   true,
+			wantAmbientState: resolver.False,
+		},
+		{
+			name: "missing ready ztunnel is conclusive uncovered",
+			mutate: func(snapshot *collect.Snapshot) {
+				snapshot.ZtunnelPods[0].Status.Conditions = nil
+			},
+			wantMode:         resolver.ModeAmbient,
+			wantZtunnel:      resolver.False,
+			wantCovered:      0,
+			wantTotalKnown:   true,
+			wantAmbientState: resolver.True,
+		},
+		{
+			name: "node permission absence preserves null total",
+			mutate: func(snapshot *collect.Snapshot) {
+				snapshot.Nodes = nil
+				snapshot.NodesKnown = false
+			},
+			wantMode:         resolver.ModeAmbient,
+			wantZtunnel:      resolver.True,
+			wantCovered:      1,
+			wantTotalKnown:   false,
+			wantAmbientState: resolver.True,
+		},
+		{
+			name: "ztunnel pod evidence absence is unknown",
+			mutate: func(snapshot *collect.Snapshot) {
+				snapshot.ZtunnelPods = nil
+				snapshot.ZtunnelPodsKnown = false
+			},
+			wantMode:         resolver.ModeAmbient,
+			wantZtunnel:      resolver.Unobserved,
+			wantCovered:      -1,
+			wantTotalKnown:   true,
+			wantAmbientState: resolver.True,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			snapshot := base
+			snapshot.Namespaces = append([]corev1.Namespace(nil), base.Namespaces...)
+			snapshot.Namespaces[0].Labels = copyStringMap(base.Namespaces[0].Labels)
+			snapshot.Pods = append([]corev1.Pod(nil), base.Pods...)
+			snapshot.Pods[0].Labels = copyStringMap(base.Pods[0].Labels)
+			snapshot.ZtunnelPods = append([]corev1.Pod(nil), base.ZtunnelPods...)
+			snapshot.ZtunnelPods[0].Status.Conditions = append(
+				[]corev1.PodCondition(nil),
+				base.ZtunnelPods[0].Status.Conditions...,
+			)
+			if tt.mutate != nil {
+				tt.mutate(&snapshot)
+			}
+
+			result := Build(snapshot)
+			workload := singleWorkload(t, result)
+			if workload.DataPlaneMode != tt.wantMode {
+				t.Fatalf("data plane mode = %q, want %q", workload.DataPlaneMode, tt.wantMode)
+			}
+			if workload.ZtunnelOnNode != tt.wantZtunnel {
+				t.Fatalf("ztunnel on node = %v, want %v", workload.ZtunnelOnNode, tt.wantZtunnel)
+			}
+			if workload.Namespace.AmbientEnrolled != tt.wantAmbientState {
+				t.Fatalf("ambient enrollment = %v, want %v", workload.Namespace.AmbientEnrolled, tt.wantAmbientState)
+			}
+			if got := result.Inventory.Ztunnel.NodesCovered; tt.wantCovered < 0 {
+				if got != nil {
+					t.Fatalf("nodes covered = %v, want unavailable", *got)
+				}
+			} else if got == nil || *got != tt.wantCovered {
+				t.Fatalf("nodes covered = %v, want %d", got, tt.wantCovered)
+			}
+			if got := result.Inventory.Ztunnel.NodesTotal; (got != nil) != tt.wantTotalKnown {
+				t.Fatalf("nodes total = %v, want known=%t", got, tt.wantTotalKnown)
+			}
+		})
+	}
 }
 
 func TestBuildPeerAuthenticationNormalization(t *testing.T) {

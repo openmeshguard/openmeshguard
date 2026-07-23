@@ -6,7 +6,17 @@ import "github.com/openmeshguard/openmeshguard/internal/resolver"
 type Inventory struct {
 	Counts        map[string]int
 	DataPlaneMode resolver.DataPlaneMode
+	Ztunnel       ZtunnelInventory
+	Waypoints     *int
 	MultiCluster  MultiCluster
+}
+
+// ZtunnelInventory preserves independently observable ambient coverage facts.
+// NodesTotal is nil when the optional nodes permission is unavailable.
+type ZtunnelInventory struct {
+	Present      *bool
+	NodesCovered *int
+	NodesTotal   *int
 }
 
 // MultiCluster captures non-secret signals that a cluster participates in a

@@ -151,10 +151,8 @@ func runScan(ctx context.Context, info versionInfo, opts scanOptions, stdout io.
 		NamespaceTargetsComplete: true,
 		InventoryAvailability:    inventoryAvailability(snapshot),
 		Inventory: map[string]any{
-			"counts": normalized.Inventory.Counts,
-			"dataPlane": map[string]any{
-				"mode": string(normalized.Inventory.DataPlaneMode),
-			},
+			"counts":    normalized.Inventory.Counts,
+			"dataPlane": dataPlaneInventory(normalized.Inventory),
 			"multiCluster": map[string]any{
 				"participationDetected": normalized.Inventory.MultiCluster.ParticipationDetected,
 				"evaluated":             false,
@@ -360,6 +358,7 @@ func permissionEvidenceImpact(permission collect.Permission) ([]string, []string
 func inventoryPathsForResource(apiGroup, resource string) []string {
 	countPaths := map[string]string{
 		"/namespaces":                             "counts.namespaces",
+		"/nodes":                                  "counts.nodes",
 		"/pods":                                   "counts.pods",
 		"/services":                               "counts.services",
 		"discovery.k8s.io/endpointslices":         "counts.endpointSlices",
@@ -382,6 +381,18 @@ func inventoryPathsForResource(apiGroup, resource string) []string {
 		(apiGroup == "apps" && (resource == "deployments" || resource == "replicasets" || resource == "statefulsets" || resource == "daemonsets")) {
 		paths = append(paths, "dataPlane.mode")
 	}
+	if apiGroup == "" && resource == "nodes" {
+		paths = append(paths, "dataPlane.ztunnel.nodesTotal")
+	}
+	if apiGroup == "" && resource == "pods" {
+		paths = append(paths, "dataPlane.ztunnel.nodesCovered")
+	}
+	if apiGroup == "apps" && resource == "daemonsets" {
+		paths = append(paths, "dataPlane.ztunnel.present", "dataPlane.ztunnel.nodesCovered")
+	}
+	if apiGroup == "gateway.networking.k8s.io" && resource == "gateways" {
+		paths = append(paths, "dataPlane.waypoints")
+	}
 	if apiGroup == "" && (resource == "namespaces" || resource == "services") {
 		paths = append(paths,
 			"multiCluster.participationDetected",
@@ -390,6 +401,27 @@ func inventoryPathsForResource(apiGroup, resource string) []string {
 		)
 	}
 	return paths
+}
+
+func dataPlaneInventory(inventory normalize.Inventory) map[string]any {
+	ztunnel := map[string]any{"nodesTotal": nil}
+	if inventory.Ztunnel.Present != nil {
+		ztunnel["present"] = *inventory.Ztunnel.Present
+	}
+	if inventory.Ztunnel.NodesCovered != nil {
+		ztunnel["nodesCovered"] = *inventory.Ztunnel.NodesCovered
+	}
+	if inventory.Ztunnel.NodesTotal != nil {
+		ztunnel["nodesTotal"] = *inventory.Ztunnel.NodesTotal
+	}
+	value := map[string]any{
+		"mode":    string(inventory.DataPlaneMode),
+		"ztunnel": ztunnel,
+	}
+	if inventory.Waypoints != nil {
+		value["waypoints"] = *inventory.Waypoints
+	}
+	return value
 }
 
 func namespaceMeshEnrollment(labels map[string]string) string {
