@@ -296,6 +296,24 @@ func TestResolverV2ResolveAuthz(t *testing.T) {
 			},
 		},
 		{
+			name: "unsupported action remains traceable in unknown posture",
+			in: authzWorkload(ModeSidecar,
+				authzPolicy("payments", "future-action", "DELEGATE", true),
+			),
+			wantEffective:  AuthzUnknown,
+			wantBroadAllow: &falseValue,
+			wantIdentity:   &falseValue,
+			wantPolicies:   []string{"payments/future-action"},
+			wantUnknown:    `unsupported AuthorizationPolicy action "DELEGATE" on payments/future-action`,
+			wantChain: []Step{
+				authzDefaultStep(1),
+				{
+					Order: 2, Kind: "AuthorizationPolicy", Namespace: "payments", Name: "future-action",
+					Field: "spec.action", Effect: `unsupported action "DELEGATE" prevents authorization posture resolution`,
+				},
+			},
+		},
+		{
 			name: "ambient selector L7 policy becomes fail safe deny",
 			in: authzWorkload(ModeAmbient,
 				AuthorizationPolicyView{

@@ -85,16 +85,23 @@ func (ResolverV2) ResolveAuthz(in WorkloadInput) AuthzResult {
 			continue
 		}
 
+		policyRef := namespacedPolicyName(policy)
+		policiesInScope = append(policiesInScope, policyRef)
 		action := normalizedAuthzAction(policy.Action)
 		if action == "" {
 			if unknownReason == "" {
 				unknownReason = fmt.Sprintf("unsupported AuthorizationPolicy action %q on %s/%s", policy.Action, policy.Namespace, policy.Name)
 			}
+			chain = append(chain, Step{
+				Kind:      "AuthorizationPolicy",
+				Name:      policy.Name,
+				Namespace: policy.Namespace,
+				Field:     "spec.action",
+				Effect:    fmt.Sprintf("unsupported action %q prevents authorization posture resolution", policy.Action),
+			})
 			continue
 		}
 
-		policyRef := namespacedPolicyName(policy)
-		policiesInScope = append(policiesInScope, policyRef)
 		step := authzPolicyStep(policy, action)
 
 		if in.DataPlaneMode == ModeAmbient && policy.TargetsWaypoint {
