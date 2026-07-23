@@ -508,6 +508,45 @@ func TestBuildPolicyInputs(t *testing.T) {
 			},
 		},
 		{
+			name: "preserves multiple targetRef attachments in the resolution chain",
+			mutate: func(snapshot *collect.Snapshot) {
+				serviceA := serviceForWorkload("payments", "a-api", "api", "http")
+				serviceA.Labels = map[string]string{useWaypointLabel: "a-waypoint"}
+				serviceB := serviceForWorkload("payments", "b-api", "api", "http")
+				serviceB.Labels = map[string]string{useWaypointLabel: "b-waypoint"}
+				snapshot.Services = []corev1.Service{serviceA, serviceB}
+				snapshot.AuthorizationPolicies = []*istiosecurityv1.AuthorizationPolicy{
+					authorizationPolicy("payments", "allow-api", nil, l7GetRule(), []*typeapi.PolicyTargetReference{
+						{Kind: "Service", Name: "b-api"},
+						{Kind: "Service", Name: "a-api"},
+					}),
+				}
+				snapshot.Gateways = []gatewayv1.Gateway{
+					readyWaypoint("payments", "a-waypoint", "service"),
+					readyWaypoint("payments", "b-waypoint", "service"),
+				}
+			},
+			assert: func(t *testing.T, workload resolver.WorkloadInput) {
+				if len(workload.AuthzPolicies) != 2 ||
+					workload.AuthzPolicies[0].TargetRefName != "a-api" ||
+					workload.AuthzPolicies[1].TargetRefName != "b-api" {
+					t.Fatalf("AuthorizationPolicies = %#v, want ordered a-api and b-api attachments", workload.AuthzPolicies)
+				}
+				workload.DataPlaneMode = resolver.ModeAmbient
+				result := resolver.New().ResolveAuthz(workload)
+				wantChain := []resolver.Step{
+					{Order: 1, Kind: "AuthorizationDefault", Field: "implicitEnablement", Effect: "establishes Istio's implicit allow when no applicable ALLOW policy exists"},
+					{Order: 2, Kind: "AuthorizationPolicy", Namespace: "payments", Name: "allow-api", Field: `spec.targetRefs["Service/a-api"]`, Effect: "adds a structurally broad rule to the additive ALLOW union"},
+					{Order: 3, Kind: "Waypoint", Namespace: "payments", Name: "a-waypoint", Field: "status.conditions[Programmed]", Effect: "selected service waypoint is ready and enforces waypoint-attached policy payments/allow-api"},
+					{Order: 4, Kind: "AuthorizationPolicy", Namespace: "payments", Name: "allow-api", Field: `spec.targetRefs["Service/b-api"]`, Effect: "adds a structurally broad rule to the additive ALLOW union"},
+					{Order: 5, Kind: "Waypoint", Namespace: "payments", Name: "b-waypoint", Field: "status.conditions[Programmed]", Effect: "selected service waypoint is ready and enforces waypoint-attached policy payments/allow-api"},
+				}
+				if !reflect.DeepEqual(result.Chain, wantChain) {
+					t.Fatalf("chain = %#v, want attachment-specific %#v", result.Chain, wantChain)
+				}
+			},
+		},
+		{
 			name: "preserves unavailable cross-namespace waypoint evidence",
 			mutate: func(snapshot *collect.Snapshot) {
 				service := serviceForWorkload("payments", "api", "api", "http")

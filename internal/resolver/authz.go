@@ -79,7 +79,7 @@ func (ResolverV2) ResolveAuthz(in WorkloadInput) AuthzResult {
 				Kind:      "AuthorizationPolicy",
 				Name:      policy.Name,
 				Namespace: policy.Namespace,
-				Field:     "spec.targetRefs",
+				Field:     authzTargetRefField(policy),
 				Effect:    "targetRef policy attaches to a waypoint; excludes it from sidecar authorization evaluation",
 			})
 			continue
@@ -261,9 +261,23 @@ func authzPolicyStep(policy AuthorizationPolicyView, action string) Step {
 		Kind:      "AuthorizationPolicy",
 		Name:      policy.Name,
 		Namespace: policy.Namespace,
-		Field:     "spec.action",
+		Field:     authzPolicyField(policy),
 		Effect:    effect,
 	}
+}
+
+func authzPolicyField(policy AuthorizationPolicyView) string {
+	if !policy.TargetsWaypoint || policy.TargetRefKind == "" || policy.TargetRefName == "" {
+		return "spec.action"
+	}
+	return authzTargetRefField(policy)
+}
+
+func authzTargetRefField(policy AuthorizationPolicyView) string {
+	if policy.TargetRefKind == "" || policy.TargetRefName == "" {
+		return "spec.targetRefs"
+	}
+	return fmt.Sprintf(`spec.targetRefs["%s/%s"]`, policy.TargetRefKind, policy.TargetRefName)
 }
 
 func resolveWaypointEnforcement(waypoint *WaypointView, policy AuthorizationPolicyView) (Step, bool, bool) {

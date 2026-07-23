@@ -349,7 +349,7 @@ func TestResolverV2ResolveAuthz(t *testing.T) {
 				authzDefaultStep(1),
 				{
 					Order: 2, Kind: "AuthorizationPolicy", Namespace: "payments", Name: "service-default-deny",
-					Field: "spec.targetRefs", Effect: "targetRef policy attaches to a waypoint; excludes it from sidecar authorization evaluation",
+					Field: `spec.targetRefs["Service/api"]`, Effect: "targetRef policy attaches to a waypoint; excludes it from sidecar authorization evaluation",
 				},
 			},
 		},
