@@ -3,11 +3,11 @@
   "generatedAt": "2000-01-01T00:00:00Z",
   "scanner": {
     "version": "dev",
-    "resolverVersion": "mtls/v2,authz/v2",
+    "resolverVersion": "mtls/v3,authz/v6",
     "controlPacks": [
       {
         "name": "builtin-authz",
-        "version": "0.1.0",
+        "version": "0.1.1",
         "source": "builtin"
       },
       {
@@ -442,7 +442,7 @@
     {
       "id": "MG-AUTHZ-006-6bab1c797a40",
       "controlId": "MG-AUTHZ-006",
-      "title": "Ambient L7 authorization must be enforced by a waypoint",
+      "title": "Waypoint-attached authorization must have a ready enforcement path",
       "severity": "high",
       "evidenceType": "config",
       "status": "unknown",
@@ -458,16 +458,16 @@
           "name": "strict-api"
         }
       ],
-      "reasoning": "Control MG-AUTHZ-006 could not be evaluated for omg-strict/strict-api: authorization.effective unavailable: AuthorizationPolicy resources unavailable; authorization.l7Unenforced unavailable: AuthorizationPolicy resources unavailable.",
+      "reasoning": "Control MG-AUTHZ-006 could not be evaluated for omg-strict/strict-api: authorization.effective unavailable: AuthorizationPolicy resources unavailable; authorization.waypointUnenforced unavailable: AuthorizationPolicy resources unavailable.",
       "remediation": {
-        "guidance": "Attach the L7 policy with targetRefs and select a ready waypoint whose scope includes the workload."
+        "guidance": "Attach the policy with targetRefs and select a ready waypoint whose scope includes the workload."
       },
-      "unknownReason": "authorization.effective unavailable: AuthorizationPolicy resources unavailable; authorization.l7Unenforced unavailable: AuthorizationPolicy resources unavailable"
+      "unknownReason": "authorization.effective unavailable: AuthorizationPolicy resources unavailable; authorization.waypointUnenforced unavailable: AuthorizationPolicy resources unavailable"
     },
     {
       "id": "MG-AUTHZ-007-0d3640d3d6d2",
       "controlId": "MG-AUTHZ-007",
-      "title": "L7 authorization without an enforcement path must be reported",
+      "title": "Unenforced waypoint authorization must be reported",
       "severity": "high",
       "evidenceType": "config",
       "status": "unknown",

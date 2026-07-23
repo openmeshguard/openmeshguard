@@ -3,11 +3,11 @@
   "generatedAt": "2000-01-01T00:00:00Z",
   "scanner": {
     "version": "dev",
-    "resolverVersion": "mtls/v2,authz/v2",
+    "resolverVersion": "mtls/v3,authz/v6",
     "controlPacks": [
       {
         "name": "builtin-authz",
-        "version": "0.1.0",
+        "version": "0.1.1",
         "source": "builtin"
       },
       {
