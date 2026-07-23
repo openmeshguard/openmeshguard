@@ -7,12 +7,12 @@
     "controlPacks": [
       {
         "name": "builtin-authz",
-        "version": "0.1.1",
+        "version": "0.2.0",
         "source": "builtin"
       },
       {
         "name": "builtin-mtls",
-        "version": "0.1.0",
+        "version": "0.2.0",
         "source": "builtin"
       }
     ]
@@ -44,12 +44,22 @@
     },
     {
       "apiGroup": "",
+      "resource": "nodes",
+      "verbs": [
+        "list"
+      ],
+      "granted": false,
+      "optional": true,
+      "impact": "ztunnel total-node coverage remains unknown without the optional nodes add-on; denied scope(s): cluster"
+    },
+    {
+      "apiGroup": "",
       "resource": "pods",
       "verbs": [
         "list"
       ],
-      "granted": true,
-      "impact": "sidecar detection from running pods may be unavailable",
+      "granted": false,
+      "impact": "per-node ztunnel readiness and ambient workload coverage may be unavailable; sidecar detection from running pods may be unavailable; denied scope(s): all namespaces",
       "affectedControls": [
         "MG-AUTHZ-001",
         "MG-AUTHZ-002",
@@ -58,9 +68,12 @@
         "MG-AUTHZ-005",
         "MG-AUTHZ-006",
         "MG-AUTHZ-007",
+        "MG-GW-005",
         "MG-MTLS-001",
         "MG-MTLS-002",
         "MG-MTLS-003",
+        "MG-MTLS-005",
+        "MG-MTLS-006",
         "MG-MTLS-007"
       ]
     },
@@ -80,6 +93,7 @@
         "MG-AUTHZ-005",
         "MG-AUTHZ-006",
         "MG-AUTHZ-007",
+        "MG-GW-005",
         "MG-MTLS-002",
         "MG-MTLS-007"
       ]
@@ -90,8 +104,8 @@
       "verbs": [
         "list"
       ],
-      "granted": true,
-      "impact": "DaemonSet workload posture may be unavailable",
+      "granted": false,
+      "impact": "DaemonSet workload posture may be unavailable; ztunnel presence and ambient workload coverage may be unavailable; denied scope(s): all namespaces",
       "affectedControls": [
         "MG-AUTHZ-001",
         "MG-AUTHZ-002",
@@ -100,9 +114,12 @@
         "MG-AUTHZ-005",
         "MG-AUTHZ-006",
         "MG-AUTHZ-007",
+        "MG-GW-005",
         "MG-MTLS-001",
         "MG-MTLS-002",
         "MG-MTLS-003",
+        "MG-MTLS-005",
+        "MG-MTLS-006",
         "MG-MTLS-007"
       ]
     },
@@ -122,9 +139,12 @@
         "MG-AUTHZ-005",
         "MG-AUTHZ-006",
         "MG-AUTHZ-007",
+        "MG-GW-005",
         "MG-MTLS-001",
         "MG-MTLS-002",
         "MG-MTLS-003",
+        "MG-MTLS-005",
+        "MG-MTLS-006",
         "MG-MTLS-007"
       ]
     },
@@ -144,9 +164,12 @@
         "MG-AUTHZ-005",
         "MG-AUTHZ-006",
         "MG-AUTHZ-007",
+        "MG-GW-005",
         "MG-MTLS-001",
         "MG-MTLS-002",
         "MG-MTLS-003",
+        "MG-MTLS-005",
+        "MG-MTLS-006",
         "MG-MTLS-007"
       ]
     },
@@ -166,9 +189,12 @@
         "MG-AUTHZ-005",
         "MG-AUTHZ-006",
         "MG-AUTHZ-007",
+        "MG-GW-005",
         "MG-MTLS-001",
         "MG-MTLS-002",
         "MG-MTLS-003",
+        "MG-MTLS-005",
+        "MG-MTLS-006",
         "MG-MTLS-007"
       ]
     },
@@ -188,6 +214,7 @@
         "MG-AUTHZ-005",
         "MG-AUTHZ-006",
         "MG-AUTHZ-007",
+        "MG-GW-005",
         "MG-MTLS-002",
         "MG-MTLS-007"
       ]
@@ -198,9 +225,9 @@
       "verbs": [
         "list"
       ],
-      "granted": false,
+      "granted": true,
       "optional": true,
-      "impact": "ambient L7 waypoint enforceability may be unavailable without Gateway evidence; denied scope(s): namespace/omg-strict",
+      "impact": "ambient L7 waypoint enforceability may be unavailable without Gateway evidence",
       "affectedControls": [
         "MG-AUTHZ-001",
         "MG-AUTHZ-002",
@@ -208,7 +235,8 @@
         "MG-AUTHZ-004",
         "MG-AUTHZ-005",
         "MG-AUTHZ-006",
-        "MG-AUTHZ-007"
+        "MG-AUTHZ-007",
+        "MG-GW-005"
       ]
     },
     {
@@ -250,7 +278,8 @@
         "MG-AUTHZ-004",
         "MG-AUTHZ-005",
         "MG-AUTHZ-006",
-        "MG-AUTHZ-007"
+        "MG-AUTHZ-007",
+        "MG-GW-005"
       ]
     },
     {
@@ -265,6 +294,8 @@
         "MG-MTLS-001",
         "MG-MTLS-002",
         "MG-MTLS-003",
+        "MG-MTLS-005",
+        "MG-MTLS-006",
         "MG-MTLS-007"
       ]
     }
@@ -278,15 +309,22 @@
       "endpointSlices": 1,
       "gateways": 0,
       "namespaces": 0,
+      "nodes": 0,
       "peerAuthentications": 1,
       "pods": 1,
       "replicasets": 1,
       "services": 1,
       "sidecars": 0,
-      "statefulsets": 0
+      "statefulsets": 0,
+      "ztunnelDaemonSets": 0,
+      "ztunnelPods": 0
     },
     "dataPlane": {
-      "mode": "sidecar"
+      "mode": "sidecar",
+      "ztunnel": {
+        "nodesTotal": null
+      },
+      "waypoints": 0
     },
     "multiCluster": {
       "participationDetected": false,
@@ -490,6 +528,30 @@
       "unknownReason": "authorization.effective unavailable: AuthorizationPolicy resources unavailable"
     },
     {
+      "id": "MG-GW-005-0c9ee646c9fe",
+      "controlId": "MG-GW-005",
+      "title": "Ambient waypoint authorization must have explicit ready enrollment",
+      "severity": "high",
+      "evidenceType": "config",
+      "status": "not-applicable",
+      "confidence": "resolved",
+      "dataPlaneMode": "sidecar",
+      "evidenceSources": [
+        "kubernetes-api"
+      ],
+      "resources": [
+        {
+          "kind": "Deployment",
+          "namespace": "omg-strict",
+          "name": "strict-api"
+        }
+      ],
+      "reasoning": "Control MG-GW-005 does not apply to omg-strict/strict-api.",
+      "remediation": {
+        "guidance": "Set istio.io/use-waypoint to a waypoint whose scope covers the target and wait for its Gateway Programmed condition to become true."
+      }
+    },
+    {
       "id": "MG-MTLS-001-e80e3a041279",
       "controlId": "MG-MTLS-001",
       "title": "Mesh-managed workloads must resolve to strict mTLS",
@@ -565,6 +627,54 @@
       "unknownReason": "mtls.effective unavailable: PeerAuthentication resources unavailable"
     },
     {
+      "id": "MG-MTLS-005-440432516897",
+      "controlId": "MG-MTLS-005",
+      "title": "Ambient workloads must have validated L4 mTLS posture",
+      "severity": "high",
+      "evidenceType": "config",
+      "status": "not-applicable",
+      "confidence": "resolved",
+      "dataPlaneMode": "sidecar",
+      "evidenceSources": [
+        "kubernetes-api"
+      ],
+      "resources": [
+        {
+          "kind": "Deployment",
+          "namespace": "omg-strict",
+          "name": "strict-api"
+        }
+      ],
+      "reasoning": "Control MG-MTLS-005 does not apply to omg-strict/strict-api.",
+      "remediation": {
+        "guidance": "Validate ztunnel coverage and apply a STRICT PeerAuthentication posture for the ambient workload, then inspect the attached resolution chain."
+      }
+    },
+    {
+      "id": "MG-MTLS-006-c8e40c81e0cf",
+      "controlId": "MG-MTLS-006",
+      "title": "Ambient workloads must have healthy ztunnel node coverage",
+      "severity": "critical",
+      "evidenceType": "config",
+      "status": "not-applicable",
+      "confidence": "resolved",
+      "dataPlaneMode": "sidecar",
+      "evidenceSources": [
+        "kubernetes-api"
+      ],
+      "resources": [
+        {
+          "kind": "Deployment",
+          "namespace": "omg-strict",
+          "name": "strict-api"
+        }
+      ],
+      "reasoning": "Control MG-MTLS-006 does not apply to omg-strict/strict-api.",
+      "remediation": {
+        "guidance": "Restore a Ready ztunnel DaemonSet pod on every node that schedules ambient workloads."
+      }
+    },
+    {
       "id": "MG-MTLS-007-42760521d74f",
       "controlId": "MG-MTLS-007",
       "title": "Client TLS must agree with resolved server mTLS",
@@ -598,6 +708,11 @@
         "grade": "unknown",
         "passRate": null,
         "unknown": 7
+      },
+      {
+        "category": "exposure",
+        "grade": "unknown",
+        "passRate": null
       },
       {
         "category": "mtls",

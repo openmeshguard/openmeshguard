@@ -11,6 +11,7 @@ trap 'rm -rf "$TEST_ROOT"' EXIT HUP INT TERM
 
 cluster_user="system:serviceaccount:$E2E_HARNESS_NAMESPACE:$E2E_CLUSTER_SCANNER"
 namespace_user="system:serviceaccount:$E2E_HARNESS_NAMESPACE:$E2E_NAMESPACE_SCANNER"
+waypoint_limited_user="system:serviceaccount:$E2E_HARNESS_NAMESPACE:$E2E_WAYPOINT_LIMITED_SCANNER"
 probe_user="system:serviceaccount:$E2E_HARNESS_NAMESPACE:audit-probe"
 fixture_manager_user="system:serviceaccount:$E2E_HARNESS_NAMESPACE:$E2E_FIXTURE_MANAGER"
 
@@ -19,9 +20,11 @@ write_valid_audit() {
 	jq -cn \
 		--arg cluster_user "$cluster_user" \
 		--arg namespace_user "$namespace_user" \
+		--arg waypoint_limited_user "$waypoint_limited_user" \
 		--arg probe_user "$probe_user" '
 		{"user":{"username":$cluster_user,"groups":["system:serviceaccounts"]},"verb":"list","objectRef":{"apiGroup":"","resource":"pods","namespace":"omg-strict"},"responseStatus":{"code":200}},
 		{"user":{"username":$namespace_user,"groups":["system:serviceaccounts"]},"verb":"list","objectRef":{"apiGroup":"security.istio.io","resource":"peerauthentications","namespace":"istio-system"},"responseStatus":{"code":403}},
+		{"user":{"username":$waypoint_limited_user,"groups":["system:serviceaccounts"]},"verb":"list","objectRef":{"apiGroup":"security.istio.io","resource":"authorizationpolicies","namespace":"omg-ambient-unavailable"},"responseStatus":{"code":200}},
 		{"user":{"username":$probe_user,"groups":["system:serviceaccounts"]},"verb":"create","objectRef":{"apiGroup":"","resource":"configmaps","namespace":"omg-strict"},"responseStatus":{"code":403}}
 	' >"$audit_test_output"
 }

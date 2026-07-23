@@ -14,6 +14,7 @@ E2E_HARNESS_NAMESPACE=openmeshguard-e2e
 E2E_FIXTURE_MANAGER=fixture-manager
 E2E_CLUSTER_SCANNER=scanner-cluster
 E2E_NAMESPACE_SCANNER=scanner-namespace
+E2E_WAYPOINT_LIMITED_SCANNER=scanner-waypoint-limited
 E2E_ADMIN_KUBECONFIG="$E2E_STATE_DIR/admin.kubeconfig"
 
 version_value() {
@@ -205,6 +206,23 @@ istioctl_binary() {
 		exit 1
 	fi
 	echo "$istio_path"
+}
+
+gateway_api_crds_bundle() {
+	gateway_api_version=$(version_value gatewayAPI)
+	gateway_api_checksum=$(version_value gatewayAPIExperimentalSHA256)
+	mkdir -p "$E2E_STATE_DIR/downloads"
+	gateway_api_path="$E2E_STATE_DIR/downloads/gateway-api-$gateway_api_version-experimental-install.yaml"
+	if [ ! -f "$gateway_api_path" ] || ! verify_sha256 "$gateway_api_path" "$gateway_api_checksum"; then
+		gateway_api_temporary="$gateway_api_path.download"
+		echo "Downloading Gateway API $gateway_api_version experimental CRDs" >&2
+		download \
+			"https://github.com/kubernetes-sigs/gateway-api/releases/download/$gateway_api_version/experimental-install.yaml" \
+			"$gateway_api_temporary"
+		verify_sha256 "$gateway_api_temporary" "$gateway_api_checksum"
+		mv "$gateway_api_temporary" "$gateway_api_path"
+	fi
+	echo "$gateway_api_path"
 }
 
 admin_kubectl() {

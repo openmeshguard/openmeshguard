@@ -8,6 +8,7 @@ rules:
     users:
       - system:serviceaccount:openmeshguard-e2e:scanner-cluster
       - system:serviceaccount:openmeshguard-e2e:scanner-namespace
+      - system:serviceaccount:openmeshguard-e2e:scanner-waypoint-limited
       - system:serviceaccount:openmeshguard-e2e:audit-probe
       - system:serviceaccount:openmeshguard-e2e:fixture-manager
       # Pinned Kind's dedicated administrator kubeconfig authenticates as this

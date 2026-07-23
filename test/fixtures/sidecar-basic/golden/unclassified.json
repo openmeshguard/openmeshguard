@@ -7,12 +7,12 @@
     "controlPacks": [
       {
         "name": "builtin-authz",
-        "version": "0.1.1",
+        "version": "0.2.0",
         "source": "builtin"
       },
       {
         "name": "builtin-mtls",
-        "version": "0.1.0",
+        "version": "0.2.0",
         "source": "builtin"
       }
     ]
@@ -44,12 +44,22 @@
     },
     {
       "apiGroup": "",
+      "resource": "nodes",
+      "verbs": [
+        "list"
+      ],
+      "granted": true,
+      "optional": true,
+      "impact": "ztunnel total-node coverage remains unknown without the optional nodes add-on"
+    },
+    {
+      "apiGroup": "",
       "resource": "pods",
       "verbs": [
         "list"
       ],
       "granted": true,
-      "impact": "sidecar detection from running pods may be unavailable",
+      "impact": "per-node ztunnel readiness and ambient workload coverage may be unavailable; sidecar detection from running pods may be unavailable",
       "affectedControls": [
         "MG-AUTHZ-001",
         "MG-AUTHZ-002",
@@ -58,9 +68,12 @@
         "MG-AUTHZ-005",
         "MG-AUTHZ-006",
         "MG-AUTHZ-007",
+        "MG-GW-005",
         "MG-MTLS-001",
         "MG-MTLS-002",
         "MG-MTLS-003",
+        "MG-MTLS-005",
+        "MG-MTLS-006",
         "MG-MTLS-007"
       ]
     },
@@ -80,6 +93,7 @@
         "MG-AUTHZ-005",
         "MG-AUTHZ-006",
         "MG-AUTHZ-007",
+        "MG-GW-005",
         "MG-MTLS-002",
         "MG-MTLS-007"
       ]
@@ -91,7 +105,7 @@
         "list"
       ],
       "granted": true,
-      "impact": "DaemonSet workload posture may be unavailable",
+      "impact": "DaemonSet workload posture may be unavailable; ztunnel presence and ambient workload coverage may be unavailable",
       "affectedControls": [
         "MG-AUTHZ-001",
         "MG-AUTHZ-002",
@@ -100,9 +114,12 @@
         "MG-AUTHZ-005",
         "MG-AUTHZ-006",
         "MG-AUTHZ-007",
+        "MG-GW-005",
         "MG-MTLS-001",
         "MG-MTLS-002",
         "MG-MTLS-003",
+        "MG-MTLS-005",
+        "MG-MTLS-006",
         "MG-MTLS-007"
       ]
     },
@@ -122,9 +139,12 @@
         "MG-AUTHZ-005",
         "MG-AUTHZ-006",
         "MG-AUTHZ-007",
+        "MG-GW-005",
         "MG-MTLS-001",
         "MG-MTLS-002",
         "MG-MTLS-003",
+        "MG-MTLS-005",
+        "MG-MTLS-006",
         "MG-MTLS-007"
       ]
     },
@@ -144,9 +164,12 @@
         "MG-AUTHZ-005",
         "MG-AUTHZ-006",
         "MG-AUTHZ-007",
+        "MG-GW-005",
         "MG-MTLS-001",
         "MG-MTLS-002",
         "MG-MTLS-003",
+        "MG-MTLS-005",
+        "MG-MTLS-006",
         "MG-MTLS-007"
       ]
     },
@@ -166,9 +189,12 @@
         "MG-AUTHZ-005",
         "MG-AUTHZ-006",
         "MG-AUTHZ-007",
+        "MG-GW-005",
         "MG-MTLS-001",
         "MG-MTLS-002",
         "MG-MTLS-003",
+        "MG-MTLS-005",
+        "MG-MTLS-006",
         "MG-MTLS-007"
       ]
     },
@@ -188,6 +214,7 @@
         "MG-AUTHZ-005",
         "MG-AUTHZ-006",
         "MG-AUTHZ-007",
+        "MG-GW-005",
         "MG-MTLS-002",
         "MG-MTLS-007"
       ]
@@ -198,9 +225,9 @@
       "verbs": [
         "list"
       ],
-      "granted": false,
+      "granted": true,
       "optional": true,
-      "impact": "ambient L7 waypoint enforceability may be unavailable without Gateway evidence; denied scope(s): namespace/omg-unclassified",
+      "impact": "ambient L7 waypoint enforceability may be unavailable without Gateway evidence",
       "affectedControls": [
         "MG-AUTHZ-001",
         "MG-AUTHZ-002",
@@ -208,7 +235,8 @@
         "MG-AUTHZ-004",
         "MG-AUTHZ-005",
         "MG-AUTHZ-006",
-        "MG-AUTHZ-007"
+        "MG-AUTHZ-007",
+        "MG-GW-005"
       ]
     },
     {
@@ -250,7 +278,8 @@
         "MG-AUTHZ-004",
         "MG-AUTHZ-005",
         "MG-AUTHZ-006",
-        "MG-AUTHZ-007"
+        "MG-AUTHZ-007",
+        "MG-GW-005"
       ]
     },
     {
@@ -265,6 +294,8 @@
         "MG-MTLS-001",
         "MG-MTLS-002",
         "MG-MTLS-003",
+        "MG-MTLS-005",
+        "MG-MTLS-006",
         "MG-MTLS-007"
       ]
     }
@@ -278,15 +309,24 @@
       "endpointSlices": 1,
       "gateways": 0,
       "namespaces": 1,
+      "nodes": 1,
       "peerAuthentications": 1,
       "pods": 1,
       "replicasets": 1,
       "services": 1,
       "sidecars": 0,
-      "statefulsets": 0
+      "statefulsets": 0,
+      "ztunnelDaemonSets": 1,
+      "ztunnelPods": 1
     },
     "dataPlane": {
-      "mode": "sidecar"
+      "mode": "sidecar",
+      "ztunnel": {
+        "present": true,
+        "nodesCovered": 1,
+        "nodesTotal": 1
+      },
+      "waypoints": 0
     },
     "multiCluster": {
       "participationDetected": false,
@@ -511,6 +551,129 @@
       "remediation": {
         "guidance": "Correct policy namespace, selector, or targetRefs so coverage reaches this workload rather than relying on policy resource presence alone."
       }
+    },
+    {
+      "id": "MG-GW-005-65338508a233",
+      "controlId": "MG-GW-005",
+      "title": "Ambient waypoint authorization must have explicit ready enrollment",
+      "severity": "high",
+      "evidenceType": "config",
+      "status": "not-applicable",
+      "confidence": "resolved",
+      "dataPlaneMode": "sidecar",
+      "evidenceSources": [
+        "kubernetes-api",
+        "istio-crd"
+      ],
+      "resources": [
+        {
+          "kind": "Deployment",
+          "namespace": "omg-unclassified",
+          "name": "unclassified-api"
+        }
+      ],
+      "resolutionChain": [
+        {
+          "order": 1,
+          "kind": "AuthorizationDefault",
+          "field": "implicitEnablement",
+          "effect": "establishes Istio's implicit allow when no applicable ALLOW policy exists"
+        },
+        {
+          "order": 2,
+          "kind": "AuthorizationPolicy",
+          "name": "authz-root-default-deny",
+          "namespace": "istio-system",
+          "field": "spec.selector",
+          "effect": "selector does not match the workload; excludes policy from authorization evaluation"
+        }
+      ],
+      "reasoning": "Control MG-GW-005 does not apply to omg-unclassified/unclassified-api.",
+      "remediation": {
+        "guidance": "Set istio.io/use-waypoint to a waypoint whose scope covers the target and wait for its Gateway Programmed condition to become true."
+      }
+    },
+    {
+      "id": "MG-MTLS-005-87149cebc379",
+      "controlId": "MG-MTLS-005",
+      "title": "Ambient workloads must have validated L4 mTLS posture",
+      "severity": "high",
+      "evidenceType": "config",
+      "status": "not-applicable",
+      "confidence": "resolved",
+      "dataPlaneMode": "sidecar",
+      "evidenceSources": [
+        "kubernetes-api",
+        "istio-crd"
+      ],
+      "resources": [
+        {
+          "kind": "Deployment",
+          "namespace": "omg-unclassified",
+          "name": "unclassified-api"
+        }
+      ],
+      "resolutionChain": [
+        {
+          "order": 1,
+          "kind": "MeshConfigDefault",
+          "field": "defaultPeerAuthenticationMode",
+          "effect": "defaults mesh mTLS mode to PERMISSIVE when no PeerAuthentication mode overrides it"
+        },
+        {
+          "order": 2,
+          "kind": "PeerAuthentication",
+          "name": "default",
+          "namespace": "istio-system",
+          "field": "spec.mtls.mode",
+          "effect": "sets mesh-wide mTLS mode to STRICT"
+        }
+      ],
+      "reasoning": "Control MG-MTLS-005 does not apply to omg-unclassified/unclassified-api.",
+      "remediation": {
+        "guidance": "Validate ztunnel coverage and apply a STRICT PeerAuthentication posture for the ambient workload, then inspect the attached resolution chain."
+      }
+    },
+    {
+      "id": "MG-MTLS-006-6a7b052b9de8",
+      "controlId": "MG-MTLS-006",
+      "title": "Ambient workloads must have healthy ztunnel node coverage",
+      "severity": "critical",
+      "evidenceType": "config",
+      "status": "not-applicable",
+      "confidence": "resolved",
+      "dataPlaneMode": "sidecar",
+      "evidenceSources": [
+        "kubernetes-api",
+        "istio-crd"
+      ],
+      "resources": [
+        {
+          "kind": "Deployment",
+          "namespace": "omg-unclassified",
+          "name": "unclassified-api"
+        }
+      ],
+      "resolutionChain": [
+        {
+          "order": 1,
+          "kind": "MeshConfigDefault",
+          "field": "defaultPeerAuthenticationMode",
+          "effect": "defaults mesh mTLS mode to PERMISSIVE when no PeerAuthentication mode overrides it"
+        },
+        {
+          "order": 2,
+          "kind": "PeerAuthentication",
+          "name": "default",
+          "namespace": "istio-system",
+          "field": "spec.mtls.mode",
+          "effect": "sets mesh-wide mTLS mode to STRICT"
+        }
+      ],
+      "reasoning": "Control MG-MTLS-006 does not apply to omg-unclassified/unclassified-api.",
+      "remediation": {
+        "guidance": "Restore a Ready ztunnel DaemonSet pod on every node that schedules ambient workloads."
+      }
     }
   ],
   "scores": {
@@ -521,6 +684,11 @@
         "grade": "F",
         "passRate": 0.42857142857142855,
         "evaluated": 7
+      },
+      {
+        "category": "exposure",
+        "grade": "unknown",
+        "passRate": null
       },
       {
         "category": "mtls",

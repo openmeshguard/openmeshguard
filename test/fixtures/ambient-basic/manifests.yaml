@@ -1,0 +1,229 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: omg-ambient-ready
+  labels:
+    istio.io/dataplane-mode: ambient
+    istio.io/use-waypoint: ambient-ready-waypoint
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: ambient-ready-waypoint
+  namespace: omg-ambient-ready
+  labels:
+    istio.io/waypoint-for: service
+spec:
+  gatewayClassName: istio-waypoint
+  listeners:
+    - name: mesh
+      port: 15008
+      protocol: HBONE
+---
+apiVersion: security.istio.io/v1
+kind: PeerAuthentication
+metadata:
+  name: default
+  namespace: omg-ambient-ready
+spec:
+  mtls:
+    mode: STRICT
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ambient-ready
+  namespace: omg-ambient-ready
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ambient-ready
+  template:
+    metadata:
+      labels:
+        app: ambient-ready
+    spec:
+      containers:
+        - name: app
+          image: registry.k8s.io/pause:3.10
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: api
+  namespace: omg-ambient-ready
+spec:
+  selector:
+    app: ambient-ready
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8080
+---
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: allow-api
+  namespace: omg-ambient-ready
+spec:
+  targetRefs:
+    - kind: Service
+      name: api
+  rules:
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/client/sa/client
+      to:
+        - operation:
+            methods: [GET]
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: omg-ambient-unavailable
+  labels:
+    istio.io/dataplane-mode: ambient
+---
+apiVersion: security.istio.io/v1
+kind: PeerAuthentication
+metadata:
+  name: default
+  namespace: omg-ambient-unavailable
+spec:
+  mtls:
+    mode: STRICT
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ambient-unavailable
+  namespace: omg-ambient-unavailable
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ambient-unavailable
+  template:
+    metadata:
+      labels:
+        app: ambient-unavailable
+        istio.io/dataplane-mode: ambient
+    spec:
+      containers:
+        - name: app
+          image: registry.k8s.io/pause:3.10
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: api
+  namespace: omg-ambient-unavailable
+  labels:
+    istio.io/use-waypoint: unavailable-waypoint
+    istio.io/use-waypoint-namespace: omg-waypoint-evidence
+spec:
+  selector:
+    app: ambient-unavailable
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8080
+---
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: allow-api
+  namespace: omg-ambient-unavailable
+spec:
+  targetRefs:
+    - kind: Service
+      name: api
+  rules:
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/client/sa/client
+      to:
+        - operation:
+            methods: [GET]
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: omg-ambient-missing
+  labels:
+    istio.io/dataplane-mode: ambient
+    istio.io/use-waypoint: ambient-missing-waypoint
+---
+apiVersion: security.istio.io/v1
+kind: PeerAuthentication
+metadata:
+  name: default
+  namespace: omg-ambient-missing
+spec:
+  mtls:
+    mode: STRICT
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ambient-missing
+  namespace: omg-ambient-missing
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ambient-missing
+  template:
+    metadata:
+      labels:
+        app: ambient-missing
+    spec:
+      containers:
+        - name: app
+          image: registry.k8s.io/pause:3.10
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: api
+  namespace: omg-ambient-missing
+spec:
+  selector:
+    app: ambient-missing
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8080
+---
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: allow-api
+  namespace: omg-ambient-missing
+spec:
+  targetRefs:
+    - kind: Service
+      name: api
+  rules:
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/client/sa/client
+      to:
+        - operation:
+            methods: [GET]

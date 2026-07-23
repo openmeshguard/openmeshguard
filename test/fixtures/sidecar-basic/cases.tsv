@@ -1,7 +1,7 @@
-strict	omg-strict	strict-api	sidecar	MG-AUTHZ-001=open,MG-AUTHZ-002=open,MG-AUTHZ-004=open,MG-AUTHZ-005=open
-permissive	omg-permissive	permissive-api	sidecar	MG-AUTHZ-001=open,MG-AUTHZ-002=open,MG-AUTHZ-004=open,MG-AUTHZ-005=open,MG-MTLS-001=open,MG-MTLS-002=open
-workload-conflict	omg-workload-conflict	conflict-api	sidecar	MG-AUTHZ-001=open,MG-AUTHZ-002=open,MG-AUTHZ-004=open,MG-AUTHZ-005=open,MG-MTLS-001=open,MG-MTLS-002=open,MG-MTLS-003=open
-port-level-override	omg-port-override	port-api	sidecar	MG-AUTHZ-001=open,MG-AUTHZ-002=open,MG-AUTHZ-004=open,MG-AUTHZ-005=open,MG-MTLS-001=open,MG-MTLS-002=open,MG-MTLS-003=open
-dr-contradiction	omg-dr-contradiction	dr-api	sidecar	MG-AUTHZ-001=open,MG-AUTHZ-002=open,MG-AUTHZ-004=open,MG-AUTHZ-005=open,MG-MTLS-007=open
-not-in-mesh	omg-not-in-mesh	outside-api	none	MG-AUTHZ-001=unknown,MG-AUTHZ-002=unknown,MG-AUTHZ-003=unknown,MG-AUTHZ-004=unknown,MG-AUTHZ-005=unknown,MG-AUTHZ-006=unknown,MG-AUTHZ-007=unknown,MG-MTLS-001=unknown,MG-MTLS-002=unknown,MG-MTLS-003=unknown,MG-MTLS-007=unknown
-unclassified	omg-unclassified	unclassified-api	sidecar	MG-AUTHZ-001=open,MG-AUTHZ-002=open,MG-AUTHZ-004=open,MG-AUTHZ-005=open
+strict	omg-strict	strict-api	sidecar	MG-AUTHZ-001=open,MG-AUTHZ-002=open,MG-AUTHZ-004=open,MG-AUTHZ-005=open,MG-GW-005=not-applicable,MG-MTLS-005=not-applicable,MG-MTLS-006=not-applicable
+permissive	omg-permissive	permissive-api	sidecar	MG-AUTHZ-001=open,MG-AUTHZ-002=open,MG-AUTHZ-004=open,MG-AUTHZ-005=open,MG-GW-005=not-applicable,MG-MTLS-001=open,MG-MTLS-002=open,MG-MTLS-005=not-applicable,MG-MTLS-006=not-applicable
+workload-conflict	omg-workload-conflict	conflict-api	sidecar	MG-AUTHZ-001=open,MG-AUTHZ-002=open,MG-AUTHZ-004=open,MG-AUTHZ-005=open,MG-GW-005=not-applicable,MG-MTLS-001=open,MG-MTLS-002=open,MG-MTLS-003=open,MG-MTLS-005=not-applicable,MG-MTLS-006=not-applicable
+port-level-override	omg-port-override	port-api	sidecar	MG-AUTHZ-001=open,MG-AUTHZ-002=open,MG-AUTHZ-004=open,MG-AUTHZ-005=open,MG-GW-005=not-applicable,MG-MTLS-001=open,MG-MTLS-002=open,MG-MTLS-003=open,MG-MTLS-005=not-applicable,MG-MTLS-006=not-applicable
+dr-contradiction	omg-dr-contradiction	dr-api	sidecar	MG-AUTHZ-001=open,MG-AUTHZ-002=open,MG-AUTHZ-004=open,MG-AUTHZ-005=open,MG-GW-005=not-applicable,MG-MTLS-005=not-applicable,MG-MTLS-006=not-applicable,MG-MTLS-007=open
+not-in-mesh	omg-not-in-mesh	outside-api	none	MG-AUTHZ-001=not-applicable,MG-AUTHZ-002=not-applicable,MG-AUTHZ-003=not-applicable,MG-AUTHZ-004=not-applicable,MG-AUTHZ-005=not-applicable,MG-AUTHZ-006=not-applicable,MG-AUTHZ-007=not-applicable,MG-GW-005=not-applicable,MG-MTLS-001=not-applicable,MG-MTLS-002=not-applicable,MG-MTLS-003=not-applicable,MG-MTLS-005=not-applicable,MG-MTLS-006=not-applicable,MG-MTLS-007=not-applicable
+unclassified	omg-unclassified	unclassified-api	sidecar	MG-AUTHZ-001=open,MG-AUTHZ-002=open,MG-AUTHZ-004=open,MG-AUTHZ-005=open,MG-GW-005=not-applicable,MG-MTLS-005=not-applicable,MG-MTLS-006=not-applicable

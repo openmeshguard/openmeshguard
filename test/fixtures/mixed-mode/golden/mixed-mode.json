@@ -22,7 +22,7 @@
     "scope": {
       "allNamespaces": false,
       "namespaces": [
-        "omg-authz-root-local"
+        "omg-mixed-mode"
       ]
     },
     "dataSources": {
@@ -302,25 +302,25 @@
   ],
   "inventory": {
     "counts": {
-      "authorizationPolicies": 2,
+      "authorizationPolicies": 3,
       "daemonsets": 0,
-      "deployments": 1,
+      "deployments": 2,
       "destinationRules": 0,
-      "endpointSlices": 1,
+      "endpointSlices": 2,
       "gateways": 0,
       "namespaces": 1,
       "nodes": 1,
-      "peerAuthentications": 1,
-      "pods": 1,
-      "replicasets": 1,
-      "services": 1,
+      "peerAuthentications": 2,
+      "pods": 2,
+      "replicasets": 2,
+      "services": 2,
       "sidecars": 0,
       "statefulsets": 0,
       "ztunnelDaemonSets": 1,
       "ztunnelPods": 1
     },
     "dataPlane": {
-      "mode": "sidecar",
+      "mode": "mixed",
       "ztunnel": {
         "present": true,
         "nodesCovered": 1,
@@ -336,8 +336,88 @@
   "workloadPostures": [
     {
       "workload": {
-        "namespace": "omg-authz-root-local",
-        "name": "authz-root-local",
+        "namespace": "omg-mixed-mode",
+        "name": "mixed-ambient",
+        "kind": "Deployment"
+      },
+      "dataPlaneMode": "ambient",
+      "mtls": {
+        "effective": "strict",
+        "byPort": {
+          "8080": "strict"
+        },
+        "clientTLSContradiction": false,
+        "chain": [
+          {
+            "order": 1,
+            "kind": "MeshConfigDefault",
+            "field": "defaultPeerAuthenticationMode",
+            "effect": "defaults mesh mTLS mode to PERMISSIVE when no PeerAuthentication mode overrides it"
+          },
+          {
+            "order": 2,
+            "kind": "PeerAuthentication",
+            "name": "default",
+            "namespace": "istio-system",
+            "field": "spec.mtls.mode",
+            "effect": "sets mesh-wide mTLS mode to STRICT"
+          },
+          {
+            "order": 3,
+            "kind": "PeerAuthentication",
+            "name": "default",
+            "namespace": "omg-mixed-mode",
+            "field": "spec.mtls.mode",
+            "effect": "sets namespace mTLS mode to STRICT"
+          }
+        ]
+      },
+      "authorization": {
+        "effective": "default-deny-explicit-allow",
+        "broadAllow": false,
+        "identityScoped": true,
+        "policiesInScope": [
+          "omg-mixed-mode/allow-client",
+          "omg-mixed-mode/default-deny"
+        ],
+        "chain": [
+          {
+            "order": 1,
+            "kind": "AuthorizationDefault",
+            "field": "implicitEnablement",
+            "effect": "establishes Istio's implicit allow when no applicable ALLOW policy exists"
+          },
+          {
+            "order": 2,
+            "kind": "AuthorizationPolicy",
+            "name": "authz-root-default-deny",
+            "namespace": "istio-system",
+            "field": "spec.selector",
+            "effect": "selector does not match the workload; excludes policy from authorization evaluation"
+          },
+          {
+            "order": 3,
+            "kind": "AuthorizationPolicy",
+            "name": "allow-client",
+            "namespace": "omg-mixed-mode",
+            "field": "spec.action",
+            "effect": "adds explicit rules to the additive ALLOW union"
+          },
+          {
+            "order": 4,
+            "kind": "AuthorizationPolicy",
+            "name": "default-deny",
+            "namespace": "omg-mixed-mode",
+            "field": "spec.action",
+            "effect": "adds an ALLOW policy with no rules; activates default deny for unmatched requests"
+          }
+        ]
+      }
+    },
+    {
+      "workload": {
+        "namespace": "omg-mixed-mode",
+        "name": "mixed-sidecar",
         "kind": "Deployment"
       },
       "dataPlaneMode": "sidecar",
@@ -361,6 +441,14 @@
             "namespace": "istio-system",
             "field": "spec.mtls.mode",
             "effect": "sets mesh-wide mTLS mode to STRICT"
+          },
+          {
+            "order": 3,
+            "kind": "PeerAuthentication",
+            "name": "default",
+            "namespace": "omg-mixed-mode",
+            "field": "spec.mtls.mode",
+            "effect": "sets namespace mTLS mode to STRICT"
           }
         ]
       },
@@ -369,8 +457,8 @@
         "broadAllow": false,
         "identityScoped": true,
         "policiesInScope": [
-          "istio-system/authz-root-default-deny",
-          "omg-authz-root-local/allow-client"
+          "omg-mixed-mode/allow-client",
+          "omg-mixed-mode/default-deny"
         ],
         "chain": [
           {
@@ -384,16 +472,24 @@
             "kind": "AuthorizationPolicy",
             "name": "authz-root-default-deny",
             "namespace": "istio-system",
-            "field": "spec.action",
-            "effect": "adds an ALLOW policy with no rules; activates default deny for unmatched requests"
+            "field": "spec.selector",
+            "effect": "selector does not match the workload; excludes policy from authorization evaluation"
           },
           {
             "order": 3,
             "kind": "AuthorizationPolicy",
             "name": "allow-client",
-            "namespace": "omg-authz-root-local",
+            "namespace": "omg-mixed-mode",
             "field": "spec.action",
             "effect": "adds explicit rules to the additive ALLOW union"
+          },
+          {
+            "order": 4,
+            "kind": "AuthorizationPolicy",
+            "name": "default-deny",
+            "namespace": "omg-mixed-mode",
+            "field": "spec.action",
+            "effect": "adds an ALLOW policy with no rules; activates default deny for unmatched requests"
           }
         ]
       }
@@ -401,7 +497,7 @@
   ],
   "findings": [
     {
-      "id": "MG-GW-005-6d52c89a8247",
+      "id": "MG-GW-005-2fe6337711af",
       "controlId": "MG-GW-005",
       "title": "Ambient waypoint authorization must have explicit ready enrollment",
       "severity": "high",
@@ -416,8 +512,8 @@
       "resources": [
         {
           "kind": "Deployment",
-          "namespace": "omg-authz-root-local",
-          "name": "authz-root-local"
+          "namespace": "omg-mixed-mode",
+          "name": "mixed-sidecar"
         }
       ],
       "resolutionChain": [
@@ -432,25 +528,33 @@
           "kind": "AuthorizationPolicy",
           "name": "authz-root-default-deny",
           "namespace": "istio-system",
-          "field": "spec.action",
-          "effect": "adds an ALLOW policy with no rules; activates default deny for unmatched requests"
+          "field": "spec.selector",
+          "effect": "selector does not match the workload; excludes policy from authorization evaluation"
         },
         {
           "order": 3,
           "kind": "AuthorizationPolicy",
           "name": "allow-client",
-          "namespace": "omg-authz-root-local",
+          "namespace": "omg-mixed-mode",
           "field": "spec.action",
           "effect": "adds explicit rules to the additive ALLOW union"
+        },
+        {
+          "order": 4,
+          "kind": "AuthorizationPolicy",
+          "name": "default-deny",
+          "namespace": "omg-mixed-mode",
+          "field": "spec.action",
+          "effect": "adds an ALLOW policy with no rules; activates default deny for unmatched requests"
         }
       ],
-      "reasoning": "Control MG-GW-005 does not apply to omg-authz-root-local/authz-root-local.",
+      "reasoning": "Control MG-GW-005 does not apply to omg-mixed-mode/mixed-sidecar.",
       "remediation": {
         "guidance": "Set istio.io/use-waypoint to a waypoint whose scope covers the target and wait for its Gateway Programmed condition to become true."
       }
     },
     {
-      "id": "MG-MTLS-005-2b31010ddbde",
+      "id": "MG-MTLS-005-df48588bdbf8",
       "controlId": "MG-MTLS-005",
       "title": "Ambient workloads must have validated L4 mTLS posture",
       "severity": "high",
@@ -465,8 +569,8 @@
       "resources": [
         {
           "kind": "Deployment",
-          "namespace": "omg-authz-root-local",
-          "name": "authz-root-local"
+          "namespace": "omg-mixed-mode",
+          "name": "mixed-sidecar"
         }
       ],
       "resolutionChain": [
@@ -483,15 +587,23 @@
           "namespace": "istio-system",
           "field": "spec.mtls.mode",
           "effect": "sets mesh-wide mTLS mode to STRICT"
+        },
+        {
+          "order": 3,
+          "kind": "PeerAuthentication",
+          "name": "default",
+          "namespace": "omg-mixed-mode",
+          "field": "spec.mtls.mode",
+          "effect": "sets namespace mTLS mode to STRICT"
         }
       ],
-      "reasoning": "Control MG-MTLS-005 does not apply to omg-authz-root-local/authz-root-local.",
+      "reasoning": "Control MG-MTLS-005 does not apply to omg-mixed-mode/mixed-sidecar.",
       "remediation": {
         "guidance": "Validate ztunnel coverage and apply a STRICT PeerAuthentication posture for the ambient workload, then inspect the attached resolution chain."
       }
     },
     {
-      "id": "MG-MTLS-006-bff8ef6d19d0",
+      "id": "MG-MTLS-006-badc1f9cc70f",
       "controlId": "MG-MTLS-006",
       "title": "Ambient workloads must have healthy ztunnel node coverage",
       "severity": "critical",
@@ -506,8 +618,8 @@
       "resources": [
         {
           "kind": "Deployment",
-          "namespace": "omg-authz-root-local",
-          "name": "authz-root-local"
+          "namespace": "omg-mixed-mode",
+          "name": "mixed-sidecar"
         }
       ],
       "resolutionChain": [
@@ -524,9 +636,17 @@
           "namespace": "istio-system",
           "field": "spec.mtls.mode",
           "effect": "sets mesh-wide mTLS mode to STRICT"
+        },
+        {
+          "order": 3,
+          "kind": "PeerAuthentication",
+          "name": "default",
+          "namespace": "omg-mixed-mode",
+          "field": "spec.mtls.mode",
+          "effect": "sets namespace mTLS mode to STRICT"
         }
       ],
-      "reasoning": "Control MG-MTLS-006 does not apply to omg-authz-root-local/authz-root-local.",
+      "reasoning": "Control MG-MTLS-006 does not apply to omg-mixed-mode/mixed-sidecar.",
       "remediation": {
         "guidance": "Restore a Ready ztunnel DaemonSet pod on every node that schedules ambient workloads."
       }
@@ -539,18 +659,19 @@
         "category": "authz",
         "grade": "A",
         "passRate": 1,
-        "evaluated": 7
+        "evaluated": 14
       },
       {
         "category": "exposure",
-        "grade": "unknown",
-        "passRate": null
+        "grade": "A",
+        "passRate": 1,
+        "evaluated": 1
       },
       {
         "category": "mtls",
         "grade": "A",
         "passRate": 1,
-        "evaluated": 4
+        "evaluated": 10
       }
     ]
   }

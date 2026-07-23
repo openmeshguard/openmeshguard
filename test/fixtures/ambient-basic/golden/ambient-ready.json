@@ -22,7 +22,7 @@
     "scope": {
       "allNamespaces": false,
       "namespaces": [
-        "omg-authz-root-local"
+        "omg-ambient-ready"
       ]
     },
     "dataSources": {
@@ -304,29 +304,29 @@
     "counts": {
       "authorizationPolicies": 2,
       "daemonsets": 0,
-      "deployments": 1,
+      "deployments": 2,
       "destinationRules": 0,
-      "endpointSlices": 1,
-      "gateways": 0,
+      "endpointSlices": 2,
+      "gateways": 1,
       "namespaces": 1,
       "nodes": 1,
-      "peerAuthentications": 1,
-      "pods": 1,
-      "replicasets": 1,
-      "services": 1,
+      "peerAuthentications": 2,
+      "pods": 2,
+      "replicasets": 2,
+      "services": 2,
       "sidecars": 0,
       "statefulsets": 0,
       "ztunnelDaemonSets": 1,
       "ztunnelPods": 1
     },
     "dataPlane": {
-      "mode": "sidecar",
+      "mode": "mixed",
       "ztunnel": {
         "present": true,
         "nodesCovered": 1,
         "nodesTotal": 1
       },
-      "waypoints": 0
+      "waypoints": 1
     },
     "multiCluster": {
       "participationDetected": false,
@@ -336,11 +336,11 @@
   "workloadPostures": [
     {
       "workload": {
-        "namespace": "omg-authz-root-local",
-        "name": "authz-root-local",
+        "namespace": "omg-ambient-ready",
+        "name": "ambient-ready",
         "kind": "Deployment"
       },
-      "dataPlaneMode": "sidecar",
+      "dataPlaneMode": "ambient",
       "mtls": {
         "effective": "strict",
         "byPort": {
@@ -361,16 +361,23 @@
             "namespace": "istio-system",
             "field": "spec.mtls.mode",
             "effect": "sets mesh-wide mTLS mode to STRICT"
+          },
+          {
+            "order": 3,
+            "kind": "PeerAuthentication",
+            "name": "default",
+            "namespace": "omg-ambient-ready",
+            "field": "spec.mtls.mode",
+            "effect": "sets namespace mTLS mode to STRICT"
           }
         ]
       },
       "authorization": {
-        "effective": "default-deny-explicit-allow",
+        "effective": "allow-only",
         "broadAllow": false,
         "identityScoped": true,
         "policiesInScope": [
-          "istio-system/authz-root-default-deny",
-          "omg-authz-root-local/allow-client"
+          "omg-ambient-ready/allow-api"
         ],
         "chain": [
           {
@@ -384,16 +391,85 @@
             "kind": "AuthorizationPolicy",
             "name": "authz-root-default-deny",
             "namespace": "istio-system",
-            "field": "spec.action",
-            "effect": "adds an ALLOW policy with no rules; activates default deny for unmatched requests"
+            "field": "spec.selector",
+            "effect": "selector does not match the workload; excludes policy from authorization evaluation"
           },
           {
             "order": 3,
             "kind": "AuthorizationPolicy",
-            "name": "allow-client",
-            "namespace": "omg-authz-root-local",
-            "field": "spec.action",
+            "name": "allow-api",
+            "namespace": "omg-ambient-ready",
+            "field": "spec.targetRefs[\"Service/api\"]",
             "effect": "adds explicit rules to the additive ALLOW union"
+          },
+          {
+            "order": 4,
+            "kind": "Waypoint",
+            "name": "ambient-ready-waypoint",
+            "namespace": "omg-ambient-ready",
+            "field": "status.conditions[Programmed]",
+            "effect": "selected namespace waypoint is ready and enforces waypoint-attached policy omg-ambient-ready/allow-api"
+          }
+        ]
+      }
+    },
+    {
+      "workload": {
+        "namespace": "omg-ambient-ready",
+        "name": "ambient-ready-waypoint",
+        "kind": "Deployment"
+      },
+      "dataPlaneMode": "sidecar",
+      "mtls": {
+        "effective": "strict",
+        "byPort": {
+          "15008": "strict",
+          "15021": "strict"
+        },
+        "clientTLSContradiction": false,
+        "chain": [
+          {
+            "order": 1,
+            "kind": "MeshConfigDefault",
+            "field": "defaultPeerAuthenticationMode",
+            "effect": "defaults mesh mTLS mode to PERMISSIVE when no PeerAuthentication mode overrides it"
+          },
+          {
+            "order": 2,
+            "kind": "PeerAuthentication",
+            "name": "default",
+            "namespace": "istio-system",
+            "field": "spec.mtls.mode",
+            "effect": "sets mesh-wide mTLS mode to STRICT"
+          },
+          {
+            "order": 3,
+            "kind": "PeerAuthentication",
+            "name": "default",
+            "namespace": "omg-ambient-ready",
+            "field": "spec.mtls.mode",
+            "effect": "sets namespace mTLS mode to STRICT"
+          }
+        ]
+      },
+      "authorization": {
+        "effective": "no-policy",
+        "broadAllow": false,
+        "identityScoped": false,
+        "chain": [
+          {
+            "order": 1,
+            "kind": "AuthorizationDefault",
+            "field": "implicitEnablement",
+            "effect": "establishes Istio's implicit allow when no applicable ALLOW policy exists"
+          },
+          {
+            "order": 2,
+            "kind": "AuthorizationPolicy",
+            "name": "authz-root-default-deny",
+            "namespace": "istio-system",
+            "field": "spec.selector",
+            "effect": "selector does not match the workload; excludes policy from authorization evaluation"
           }
         ]
       }
@@ -401,12 +477,12 @@
   ],
   "findings": [
     {
-      "id": "MG-GW-005-6d52c89a8247",
-      "controlId": "MG-GW-005",
-      "title": "Ambient waypoint authorization must have explicit ready enrollment",
+      "id": "MG-AUTHZ-001-949567e51911",
+      "controlId": "MG-AUTHZ-001",
+      "title": "Mesh-managed workloads must have resolved authorization coverage",
       "severity": "high",
       "evidenceType": "config",
-      "status": "not-applicable",
+      "status": "open",
       "confidence": "resolved",
       "dataPlaneMode": "sidecar",
       "evidenceSources": [
@@ -416,8 +492,8 @@
       "resources": [
         {
           "kind": "Deployment",
-          "namespace": "omg-authz-root-local",
-          "name": "authz-root-local"
+          "namespace": "omg-ambient-ready",
+          "name": "ambient-ready-waypoint"
         }
       ],
       "resolutionChain": [
@@ -432,25 +508,238 @@
           "kind": "AuthorizationPolicy",
           "name": "authz-root-default-deny",
           "namespace": "istio-system",
-          "field": "spec.action",
-          "effect": "adds an ALLOW policy with no rules; activates default deny for unmatched requests"
+          "field": "spec.selector",
+          "effect": "selector does not match the workload; excludes policy from authorization evaluation"
+        }
+      ],
+      "reasoning": "omg-ambient-ready/ambient-ready-waypoint has no resolved AuthorizationPolicy coverage.",
+      "remediation": {
+        "guidance": "Apply an AuthorizationPolicy that selects this workload and inspect the resolution chain to confirm its effective scope."
+      }
+    },
+    {
+      "id": "MG-AUTHZ-002-0adbbee38aaa",
+      "controlId": "MG-AUTHZ-002",
+      "title": "Workloads should resolve to default deny with explicit allow",
+      "severity": "high",
+      "evidenceType": "config",
+      "status": "open",
+      "confidence": "resolved",
+      "dataPlaneMode": "sidecar",
+      "evidenceSources": [
+        "kubernetes-api",
+        "istio-crd"
+      ],
+      "resources": [
+        {
+          "kind": "Deployment",
+          "namespace": "omg-ambient-ready",
+          "name": "ambient-ready-waypoint"
+        }
+      ],
+      "resolutionChain": [
+        {
+          "order": 1,
+          "kind": "AuthorizationDefault",
+          "field": "implicitEnablement",
+          "effect": "establishes Istio's implicit allow when no applicable ALLOW policy exists"
+        },
+        {
+          "order": 2,
+          "kind": "AuthorizationPolicy",
+          "name": "authz-root-default-deny",
+          "namespace": "istio-system",
+          "field": "spec.selector",
+          "effect": "selector does not match the workload; excludes policy from authorization evaluation"
+        }
+      ],
+      "reasoning": "Authorization for omg-ambient-ready/ambient-ready-waypoint resolves to no-policy, not default deny with explicit allow.",
+      "remediation": {
+        "guidance": "Establish an empty ALLOW policy for default deny and add narrowly scoped ALLOW rules for required traffic."
+      }
+    },
+    {
+      "id": "MG-AUTHZ-002-e9d23d4086f4",
+      "controlId": "MG-AUTHZ-002",
+      "title": "Workloads should resolve to default deny with explicit allow",
+      "severity": "high",
+      "evidenceType": "config",
+      "status": "open",
+      "confidence": "resolved",
+      "dataPlaneMode": "ambient",
+      "evidenceSources": [
+        "kubernetes-api",
+        "istio-crd"
+      ],
+      "resources": [
+        {
+          "kind": "Deployment",
+          "namespace": "omg-ambient-ready",
+          "name": "ambient-ready"
+        }
+      ],
+      "resolutionChain": [
+        {
+          "order": 1,
+          "kind": "AuthorizationDefault",
+          "field": "implicitEnablement",
+          "effect": "establishes Istio's implicit allow when no applicable ALLOW policy exists"
+        },
+        {
+          "order": 2,
+          "kind": "AuthorizationPolicy",
+          "name": "authz-root-default-deny",
+          "namespace": "istio-system",
+          "field": "spec.selector",
+          "effect": "selector does not match the workload; excludes policy from authorization evaluation"
         },
         {
           "order": 3,
           "kind": "AuthorizationPolicy",
-          "name": "allow-client",
-          "namespace": "omg-authz-root-local",
-          "field": "spec.action",
+          "name": "allow-api",
+          "namespace": "omg-ambient-ready",
+          "field": "spec.targetRefs[\"Service/api\"]",
           "effect": "adds explicit rules to the additive ALLOW union"
+        },
+        {
+          "order": 4,
+          "kind": "Waypoint",
+          "name": "ambient-ready-waypoint",
+          "namespace": "omg-ambient-ready",
+          "field": "status.conditions[Programmed]",
+          "effect": "selected namespace waypoint is ready and enforces waypoint-attached policy omg-ambient-ready/allow-api"
         }
       ],
-      "reasoning": "Control MG-GW-005 does not apply to omg-authz-root-local/authz-root-local.",
+      "reasoning": "Authorization for omg-ambient-ready/ambient-ready resolves to allow-only, not default deny with explicit allow.",
+      "remediation": {
+        "guidance": "Establish an empty ALLOW policy for default deny and add narrowly scoped ALLOW rules for required traffic."
+      }
+    },
+    {
+      "id": "MG-AUTHZ-004-3b0ff014d5e1",
+      "controlId": "MG-AUTHZ-004",
+      "title": "Authorization access must be scoped to explicit identities",
+      "severity": "high",
+      "evidenceType": "config",
+      "status": "open",
+      "confidence": "resolved",
+      "dataPlaneMode": "sidecar",
+      "evidenceSources": [
+        "kubernetes-api",
+        "istio-crd"
+      ],
+      "resources": [
+        {
+          "kind": "Deployment",
+          "namespace": "omg-ambient-ready",
+          "name": "ambient-ready-waypoint"
+        }
+      ],
+      "resolutionChain": [
+        {
+          "order": 1,
+          "kind": "AuthorizationDefault",
+          "field": "implicitEnablement",
+          "effect": "establishes Istio's implicit allow when no applicable ALLOW policy exists"
+        },
+        {
+          "order": 2,
+          "kind": "AuthorizationPolicy",
+          "name": "authz-root-default-deny",
+          "namespace": "istio-system",
+          "field": "spec.selector",
+          "effect": "selector does not match the workload; excludes policy from authorization evaluation"
+        }
+      ],
+      "reasoning": "Authorization access for omg-ambient-ready/ambient-ready-waypoint is not scoped to explicit principals, namespaces, or workloads.",
+      "remediation": {
+        "guidance": "Scope ALLOW rules to approved principals, namespaces, service accounts, or workload identities."
+      }
+    },
+    {
+      "id": "MG-AUTHZ-005-4ab3c9faba81",
+      "controlId": "MG-AUTHZ-005",
+      "title": "Authorization coverage must resolve at workload level",
+      "severity": "high",
+      "evidenceType": "config",
+      "status": "open",
+      "confidence": "resolved",
+      "dataPlaneMode": "sidecar",
+      "evidenceSources": [
+        "kubernetes-api",
+        "istio-crd"
+      ],
+      "resources": [
+        {
+          "kind": "Deployment",
+          "namespace": "omg-ambient-ready",
+          "name": "ambient-ready-waypoint"
+        }
+      ],
+      "resolutionChain": [
+        {
+          "order": 1,
+          "kind": "AuthorizationDefault",
+          "field": "implicitEnablement",
+          "effect": "establishes Istio's implicit allow when no applicable ALLOW policy exists"
+        },
+        {
+          "order": 2,
+          "kind": "AuthorizationPolicy",
+          "name": "authz-root-default-deny",
+          "namespace": "istio-system",
+          "field": "spec.selector",
+          "effect": "selector does not match the workload; excludes policy from authorization evaluation"
+        }
+      ],
+      "reasoning": "omg-ambient-ready/ambient-ready-waypoint is not selected by any resolved AuthorizationPolicy.",
+      "remediation": {
+        "guidance": "Correct policy namespace, selector, or targetRefs so coverage reaches this workload rather than relying on policy resource presence alone."
+      }
+    },
+    {
+      "id": "MG-GW-005-6625e7838e47",
+      "controlId": "MG-GW-005",
+      "title": "Ambient waypoint authorization must have explicit ready enrollment",
+      "severity": "high",
+      "evidenceType": "config",
+      "status": "not-applicable",
+      "confidence": "resolved",
+      "dataPlaneMode": "sidecar",
+      "evidenceSources": [
+        "kubernetes-api",
+        "istio-crd"
+      ],
+      "resources": [
+        {
+          "kind": "Deployment",
+          "namespace": "omg-ambient-ready",
+          "name": "ambient-ready-waypoint"
+        }
+      ],
+      "resolutionChain": [
+        {
+          "order": 1,
+          "kind": "AuthorizationDefault",
+          "field": "implicitEnablement",
+          "effect": "establishes Istio's implicit allow when no applicable ALLOW policy exists"
+        },
+        {
+          "order": 2,
+          "kind": "AuthorizationPolicy",
+          "name": "authz-root-default-deny",
+          "namespace": "istio-system",
+          "field": "spec.selector",
+          "effect": "selector does not match the workload; excludes policy from authorization evaluation"
+        }
+      ],
+      "reasoning": "Control MG-GW-005 does not apply to omg-ambient-ready/ambient-ready-waypoint.",
       "remediation": {
         "guidance": "Set istio.io/use-waypoint to a waypoint whose scope covers the target and wait for its Gateway Programmed condition to become true."
       }
     },
     {
-      "id": "MG-MTLS-005-2b31010ddbde",
+      "id": "MG-MTLS-005-a79ef320c50c",
       "controlId": "MG-MTLS-005",
       "title": "Ambient workloads must have validated L4 mTLS posture",
       "severity": "high",
@@ -465,8 +754,8 @@
       "resources": [
         {
           "kind": "Deployment",
-          "namespace": "omg-authz-root-local",
-          "name": "authz-root-local"
+          "namespace": "omg-ambient-ready",
+          "name": "ambient-ready-waypoint"
         }
       ],
       "resolutionChain": [
@@ -483,15 +772,23 @@
           "namespace": "istio-system",
           "field": "spec.mtls.mode",
           "effect": "sets mesh-wide mTLS mode to STRICT"
+        },
+        {
+          "order": 3,
+          "kind": "PeerAuthentication",
+          "name": "default",
+          "namespace": "omg-ambient-ready",
+          "field": "spec.mtls.mode",
+          "effect": "sets namespace mTLS mode to STRICT"
         }
       ],
-      "reasoning": "Control MG-MTLS-005 does not apply to omg-authz-root-local/authz-root-local.",
+      "reasoning": "Control MG-MTLS-005 does not apply to omg-ambient-ready/ambient-ready-waypoint.",
       "remediation": {
         "guidance": "Validate ztunnel coverage and apply a STRICT PeerAuthentication posture for the ambient workload, then inspect the attached resolution chain."
       }
     },
     {
-      "id": "MG-MTLS-006-bff8ef6d19d0",
+      "id": "MG-MTLS-006-ec7ac6e27f97",
       "controlId": "MG-MTLS-006",
       "title": "Ambient workloads must have healthy ztunnel node coverage",
       "severity": "critical",
@@ -506,8 +803,8 @@
       "resources": [
         {
           "kind": "Deployment",
-          "namespace": "omg-authz-root-local",
-          "name": "authz-root-local"
+          "namespace": "omg-ambient-ready",
+          "name": "ambient-ready-waypoint"
         }
       ],
       "resolutionChain": [
@@ -524,9 +821,17 @@
           "namespace": "istio-system",
           "field": "spec.mtls.mode",
           "effect": "sets mesh-wide mTLS mode to STRICT"
+        },
+        {
+          "order": 3,
+          "kind": "PeerAuthentication",
+          "name": "default",
+          "namespace": "omg-ambient-ready",
+          "field": "spec.mtls.mode",
+          "effect": "sets namespace mTLS mode to STRICT"
         }
       ],
-      "reasoning": "Control MG-MTLS-006 does not apply to omg-authz-root-local/authz-root-local.",
+      "reasoning": "Control MG-MTLS-006 does not apply to omg-ambient-ready/ambient-ready-waypoint.",
       "remediation": {
         "guidance": "Restore a Ready ztunnel DaemonSet pod on every node that schedules ambient workloads."
       }
@@ -537,20 +842,21 @@
     "categories": [
       {
         "category": "authz",
-        "grade": "A",
-        "passRate": 1,
-        "evaluated": 7
+        "grade": "D",
+        "passRate": 0.6428571428571429,
+        "evaluated": 14
       },
       {
         "category": "exposure",
-        "grade": "unknown",
-        "passRate": null
+        "grade": "A",
+        "passRate": 1,
+        "evaluated": 1
       },
       {
         "category": "mtls",
         "grade": "A",
         "passRate": 1,
-        "evaluated": 4
+        "evaluated": 10
       }
     ]
   }
