@@ -220,6 +220,50 @@ func TestResolverV2ResolveAuthz(t *testing.T) {
 			},
 		},
 		{
+			name: "ambient workload without ztunnel cannot enforce ready waypoint policy",
+			in: func() WorkloadInput {
+				in := authzWorkloadWithWaypoint(ModeAmbient, &WaypointView{
+					Name: "payments", Namespace: "payments", Known: true, Ready: true, Scope: "service",
+				}, waypointAuthzPolicy("payments", "http-get", true))
+				in.ZtunnelOnNode = False
+				return in
+			}(),
+			wantEffective: AuthzNotInMesh,
+			wantChain: []Step{{
+				Order: 1, Kind: "DataPlane", Field: "ztunnelOnNode",
+				Effect: "ambient enrollment is declared but no ztunnel is available on the workload node, so Istio authorization is not enforced",
+			}},
+		},
+		{
+			name: "ambient workload with unavailable ztunnel evidence is unknown",
+			in: func() WorkloadInput {
+				in := authzWorkloadWithWaypoint(ModeAmbient, &WaypointView{
+					Name: "payments", Namespace: "payments", Known: true, Ready: true, Scope: "service",
+				}, waypointAuthzPolicy("payments", "http-get", true))
+				in.ZtunnelOnNode = Unobserved
+				return in
+			}(),
+			wantEffective: AuthzUnknown,
+			wantUnknown:   ztunnelUnavailableReason,
+			wantChain:     []Step{},
+		},
+		{
+			name: "sidecar authorization ignores ztunnel state",
+			in: func() WorkloadInput {
+				in := authzWorkload(ModeSidecar, authzPolicy("payments", "allow-api", "ALLOW", true))
+				in.ZtunnelOnNode = False
+				return in
+			}(),
+			wantEffective:  AuthzAllowOnly,
+			wantBroadAllow: &falseValue,
+			wantIdentity:   &trueValue,
+			wantPolicies:   []string{"payments/allow-api"},
+			wantChain: []Step{
+				authzDefaultStep(1),
+				authzPolicyStepWant(2, "payments", "allow-api", "adds explicit rules to the additive ALLOW union"),
+			},
+		},
+		{
 			name: "mixed L4 and L7 targetRef policy with unready waypoint is unenforced",
 			in: authzWorkloadWithWaypoint(ModeAmbient, &WaypointView{
 				Name: "payments", Namespace: "payments", Known: true, Ready: false, Scope: "service",
@@ -529,13 +573,17 @@ func authzWorkloadWithWaypoint(mode DataPlaneMode, waypoint *WaypointView, polic
 			policies[i].TargetWaypoint = waypoint
 		}
 	}
-	return WorkloadInput{
+	in := WorkloadInput{
 		Ref:           workloadRef(),
 		DataPlaneMode: mode,
 		MeshDefaults:  MeshDefaults{RootNamespace: "istio-system", Known: true},
 		AuthzPolicies: append([]AuthorizationPolicyView{}, policies...),
 		Waypoint:      waypoint,
 	}
+	if mode == ModeAmbient {
+		in.ZtunnelOnNode = True
+	}
+	return in
 }
 
 func authzPolicy(namespace, name, action string, hasRules bool) AuthorizationPolicyView {

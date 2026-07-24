@@ -32,6 +32,22 @@ func (ResolverV2) ResolveAuthz(in WorkloadInput) AuthzResult {
 			}}),
 		}
 	}
+	if in.DataPlaneMode == ModeAmbient {
+		switch in.ZtunnelOnNode {
+		case True:
+		case False:
+			return AuthzResult{
+				Effective: AuthzNotInMesh,
+				Chain: orderChain([]Step{{
+					Kind:   "DataPlane",
+					Field:  "ztunnelOnNode",
+					Effect: "ambient enrollment is declared but no ztunnel is available on the workload node, so Istio authorization is not enforced",
+				}}),
+			}
+		default:
+			return unknownAuthz(ztunnelUnavailableReason, nil, nil, nil, nil)
+		}
+	}
 	if in.AuthzPolicies == nil {
 		return unknownAuthz(authorizationPoliciesUnavailableReason, nil, nil, nil, nil)
 	}
