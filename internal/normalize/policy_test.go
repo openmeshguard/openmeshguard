@@ -460,6 +460,7 @@ func TestBuildPolicyInputs(t *testing.T) {
 					t.Fatalf("sidecar authorization = %#v, want targetRef policy excluded", sidecarResult)
 				}
 				workload.DataPlaneMode = resolver.ModeAmbient
+				workload.ZtunnelOnNode = resolver.True
 				result := resolver.New().ResolveAuthz(workload)
 				if result.Effective != resolver.AuthzAllowOnly {
 					t.Fatalf("effective authorization = %q, want allow-only", result.Effective)
@@ -498,6 +499,7 @@ func TestBuildPolicyInputs(t *testing.T) {
 					t.Fatalf("target-specific policy projection = %#v, want unready b-waypoint", policy)
 				}
 				workload.DataPlaneMode = resolver.ModeAmbient
+				workload.ZtunnelOnNode = resolver.True
 				result := resolver.New().ResolveAuthz(workload)
 				if result.Effective != resolver.AuthzWaypointUnenforced || len(result.WaypointUnenforced) != 1 {
 					t.Fatalf("authorization = %#v, want b-waypoint unenforced", result)
@@ -533,6 +535,7 @@ func TestBuildPolicyInputs(t *testing.T) {
 					t.Fatalf("AuthorizationPolicies = %#v, want ordered a-api and b-api attachments", workload.AuthzPolicies)
 				}
 				workload.DataPlaneMode = resolver.ModeAmbient
+				workload.ZtunnelOnNode = resolver.True
 				result := resolver.New().ResolveAuthz(workload)
 				wantChain := []resolver.Step{
 					{Order: 1, Kind: "AuthorizationDefault", Field: "implicitEnablement", Effect: "establishes Istio's implicit allow when no applicable ALLOW policy exists"},
@@ -564,9 +567,96 @@ func TestBuildPolicyInputs(t *testing.T) {
 					t.Fatalf("waypoint = %#v, want explicit unavailable evidence", workload.Waypoint)
 				}
 				workload.DataPlaneMode = resolver.ModeAmbient
+				workload.ZtunnelOnNode = resolver.True
 				result := resolver.New().ResolveAuthz(workload)
 				if result.Effective != resolver.AuthzUnknown || !strings.Contains(result.UnknownReason, "waypoint evidence unavailable") {
 					t.Fatalf("authorization = %#v, want waypoint evidence unknown", result)
+				}
+			},
+		},
+		{
+			name: "preserves unavailable namespace waypoint inheritance evidence",
+			mutate: func(snapshot *collect.Snapshot) {
+				snapshot.Namespaces = nil
+				snapshot.PermissionSummary = append(snapshot.PermissionSummary, collect.Permission{
+					APIGroup: "", Resource: "namespaces", Verbs: []string{"list"}, Granted: false,
+				})
+				snapshot.Deployments[0].Spec.Template.Labels["istio.io/dataplane-mode"] = "ambient"
+				snapshot.Deployments[0].Spec.Template.Spec.Containers = []corev1.Container{{Name: "api"}}
+				snapshot.Services = []corev1.Service{serviceForWorkload("payments", "api", "api", "http")}
+				snapshot.AuthorizationPolicies = []*istiosecurityv1.AuthorizationPolicy{
+					authorizationPolicy("payments", "get-api", nil, l7GetRule(), []*typeapi.PolicyTargetReference{{Kind: "Service", Name: "api"}}),
+				}
+			},
+			assert: func(t *testing.T, workload resolver.WorkloadInput) {
+				if workload.DataPlaneMode != resolver.ModeAmbient {
+					t.Fatalf("data plane mode = %q, want ambient from workload label", workload.DataPlaneMode)
+				}
+				if workload.Waypoint == nil || workload.Waypoint.Known || workload.Waypoint.Scope != "namespace" {
+					t.Fatalf("workload waypoint = %#v, want unavailable namespace inheritance evidence", workload.Waypoint)
+				}
+				if len(workload.AuthzPolicies) != 1 || workload.AuthzPolicies[0].TargetWaypoint == nil ||
+					workload.AuthzPolicies[0].TargetWaypoint.Known {
+					t.Fatalf("AuthorizationPolicy target waypoint = %#v, want unavailable namespace inheritance evidence", workload.AuthzPolicies)
+				}
+				workload.ZtunnelOnNode = resolver.True
+				result := resolver.New().ResolveAuthz(workload)
+				if result.Effective != resolver.AuthzUnknown || !strings.Contains(result.UnknownReason, "waypoint evidence unavailable") {
+					t.Fatalf("authorization = %#v, want unavailable waypoint evidence to remain unknown", result)
+				}
+			},
+		},
+		{
+			name: "projects root GatewayClass targetRef through the selected waypoint",
+			mutate: func(snapshot *collect.Snapshot) {
+				service := serviceForWorkload("payments", "api", "api", "http")
+				service.Labels = map[string]string{useWaypointLabel: "api-waypoint"}
+				snapshot.Services = []corev1.Service{service}
+				snapshot.AuthorizationPolicies = []*istiosecurityv1.AuthorizationPolicy{
+					authorizationPolicy("istio-system", "waypoint-default", nil, l7GetRule(), []*typeapi.PolicyTargetReference{{
+						Group: "gateway.networking.k8s.io", Kind: "GatewayClass", Name: waypointGatewayClass,
+					}}),
+				}
+				snapshot.Gateways = []gatewayv1.Gateway{readyWaypoint("payments", "api-waypoint", "service")}
+			},
+			assert: func(t *testing.T, workload resolver.WorkloadInput) {
+				if len(workload.AuthzPolicies) != 1 {
+					t.Fatalf("AuthorizationPolicies = %#v, want root GatewayClass policy", workload.AuthzPolicies)
+				}
+				policy := workload.AuthzPolicies[0]
+				if policy.TargetRefKind != "GatewayClass" || policy.TargetRefName != waypointGatewayClass ||
+					policy.TargetWaypoint == nil || !policy.TargetWaypoint.Ready {
+					t.Fatalf("GatewayClass target projection = %#v, want selected ready waypoint", policy)
+				}
+				workload.DataPlaneMode = resolver.ModeAmbient
+				workload.ZtunnelOnNode = resolver.True
+				if result := resolver.New().ResolveAuthz(workload); result.Effective != resolver.AuthzAllowOnly {
+					t.Fatalf("authorization = %#v, want root GatewayClass policy enforced", result)
+				}
+			},
+		},
+		{
+			name: "rejects stale waypoint Programmed condition",
+			mutate: func(snapshot *collect.Snapshot) {
+				service := serviceForWorkload("payments", "api", "api", "http")
+				service.Labels = map[string]string{useWaypointLabel: "api-waypoint"}
+				snapshot.Services = []corev1.Service{service}
+				snapshot.AuthorizationPolicies = []*istiosecurityv1.AuthorizationPolicy{
+					authorizationPolicy("payments", "get-api", nil, l7GetRule(), []*typeapi.PolicyTargetReference{{Kind: "Service", Name: "api"}}),
+				}
+				gateway := readyWaypoint("payments", "api-waypoint", "service")
+				gateway.Generation = 2
+				gateway.Status.Conditions[0].ObservedGeneration = 1
+				snapshot.Gateways = []gatewayv1.Gateway{gateway}
+			},
+			assert: func(t *testing.T, workload resolver.WorkloadInput) {
+				if workload.Waypoint == nil || !workload.Waypoint.Known || workload.Waypoint.Ready {
+					t.Fatalf("waypoint = %#v, want known unready from stale Programmed condition", workload.Waypoint)
+				}
+				workload.DataPlaneMode = resolver.ModeAmbient
+				workload.ZtunnelOnNode = resolver.True
+				if result := resolver.New().ResolveAuthz(workload); result.Effective != resolver.AuthzWaypointUnenforced {
+					t.Fatalf("authorization = %#v, want stale waypoint unenforced", result)
 				}
 			},
 		},

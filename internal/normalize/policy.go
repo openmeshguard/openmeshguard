@@ -708,13 +708,23 @@ func (b *workloadBuilder) authorizationPolicyTargetView(
 	namespaceLabels map[string]string,
 	workloadWaypoint *resolver.WaypointView,
 ) (resolver.AuthorizationPolicyView, bool) {
-	if view.Namespace != workloadNamespace {
-		return resolver.AuthorizationPolicyView{}, false
-	}
+	kind := strings.ToLower(ref.kind)
 	view.TargetsWaypoint = true
 	view.TargetRefKind = ref.kind
 	view.TargetRefName = ref.name
-	switch strings.ToLower(ref.kind) {
+	if kind == "gatewayclass" {
+		if !view.RootNamespace || ref.group != "gateway.networking.k8s.io" ||
+			ref.name != waypointGatewayClass || workloadWaypoint == nil {
+			return resolver.AuthorizationPolicyView{}, false
+		}
+		waypoint := *workloadWaypoint
+		view.TargetWaypoint = &waypoint
+		return view, true
+	}
+	if view.Namespace != workloadNamespace {
+		return resolver.AuthorizationPolicyView{}, false
+	}
+	switch kind {
 	case "service":
 		if ref.group != "" && ref.group != "core" {
 			return resolver.AuthorizationPolicyView{}, false
@@ -879,7 +889,9 @@ func projectGateways(gateways []gatewayv1.Gateway) []gatewayProjection {
 
 func gatewayProgrammed(gateway gatewayv1.Gateway) bool {
 	for _, condition := range gateway.Status.Conditions {
-		if condition.Type == string(gatewayv1.GatewayConditionProgrammed) && condition.Status == metav1.ConditionTrue {
+		if condition.Type == string(gatewayv1.GatewayConditionProgrammed) &&
+			condition.Status == metav1.ConditionTrue &&
+			condition.ObservedGeneration == gateway.Generation {
 			return true
 		}
 	}
@@ -894,6 +906,9 @@ func (b *workloadBuilder) waypointFor(
 ) *resolver.WaypointView {
 	name, waypointNamespace, scope := selectedWaypointLabel(namespace, workloadLabels, namespaceLabels, services)
 	if name == "" {
+		if !b.namespaceLabelsKnown {
+			return &resolver.WaypointView{Known: false, Scope: "namespace"}
+		}
 		return nil
 	}
 	return b.waypointView(name, waypointNamespace, scope)
@@ -909,6 +924,9 @@ func (b *workloadBuilder) waypointForService(service corev1.Service, namespaceLa
 		scope = "namespace"
 	}
 	if name == "" {
+		if !b.namespaceLabelsKnown {
+			return &resolver.WaypointView{Known: false, Scope: "namespace"}
+		}
 		return nil
 	}
 	return b.waypointView(name, waypointNamespace(service.Namespace, labels), scope)
