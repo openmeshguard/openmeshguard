@@ -8,7 +8,7 @@ import (
 )
 
 const (
-	mtlsVersion  = "mtls/v3"
+	mtlsVersion  = "mtls/v4"
 	authzVersion = "authz/v7"
 
 	dataPlaneUnknownReason                = "data plane membership unavailable"
@@ -371,7 +371,7 @@ func applyDestinationRules(
 	contradiction := false
 	for _, destinationRule := range sortedDestinationRules(destinationRules) {
 		if strings.TrimSpace(destinationRule.TLSMode) != "" {
-			serverStrict, applies, err := destinationLevelServerStrict(
+			serverModes, applies, err := destinationLevelServerModes(
 				effective,
 				byPort,
 				ports,
@@ -385,7 +385,7 @@ func applyDestinationRules(
 				"spec.trafficPolicy.tls.mode",
 				0,
 				destinationRule.TLSMode,
-				serverStrict,
+				serverModes,
 			)
 			if err != nil {
 				return nil, false, err
@@ -406,7 +406,7 @@ func applyDestinationRules(
 				fmt.Sprintf("spec.trafficPolicy.portLevelSettings[%q].tls.mode", fmt.Sprint(port)),
 				port,
 				mode,
-				serverStrictForPort(effective, byPort, port),
+				serverMTLSModesFor(serverModeForPort(effective, byPort, port)),
 			)
 			if err != nil {
 				return nil, false, err
@@ -423,7 +423,7 @@ func destinationRuleStep(
 	field string,
 	port int32,
 	mode string,
-	serverStrict bool,
+	serverModes serverMTLSModes,
 ) (bool, Step, error) {
 	normalized := normalizedMode(mode)
 	switch normalized {
@@ -434,7 +434,9 @@ func destinationRuleStep(
 		return false, Step{}, fmt.Errorf("unsupported DestinationRule TLS mode %q on %s/%s", mode, destinationRule.Namespace, destinationRule.Name)
 	}
 
-	conflicts := serverStrict && (normalized == "DISABLE" || normalized == "SIMPLE")
+	conflictsWithStrict := serverModes.strict && (normalized == "DISABLE" || normalized == "SIMPLE")
+	conflictsWithDisabled := serverModes.disabled && normalized == "ISTIO_MUTUAL"
+	conflicts := conflictsWithStrict || conflictsWithDisabled
 	var effect string
 	if normalized == "" {
 		effect = "leaves client TLS mode unset, so automatic mTLS applies"
@@ -447,9 +449,11 @@ func destinationRuleStep(
 			effect = fmt.Sprintf("sets client TLS mode %s for port %d", normalized, port)
 		}
 	}
-	if conflicts {
+	if conflictsWithStrict {
 		effect += ", which conflicts with strict server mTLS"
-	} else if serverStrict {
+	} else if conflictsWithDisabled {
+		effect += ", which conflicts with disabled server mTLS"
+	} else if serverModes.strict {
 		effect += ", compatible with strict server mTLS"
 	}
 
@@ -462,17 +466,29 @@ func destinationRuleStep(
 	}, nil
 }
 
-func destinationLevelServerStrict(
+type serverMTLSModes struct {
+	strict   bool
+	disabled bool
+}
+
+func serverMTLSModesFor(mode MTLSEffective) serverMTLSModes {
+	return serverMTLSModes{
+		strict:   mode == MTLSStrict,
+		disabled: mode == MTLSDisabled,
+	}
+}
+
+func destinationLevelServerModes(
 	effective MTLSEffective,
 	byPort map[int32]MTLSEffective,
 	ports []int32,
 	portTLSModes map[int32]string,
-) (serverStrict bool, applies bool, err error) {
+) (serverModes serverMTLSModes, applies bool, err error) {
 	if len(portTLSModes) == 0 {
-		return serverStrictForAnyPort(effective, byPort), true, nil
+		return serverModesForAnyPort(effective, byPort), true, nil
 	}
 	if len(ports) == 0 {
-		return false, false, fmt.Errorf("%s", destinationRulePortsUnavailableReason)
+		return serverMTLSModes{}, false, fmt.Errorf("%s", destinationRulePortsUnavailableReason)
 	}
 
 	for _, port := range sortedInt32Keys(int32Set(ports)) {
@@ -480,31 +496,33 @@ func destinationLevelServerStrict(
 			continue
 		}
 		applies = true
-		serverStrict = serverStrict || serverStrictForPort(effective, byPort, port)
+		mode := serverModeForPort(effective, byPort, port)
+		serverModes.strict = serverModes.strict || mode == MTLSStrict
+		serverModes.disabled = serverModes.disabled || mode == MTLSDisabled
 	}
-	return serverStrict, applies, nil
+	return serverModes, applies, nil
 }
 
-func serverStrictForAnyPort(effective MTLSEffective, byPort map[int32]MTLSEffective) bool {
+func serverModesForAnyPort(effective MTLSEffective, byPort map[int32]MTLSEffective) serverMTLSModes {
 	if len(byPort) == 0 {
-		return effective == MTLSStrict
+		return serverMTLSModesFor(effective)
 	}
+	serverModes := serverMTLSModes{}
 	for _, mode := range byPort {
-		if mode == MTLSStrict {
-			return true
-		}
+		serverModes.strict = serverModes.strict || mode == MTLSStrict
+		serverModes.disabled = serverModes.disabled || mode == MTLSDisabled
 	}
-	return false
+	return serverModes
 }
 
-func serverStrictForPort(effective MTLSEffective, byPort map[int32]MTLSEffective, port int32) bool {
+func serverModeForPort(effective MTLSEffective, byPort map[int32]MTLSEffective, port int32) MTLSEffective {
 	if len(byPort) == 0 {
-		return effective == MTLSStrict
+		return effective
 	}
 	if mode, ok := byPort[port]; ok {
-		return mode == MTLSStrict
+		return mode
 	}
-	return effective == MTLSStrict
+	return effective
 }
 
 func sortedDestinationRules(destinationRules []DestinationRuleView) []DestinationRuleView {

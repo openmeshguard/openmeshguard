@@ -5,7 +5,7 @@
 // changes to exported types in this file require human approval.
 //
 // Resolver versions are a stable, comma-separated list of subsystem tags in
-// the order mTLS, authorization (for example, mtls/v3,authz/v7). Bump only the
+// the order mTLS, authorization (for example, mtls/v4,authz/v7). Bump only the
 // tag whose precedence, interpretation, or unknown-propagation semantics
 // change, and add or update table coverage for that behavior.
 //

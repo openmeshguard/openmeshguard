@@ -7,8 +7,8 @@ import (
 )
 
 func TestResolverV2Version(t *testing.T) {
-	if got := New().Version(); got != "mtls/v3,authz/v7" {
-		t.Fatalf("Version() = %q, want mtls/v3,authz/v7", got)
+	if got := New().Version(); got != "mtls/v4,authz/v7" {
+		t.Fatalf("Version() = %q, want mtls/v4,authz/v7", got)
 	}
 }
 
@@ -167,6 +167,20 @@ func TestResolverV2ResolveMTLS(t *testing.T) {
 				defaultStep(1),
 				peerStep(2, "istio-system", "default", "spec.mtls.mode", "sets mesh-wide mTLS mode to STRICT"),
 				destinationRuleStepForTest(3, "payments", "api", "spec.trafficPolicy.tls.mode", "sets client TLS mode ISTIO_MUTUAL, compatible with strict server mTLS"),
+			},
+		},
+		{
+			name: "DestinationRule ISTIO_MUTUAL contradicts disabled server mTLS",
+			in: sidecarWorkloadWithDestinationRules(
+				[]PeerAuthenticationView{peerAuthentication("istio-system", "default", "DISABLE", false)},
+				[]DestinationRuleView{{Name: "api", Namespace: "payments", Host: "api.payments.svc.cluster.local", TLSMode: "ISTIO_MUTUAL"}},
+			),
+			wantEffective:           MTLSDisabled,
+			wantClientContradiction: true,
+			wantChain: []Step{
+				defaultStep(1),
+				peerStep(2, "istio-system", "default", "spec.mtls.mode", "sets mesh-wide mTLS mode to DISABLE"),
+				destinationRuleStepForTest(3, "payments", "api", "spec.trafficPolicy.tls.mode", "sets client TLS mode ISTIO_MUTUAL, which conflicts with disabled server mTLS"),
 			},
 		},
 		{
