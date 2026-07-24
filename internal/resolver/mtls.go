@@ -8,7 +8,7 @@ import (
 )
 
 const (
-	mtlsVersion  = "mtls/v4"
+	mtlsVersion  = "mtls/v5"
 	authzVersion = "authz/v8"
 
 	dataPlaneUnknownReason                = "data plane membership unavailable"
@@ -33,12 +33,11 @@ func (ResolverV2) Version() string {
 }
 
 func (ResolverV2) ResolveMTLS(in WorkloadInput) MTLSResult {
-	if !in.MeshDefaults.Known {
-		return unknownMTLS(peerAuthenticationUnavailableReason)
-	}
-
 	if result, done := dataPlaneMTLS(in); done {
 		return result
+	}
+	if !in.MeshDefaults.Known {
+		return unknownMTLS(peerAuthenticationUnavailableReason)
 	}
 
 	selection, err := selectPeerAuthentications(in)

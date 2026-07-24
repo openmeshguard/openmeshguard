@@ -7,8 +7,8 @@ import (
 )
 
 func TestResolverV2Version(t *testing.T) {
-	if got := New().Version(); got != "mtls/v4,authz/v8" {
-		t.Fatalf("Version() = %q, want mtls/v4,authz/v8", got)
+	if got := New().Version(); got != "mtls/v5,authz/v8" {
+		t.Fatalf("Version() = %q, want mtls/v5,authz/v8", got)
 	}
 }
 
@@ -357,6 +357,37 @@ func TestResolverV2ResolveMTLS(t *testing.T) {
 				peerStep(2, "payments", "default", "spec.mtls.mode", "sets namespace mTLS mode to STRICT"),
 				peerStep(3, "payments", "older-api", "spec.mtls.mode", "sets workload mTLS mode to DISABLE"),
 			},
+		},
+		{
+			name: "not-in-mesh workload does not require PeerAuthentication evidence",
+			in: WorkloadInput{
+				Ref:           workloadRef(),
+				DataPlaneMode: ModeNotApplicable,
+				MeshDefaults:  MeshDefaults{RootNamespace: "istio-system", Known: false},
+			},
+			wantEffective: MTLSNotInMesh,
+			wantChain: []Step{{
+				Order:  1,
+				Kind:   "DataPlane",
+				Field:  "dataPlaneMode",
+				Effect: "workload is not enrolled in an Istio data plane, so mesh mTLS is not enforced",
+			}},
+		},
+		{
+			name: "ambient workload without ztunnel does not require PeerAuthentication evidence",
+			in: WorkloadInput{
+				Ref:           workloadRef(),
+				DataPlaneMode: ModeAmbient,
+				MeshDefaults:  MeshDefaults{RootNamespace: "istio-system", Known: false},
+				ZtunnelOnNode: False,
+			},
+			wantEffective: MTLSNotInMesh,
+			wantChain: []Step{{
+				Order:  1,
+				Kind:   "DataPlane",
+				Field:  "ztunnelOnNode",
+				Effect: "ambient workload has no available ztunnel, so mesh mTLS is not enforced",
+			}},
 		},
 		{
 			name: "multiple selector PeerAuthentications without timestamps are unknown",
