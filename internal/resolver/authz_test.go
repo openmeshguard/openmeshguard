@@ -520,6 +520,42 @@ func TestResolverV2ResolveAuthz(t *testing.T) {
 			},
 		},
 		{
+			name: "ruleless targetRef DENY never requires waypoint enforcement",
+			in: authzWorkload(ModeAmbient, AuthorizationPolicyView{
+				Name: "deny-nothing", Namespace: "payments", Action: "DENY",
+				HasRules: false, TargetsWaypoint: true, TargetRefKind: "Service", TargetRefName: "api",
+			}),
+			wantEffective:  AuthzNoPolicy,
+			wantBroadAllow: &falseValue,
+			wantIdentity:   &falseValue,
+			wantPolicies:   []string{"payments/deny-nothing"},
+			wantChain: []Step{
+				authzDefaultStep(1),
+				{
+					Order: 2, Kind: "AuthorizationPolicy", Namespace: "payments", Name: "deny-nothing",
+					Field: `spec.targetRefs["Service/api"]`, Effect: "DENY policy has no rules and never matches",
+				},
+			},
+		},
+		{
+			name: "ruleless targetRef CUSTOM never requires waypoint enforcement",
+			in: authzWorkload(ModeAmbient, AuthorizationPolicyView{
+				Name: "custom-nothing", Namespace: "payments", Action: "CUSTOM",
+				HasRules: false, TargetsWaypoint: true, TargetRefKind: "Service", TargetRefName: "api",
+			}),
+			wantEffective:  AuthzNoPolicy,
+			wantBroadAllow: &falseValue,
+			wantIdentity:   &falseValue,
+			wantPolicies:   []string{"payments/custom-nothing"},
+			wantChain: []Step{
+				authzDefaultStep(1),
+				{
+					Order: 2, Kind: "AuthorizationPolicy", Namespace: "payments", Name: "custom-nothing",
+					Field: `spec.targetRefs["Service/api"]`, Effect: "CUSTOM policy has no rules and never matches",
+				},
+			},
+		},
+		{
 			name: "operation-only ALLOW is not identity scoped",
 			in: authzWorkload(ModeSidecar, AuthorizationPolicyView{
 				Name: "get-any-source", Namespace: "payments", Action: "ALLOW", HasRules: true, BroadAllow: true,

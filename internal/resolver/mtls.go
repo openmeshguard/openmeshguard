@@ -9,7 +9,7 @@ import (
 
 const (
 	mtlsVersion  = "mtls/v4"
-	authzVersion = "authz/v7"
+	authzVersion = "authz/v8"
 
 	dataPlaneUnknownReason                = "data plane membership unavailable"
 	peerAuthenticationUnavailableReason   = "PeerAuthentication resources unavailable"

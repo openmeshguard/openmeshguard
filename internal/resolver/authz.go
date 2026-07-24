@@ -129,6 +129,11 @@ func (ResolverV2) ResolveAuthz(in WorkloadInput) AuthzResult {
 		}
 
 		step := authzPolicyStep(policy, action)
+		if !policy.HasRules && (action == "DENY" || action == "CUSTOM" || action == "AUDIT") {
+			chain = append(chain, step)
+			updateAuthzActionState(action, policy, &hasCustom, &hasDeny, &hasEmptyAllow, &hasExplicitAllow, &broadAllow, &identityScoped)
+			continue
+		}
 
 		if in.DataPlaneMode == ModeAmbient && policy.TargetsWaypoint {
 			waypointStep, enforced, unavailable := resolveWaypointEnforcement(policy.TargetWaypoint, policy)
