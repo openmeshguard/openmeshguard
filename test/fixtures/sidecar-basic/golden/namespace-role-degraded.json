@@ -3,7 +3,7 @@
   "generatedAt": "2000-01-01T00:00:00Z",
   "scanner": {
     "version": "dev",
-    "resolverVersion": "mtls/v3,authz/v6",
+    "resolverVersion": "mtls/v5,authz/v8",
     "controlPacks": [
       {
         "name": "builtin-authz",
@@ -546,6 +546,15 @@
           "name": "strict-api"
         }
       ],
+      "resolutionChain": [
+        {
+          "order": 1,
+          "kind": "Control",
+          "name": "MG-GW-005",
+          "field": "applicability",
+          "effect": "control MG-GW-005 applicability resolved to not-applicable"
+        }
+      ],
       "reasoning": "Control MG-GW-005 does not apply to omg-strict/strict-api.",
       "remediation": {
         "guidance": "Set istio.io/use-waypoint to a waypoint whose scope covers the target and wait for its Gateway Programmed condition to become true."
@@ -645,6 +654,15 @@
           "name": "strict-api"
         }
       ],
+      "resolutionChain": [
+        {
+          "order": 1,
+          "kind": "Control",
+          "name": "MG-MTLS-005",
+          "field": "applicability",
+          "effect": "control MG-MTLS-005 applicability resolved to not-applicable"
+        }
+      ],
       "reasoning": "Control MG-MTLS-005 does not apply to omg-strict/strict-api.",
       "remediation": {
         "guidance": "Validate ztunnel coverage and apply a STRICT PeerAuthentication posture for the ambient workload, then inspect the attached resolution chain."
@@ -667,6 +685,15 @@
           "kind": "Deployment",
           "namespace": "omg-strict",
           "name": "strict-api"
+        }
+      ],
+      "resolutionChain": [
+        {
+          "order": 1,
+          "kind": "Control",
+          "name": "MG-MTLS-006",
+          "field": "applicability",
+          "effect": "control MG-MTLS-006 applicability resolved to not-applicable"
         }
       ],
       "reasoning": "Control MG-MTLS-006 does not apply to omg-strict/strict-api.",

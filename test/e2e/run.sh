@@ -265,6 +265,12 @@ assert_waypoint_limited_bindings() {
 		  }
 		] | sort_by(.namespace) == [
 		  {
+		    kind: "ClusterRoleBinding",
+		    namespace: "",
+		    roleKind: "ClusterRole",
+		    role: "openmeshguard-e2e-ztunnel-evidence"
+		  },
+		  {
 		    kind: "RoleBinding",
 		    namespace: "istio-system",
 		    roleKind: "ClusterRole",
@@ -278,7 +284,7 @@ assert_waypoint_limited_bindings() {
 		  }
 		]
 	' >/dev/null; then
-		echo "waypoint-limited scanner bindings differ from the two intended namespace-scoped bindings; inspect $results/scanner-bindings.json" >&2
+		echo "waypoint-limited scanner bindings differ from the test-only ztunnel evidence and two intended namespace-scoped bindings; inspect $results/scanner-bindings.json" >&2
 		return 1
 	fi
 }

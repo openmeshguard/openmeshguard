@@ -3,7 +3,7 @@
   "generatedAt": "2000-01-01T00:00:00Z",
   "scanner": {
     "version": "dev",
-    "resolverVersion": "mtls/v3,authz/v6",
+    "resolverVersion": "mtls/v5,authz/v8",
     "controlPacks": [
       {
         "name": "builtin-authz",
@@ -48,9 +48,9 @@
       "verbs": [
         "list"
       ],
-      "granted": false,
+      "granted": true,
       "optional": true,
-      "impact": "ztunnel total-node coverage remains unknown without the optional nodes add-on; denied scope(s): cluster"
+      "impact": "ztunnel total-node coverage remains unknown without the optional nodes add-on"
     },
     {
       "apiGroup": "",
@@ -58,8 +58,8 @@
       "verbs": [
         "list"
       ],
-      "granted": false,
-      "impact": "per-node ztunnel readiness and ambient workload coverage may be unavailable; sidecar detection from running pods may be unavailable; denied scope(s): all namespaces",
+      "granted": true,
+      "impact": "per-node ztunnel readiness and ambient workload coverage may be unavailable; sidecar detection from running pods may be unavailable",
       "affectedControls": [
         "MG-AUTHZ-001",
         "MG-AUTHZ-002",
@@ -104,8 +104,8 @@
       "verbs": [
         "list"
       ],
-      "granted": false,
-      "impact": "DaemonSet workload posture may be unavailable; ztunnel presence and ambient workload coverage may be unavailable; denied scope(s): all namespaces",
+      "granted": true,
+      "impact": "DaemonSet workload posture may be unavailable; ztunnel presence and ambient workload coverage may be unavailable",
       "affectedControls": [
         "MG-AUTHZ-001",
         "MG-AUTHZ-002",
@@ -309,20 +309,22 @@
       "endpointSlices": 1,
       "gateways": 0,
       "namespaces": 0,
-      "nodes": 0,
+      "nodes": 1,
       "peerAuthentications": 2,
       "pods": 1,
       "replicasets": 1,
       "services": 1,
       "sidecars": 0,
       "statefulsets": 0,
-      "ztunnelDaemonSets": 0,
-      "ztunnelPods": 0
+      "ztunnelDaemonSets": 1,
+      "ztunnelPods": 1
     },
     "dataPlane": {
       "mode": "ambient",
       "ztunnel": {
-        "nodesTotal": null
+        "present": true,
+        "nodesCovered": 1,
+        "nodesTotal": 1
       },
       "waypoints": 0
     },
@@ -340,9 +342,35 @@
       },
       "dataPlaneMode": "ambient",
       "mtls": {
-        "effective": "unknown",
-        "chain": [],
-        "unknownReason": "ztunnel availability unavailable"
+        "effective": "strict",
+        "byPort": {
+          "8080": "strict"
+        },
+        "clientTLSContradiction": false,
+        "chain": [
+          {
+            "order": 1,
+            "kind": "MeshConfigDefault",
+            "field": "defaultPeerAuthenticationMode",
+            "effect": "defaults mesh mTLS mode to PERMISSIVE when no PeerAuthentication mode overrides it"
+          },
+          {
+            "order": 2,
+            "kind": "PeerAuthentication",
+            "name": "default",
+            "namespace": "istio-system",
+            "field": "spec.mtls.mode",
+            "effect": "sets mesh-wide mTLS mode to STRICT"
+          },
+          {
+            "order": 3,
+            "kind": "PeerAuthentication",
+            "name": "default",
+            "namespace": "omg-ambient-unavailable",
+            "field": "spec.mtls.mode",
+            "effect": "sets namespace mTLS mode to STRICT"
+          }
+        ]
       },
       "authorization": {
         "effective": "unknown",
@@ -851,156 +879,6 @@
         "guidance": "Set istio.io/use-waypoint to a waypoint whose scope covers the target and wait for its Gateway Programmed condition to become true."
       },
       "unknownReason": "authorization.effective unavailable: Gateway API waypoint evidence unavailable; authorization.waypointUnenforced unavailable: Gateway API waypoint evidence unavailable"
-    },
-    {
-      "id": "MG-MTLS-001-b587489e0a1f",
-      "controlId": "MG-MTLS-001",
-      "title": "Mesh-managed workloads must resolve to strict mTLS",
-      "severity": "high",
-      "evidenceType": "config",
-      "status": "unknown",
-      "confidence": "unavailable",
-      "dataPlaneMode": "ambient",
-      "evidenceSources": [
-        "kubernetes-api"
-      ],
-      "resources": [
-        {
-          "kind": "Deployment",
-          "namespace": "omg-ambient-unavailable",
-          "name": "ambient-unavailable"
-        }
-      ],
-      "reasoning": "Control MG-MTLS-001 could not be evaluated for omg-ambient-unavailable/ambient-unavailable: mtls.effective unavailable: ztunnel availability unavailable.",
-      "remediation": {
-        "guidance": "Apply or correct PeerAuthentication so the workload resolves to STRICT, then inspect the attached resolution chain."
-      },
-      "unknownReason": "mtls.effective unavailable: ztunnel availability unavailable"
-    },
-    {
-      "id": "MG-MTLS-002-a29de1376572",
-      "controlId": "MG-MTLS-002",
-      "title": "Declared workload ports must resolve to strict mTLS",
-      "severity": "high",
-      "evidenceType": "config",
-      "status": "unknown",
-      "confidence": "unavailable",
-      "dataPlaneMode": "ambient",
-      "evidenceSources": [
-        "kubernetes-api"
-      ],
-      "resources": [
-        {
-          "kind": "Deployment",
-          "namespace": "omg-ambient-unavailable",
-          "name": "ambient-unavailable"
-        }
-      ],
-      "reasoning": "Control MG-MTLS-002 could not be evaluated for omg-ambient-unavailable/ambient-unavailable: mtls.byPort unavailable: workload ports unavailable.",
-      "remediation": {
-        "guidance": "Correct workload-level port mTLS overrides so every declared, Service-bound workload port resolves to STRICT."
-      },
-      "unknownReason": "mtls.byPort unavailable: workload ports unavailable"
-    },
-    {
-      "id": "MG-MTLS-003-963722fe7564",
-      "controlId": "MG-MTLS-003",
-      "title": "Workloads must never resolve to globally disabled mTLS",
-      "severity": "critical",
-      "evidenceType": "config",
-      "status": "unknown",
-      "confidence": "unavailable",
-      "dataPlaneMode": "ambient",
-      "evidenceSources": [
-        "kubernetes-api"
-      ],
-      "resources": [
-        {
-          "kind": "Deployment",
-          "namespace": "omg-ambient-unavailable",
-          "name": "ambient-unavailable"
-        }
-      ],
-      "reasoning": "Control MG-MTLS-003 could not be evaluated for omg-ambient-unavailable/ambient-unavailable: mtls.effective unavailable: ztunnel availability unavailable.",
-      "remediation": {
-        "guidance": "Apply or correct PeerAuthentication so the workload no longer resolves to DISABLE, then inspect the attached resolution chain."
-      },
-      "unknownReason": "mtls.effective unavailable: ztunnel availability unavailable"
-    },
-    {
-      "id": "MG-MTLS-005-ae7a21b441b9",
-      "controlId": "MG-MTLS-005",
-      "title": "Ambient workloads must have validated L4 mTLS posture",
-      "severity": "high",
-      "evidenceType": "config",
-      "status": "unknown",
-      "confidence": "unavailable",
-      "dataPlaneMode": "ambient",
-      "evidenceSources": [
-        "kubernetes-api"
-      ],
-      "resources": [
-        {
-          "kind": "Deployment",
-          "namespace": "omg-ambient-unavailable",
-          "name": "ambient-unavailable"
-        }
-      ],
-      "reasoning": "Control MG-MTLS-005 could not be evaluated for omg-ambient-unavailable/ambient-unavailable: mtls.effective unavailable: ztunnel availability unavailable.",
-      "remediation": {
-        "guidance": "Validate ztunnel coverage and apply a STRICT PeerAuthentication posture for the ambient workload, then inspect the attached resolution chain."
-      },
-      "unknownReason": "mtls.effective unavailable: ztunnel availability unavailable"
-    },
-    {
-      "id": "MG-MTLS-006-4a73c0db9718",
-      "controlId": "MG-MTLS-006",
-      "title": "Ambient workloads must have healthy ztunnel node coverage",
-      "severity": "critical",
-      "evidenceType": "config",
-      "status": "unknown",
-      "confidence": "unavailable",
-      "dataPlaneMode": "ambient",
-      "evidenceSources": [
-        "kubernetes-api"
-      ],
-      "resources": [
-        {
-          "kind": "Deployment",
-          "namespace": "omg-ambient-unavailable",
-          "name": "ambient-unavailable"
-        }
-      ],
-      "reasoning": "Control MG-MTLS-006 could not be evaluated for omg-ambient-unavailable/ambient-unavailable: mtls.effective unavailable: ztunnel availability unavailable.",
-      "remediation": {
-        "guidance": "Restore a Ready ztunnel DaemonSet pod on every node that schedules ambient workloads."
-      },
-      "unknownReason": "mtls.effective unavailable: ztunnel availability unavailable"
-    },
-    {
-      "id": "MG-MTLS-007-7a51066975b7",
-      "controlId": "MG-MTLS-007",
-      "title": "Client TLS must agree with resolved server mTLS",
-      "severity": "high",
-      "evidenceType": "config",
-      "status": "unknown",
-      "confidence": "unavailable",
-      "dataPlaneMode": "ambient",
-      "evidenceSources": [
-        "kubernetes-api"
-      ],
-      "resources": [
-        {
-          "kind": "Deployment",
-          "namespace": "omg-ambient-unavailable",
-          "name": "ambient-unavailable"
-        }
-      ],
-      "reasoning": "Control MG-MTLS-007 could not be evaluated for omg-ambient-unavailable/ambient-unavailable: mtls.clientTLSContradiction unavailable: DestinationRule collection unavailable.",
-      "remediation": {
-        "guidance": "Correct DestinationRule TLS mode or the server-side PeerAuthentication posture so client and server settings agree."
-      },
-      "unknownReason": "mtls.clientTLSContradiction unavailable: DestinationRule collection unavailable"
     }
   ],
   "scores": {
@@ -1020,9 +898,9 @@
       },
       {
         "category": "mtls",
-        "grade": "unknown",
-        "passRate": null,
-        "unknown": 6
+        "grade": "A",
+        "passRate": 1,
+        "evaluated": 6
       }
     ]
   }
