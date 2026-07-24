@@ -11,6 +11,7 @@ import (
 
 	"github.com/openmeshguard/openmeshguard/internal/collect"
 	"github.com/openmeshguard/openmeshguard/internal/engine"
+	"github.com/openmeshguard/openmeshguard/internal/normalize"
 	"github.com/openmeshguard/openmeshguard/internal/resolver"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -207,6 +208,13 @@ func TestNamespaceInputsAggregateMeshEnrollment(t *testing.T) {
 	}
 }
 
+func TestDataPlaneInventoryCanonicalizesNotApplicableMode(t *testing.T) {
+	got := dataPlaneInventory(normalize.Inventory{DataPlaneMode: resolver.ModeNotApplicable})
+	if got["mode"] != string(resolver.ModeUnknown) {
+		t.Fatalf("inventory data plane mode = %#v, want canonical unknown", got["mode"])
+	}
+}
+
 func TestInventoryAvailabilityFromPermissionSummary(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -337,11 +345,11 @@ controls:
 	}
 	got := permissionSummaryWithControls(permissions, packs)
 	want := [][]string{
-		{"ACME-INV-001", "MG-AUTHZ-001", "MG-AUTHZ-002", "MG-AUTHZ-003", "MG-AUTHZ-004", "MG-AUTHZ-005", "MG-AUTHZ-006", "MG-AUTHZ-007", "MG-MTLS-002", "MG-MTLS-007"},
-		{"MG-AUTHZ-001", "MG-AUTHZ-002", "MG-AUTHZ-003", "MG-AUTHZ-004", "MG-AUTHZ-005", "MG-AUTHZ-006", "MG-AUTHZ-007", "MG-MTLS-002", "MG-MTLS-007"},
+		{"ACME-INV-001", "MG-AUTHZ-001", "MG-AUTHZ-002", "MG-AUTHZ-003", "MG-AUTHZ-004", "MG-AUTHZ-005", "MG-AUTHZ-006", "MG-AUTHZ-007", "MG-GW-005", "MG-MTLS-002", "MG-MTLS-007"},
+		{"MG-AUTHZ-001", "MG-AUTHZ-002", "MG-AUTHZ-003", "MG-AUTHZ-004", "MG-AUTHZ-005", "MG-AUTHZ-006", "MG-AUTHZ-007", "MG-GW-005", "MG-MTLS-002", "MG-MTLS-007"},
 		{"ACME-ENV-001", "ACME-INV-001"},
-		{"MG-MTLS-001", "MG-MTLS-002", "MG-MTLS-003", "MG-MTLS-007"},
-		{"ACME-ENV-001", "ACME-GOV-002", "ACME-INV-001", "MG-AUTHZ-001", "MG-AUTHZ-002", "MG-AUTHZ-003", "MG-AUTHZ-004", "MG-AUTHZ-005", "MG-AUTHZ-006", "MG-AUTHZ-007", "MG-MTLS-001", "MG-MTLS-002", "MG-MTLS-003", "MG-MTLS-007"},
+		{"MG-MTLS-001", "MG-MTLS-002", "MG-MTLS-003", "MG-MTLS-005", "MG-MTLS-006", "MG-MTLS-007"},
+		{"ACME-ENV-001", "ACME-GOV-002", "ACME-INV-001", "MG-AUTHZ-001", "MG-AUTHZ-002", "MG-AUTHZ-003", "MG-AUTHZ-004", "MG-AUTHZ-005", "MG-AUTHZ-006", "MG-AUTHZ-007", "MG-GW-005", "MG-MTLS-001", "MG-MTLS-002", "MG-MTLS-003", "MG-MTLS-005", "MG-MTLS-006", "MG-MTLS-007"},
 	}
 	for index := range want {
 		if strings.Join(got[index].AffectedControls, ",") != strings.Join(want[index], ",") {

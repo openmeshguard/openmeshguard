@@ -2,7 +2,7 @@ def allowed_resource:
   (.objectRef.apiGroup // "") as $group |
   .objectRef.resource as $resource |
   if $group == "" then
-    ["namespaces", "pods", "services"] | index($resource) != null
+    ["namespaces", "nodes", "pods", "services"] | index($resource) != null
   elif $group == "apps" then
     ["daemonsets", "deployments", "replicasets", "statefulsets"] | index($resource) != null
   elif $group == "discovery.k8s.io" then
@@ -18,7 +18,11 @@ def allowed_resource:
   else false
   end;
 
-map(select(.user.username == $cluster_user or .user.username == $namespace_user)) as $events |
+map(select(
+  .user.username == $cluster_user or
+  .user.username == $namespace_user or
+  .user.username == $waypoint_limited_user
+)) as $events |
 ($events | length > 0) and
 all($events[];
   .verb == "list" and
@@ -27,6 +31,7 @@ all($events[];
 ) and
 any($events[]; .user.username == $cluster_user) and
 any($events[]; .user.username == $namespace_user) and
+any($events[]; .user.username == $waypoint_limited_user) and
 any($events[];
   .user.username == $namespace_user and
   .verb == "list" and

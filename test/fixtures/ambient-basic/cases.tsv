@@ -1,0 +1,3 @@
+ambient-ready	omg-ambient-ready	ambient-ready	ambient	MG-AUTHZ-001=open,MG-AUTHZ-002=open,MG-AUTHZ-002=open,MG-AUTHZ-004=open,MG-AUTHZ-005=open,MG-GW-005=not-applicable,MG-MTLS-005=not-applicable,MG-MTLS-006=not-applicable	2
+ambient-missing	omg-ambient-missing	ambient-missing	ambient	MG-AUTHZ-002=open,MG-AUTHZ-006=open,MG-AUTHZ-007=open,MG-GW-005=open	1
+ambient-unavailable	omg-ambient-unavailable	ambient-unavailable	ambient	MG-AUTHZ-001=unknown,MG-AUTHZ-002=unknown,MG-AUTHZ-003=unknown,MG-AUTHZ-004=unknown,MG-AUTHZ-005=unknown,MG-AUTHZ-006=unknown,MG-AUTHZ-007=unknown,MG-GW-005=unknown	1	waypoint-limited

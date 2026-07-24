@@ -109,10 +109,8 @@ func defaultEngineInput(input ScanInput) engine.Input {
 	return engine.Input{
 		Workloads: workloads,
 		Inventory: map[string]any{
-			"counts": input.Inventory.Counts,
-			"dataPlane": map[string]any{
-				"mode": string(input.Inventory.DataPlaneMode),
-			},
+			"counts":    input.Inventory.Counts,
+			"dataPlane": inventoryDataPlaneValue(input.Inventory),
 			"multiCluster": map[string]any{
 				"participationDetected": input.Inventory.MultiCluster.ParticipationDetected,
 				"evaluated":             false,
@@ -162,6 +160,12 @@ func inventory(input normalize.Inventory) inventorySummary {
 		Counts: input.Counts,
 		DataPlane: dataPlane{
 			Mode: mode,
+			Ztunnel: &ztunnel{
+				Present:      input.Ztunnel.Present,
+				NodesCovered: input.Ztunnel.NodesCovered,
+				NodesTotal:   input.Ztunnel.NodesTotal,
+			},
+			Waypoints: input.Waypoints,
 		},
 		MultiCluster: multiCluster{
 			ParticipationDetected: input.MultiCluster.ParticipationDetected,
@@ -170,6 +174,31 @@ func inventory(input normalize.Inventory) inventorySummary {
 			MeshNetworks:          input.MultiCluster.MeshNetworks,
 		},
 	}
+}
+
+func inventoryDataPlaneValue(input normalize.Inventory) map[string]any {
+	mode := string(input.DataPlaneMode)
+	if mode == string(resolver.ModeNotApplicable) || mode == "" {
+		mode = string(resolver.ModeUnknown)
+	}
+	ztunnelValue := map[string]any{"nodesTotal": nil}
+	if input.Ztunnel.Present != nil {
+		ztunnelValue["present"] = *input.Ztunnel.Present
+	}
+	if input.Ztunnel.NodesCovered != nil {
+		ztunnelValue["nodesCovered"] = *input.Ztunnel.NodesCovered
+	}
+	if input.Ztunnel.NodesTotal != nil {
+		ztunnelValue["nodesTotal"] = *input.Ztunnel.NodesTotal
+	}
+	value := map[string]any{
+		"mode":    mode,
+		"ztunnel": ztunnelValue,
+	}
+	if input.Waypoints != nil {
+		value["waypoints"] = *input.Waypoints
+	}
+	return value
 }
 
 func controlPacks(packs []engine.Pack) []controlPack {
@@ -295,7 +324,15 @@ type inventorySummary struct {
 }
 
 type dataPlane struct {
-	Mode string `json:"mode"`
+	Mode      string   `json:"mode"`
+	Ztunnel   *ztunnel `json:"ztunnel,omitempty"`
+	Waypoints *int     `json:"waypoints,omitempty"`
+}
+
+type ztunnel struct {
+	Present      *bool `json:"present,omitempty"`
+	NodesCovered *int  `json:"nodesCovered,omitempty"`
+	NodesTotal   *int  `json:"nodesTotal"`
 }
 
 type multiCluster struct {

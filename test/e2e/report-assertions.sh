@@ -40,19 +40,17 @@ assert_report_update_guard() {
 		return 1
 	fi
 
-	if ! jq -e '
-		def nonempty_chain:
-		  type == "array" and length > 0;
-		all(.workloadPostures[];
-		  (.mtls.effective == "unknown" or (.mtls.chain | nonempty_chain)) and
-		  (.authorization.effective == "unknown" or (.authorization.chain | nonempty_chain))
-		) and
-		if any(.workloadPostures[]; .mtls.effective != "unknown") then
-		  all(.findings[]; (.resolutionChain | nonempty_chain))
-		else
-		  true
-		end
-	' "$report_guard_file" >/dev/null; then
+		if ! jq -e '
+			def nonempty_chain:
+			  type == "array" and length > 0;
+			all(.workloadPostures[];
+			  (.mtls.effective == "unknown" or (.mtls.chain | nonempty_chain)) and
+			  (.authorization.effective == "unknown" or (.authorization.chain | nonempty_chain))
+			) and
+			all(.findings[];
+			  .status == "unknown" or (.resolutionChain | nonempty_chain)
+			)
+		' "$report_guard_file" >/dev/null; then
 		echo "semantic assertion failed: $report_guard_name resolved conclusions and findings require non-empty resolution chains ($report_guard_file)" >&2
 		return 1
 	fi

@@ -1,0 +1,107 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: omg-mixed-mode
+  labels:
+    istio.io/dataplane-mode: ambient
+---
+apiVersion: security.istio.io/v1
+kind: PeerAuthentication
+metadata:
+  name: default
+  namespace: omg-mixed-mode
+spec:
+  mtls:
+    mode: STRICT
+---
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: default-deny
+  namespace: omg-mixed-mode
+spec: {}
+---
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: allow-client
+  namespace: omg-mixed-mode
+spec:
+  rules:
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/client/sa/client
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mixed-ambient
+  namespace: omg-mixed-mode
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mixed-ambient
+  template:
+    metadata:
+      labels:
+        app: mixed-ambient
+    spec:
+      containers:
+        - name: app
+          image: registry.k8s.io/pause:3.10
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mixed-ambient
+  namespace: omg-mixed-mode
+spec:
+  selector:
+    app: mixed-ambient
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8080
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mixed-sidecar
+  namespace: omg-mixed-mode
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mixed-sidecar
+  template:
+    metadata:
+      labels:
+        app: mixed-sidecar
+        sidecar.istio.io/inject: "true"
+    spec:
+      containers:
+        - name: app
+          image: registry.k8s.io/pause:3.10
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mixed-sidecar
+  namespace: omg-mixed-mode
+spec:
+  selector:
+    app: mixed-sidecar
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8080

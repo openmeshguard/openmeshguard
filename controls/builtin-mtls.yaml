@@ -2,7 +2,7 @@ apiVersion: openmeshguard.io/v1alpha1
 kind: ControlPack
 metadata:
   name: builtin-mtls
-  version: 0.1.0
+  version: 0.2.0
 controls:
   - id: MG-MTLS-001
     title: Mesh-managed workloads must resolve to strict mTLS
@@ -66,6 +66,50 @@ controls:
       guidance: >-
         Apply or correct PeerAuthentication so the workload no longer resolves
         to DISABLE, then inspect the attached resolution chain.
+    frameworks:
+      - nist-csf-2.0/PR.DS-02
+      - owasp-k8s-2025/K05
+
+  - id: MG-MTLS-005
+    title: Ambient workloads must have validated L4 mTLS posture
+    category: mtls
+    severity: high
+    evidenceType: config
+    scope: workload
+    environments: []
+    requires:
+      - mtls.effective
+    applicability: 'workload.dataPlaneMode == "ambient"'
+    expression: 'workload.mtls.effective == "strict"'
+    message: >-
+      Ambient L4 mTLS for {{ .Workload }} resolves to
+      {{ .Posture.Mtls.Effective }}, not strict.
+    remediation:
+      guidance: >-
+        Validate ztunnel coverage and apply a STRICT PeerAuthentication posture
+        for the ambient workload, then inspect the attached resolution chain.
+    frameworks:
+      - nist-csf-2.0/PR.DS-02
+      - owasp-k8s-2025/K05
+
+  - id: MG-MTLS-006
+    title: Ambient workloads must have healthy ztunnel node coverage
+    category: mtls
+    severity: critical
+    evidenceType: config
+    scope: workload
+    environments: []
+    requires:
+      - mtls.effective
+    applicability: 'workload.dataPlaneMode == "ambient"'
+    expression: 'workload.mtls.effective != "not-in-mesh"'
+    message: >-
+      {{ .Workload }} is enrolled in ambient mode but has no ready ztunnel on
+      its scheduled node.
+    remediation:
+      guidance: >-
+        Restore a Ready ztunnel DaemonSet pod on every node that schedules
+        ambient workloads.
     frameworks:
       - nist-csf-2.0/PR.DS-02
       - owasp-k8s-2025/K05

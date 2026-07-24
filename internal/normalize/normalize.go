@@ -18,9 +18,7 @@ import (
 const defaultRootNamespace = "istio-system"
 
 // Build converts collected typed resources into normalized inventory and pure
-// resolver inputs. Ambient membership detection remains intentionally deferred
-// to M6; M5 only models waypoint attachment and enforceability from observed
-// labels and Gateway API state.
+// resolver inputs.
 func Build(snapshot collect.Snapshot) Result {
 	rootNamespace := snapshot.RootNamespace
 	if rootNamespace == "" {
@@ -36,6 +34,8 @@ func Build(snapshot collect.Snapshot) Result {
 	sidecars := projectSidecars(snapshot.Sidecars)
 	authorizationPolicies := projectAuthorizationPolicies(snapshot.AuthorizationPolicies, rootNamespace)
 	gateways := projectGateways(snapshot.Gateways)
+	namespaceLabelsKnown := namespacesKnown(snapshot)
+	ztunnelInventory, ztunnelReadyNodes, ztunnelCoverageKnown, ztunnelPresent := detectZtunnel(snapshot)
 
 	builder := workloadBuilder{
 		namespaces:            namespaceLabels,
@@ -49,6 +49,10 @@ func Build(snapshot collect.Snapshot) Result {
 		gateways:              gateways,
 		clientProxies:         projectClientProxies(snapshot),
 		clientProxiesKnown:    snapshot.ClientProxiesAvailable(),
+		namespaceLabelsKnown:  namespaceLabelsKnown,
+		ztunnelReadyNodes:     ztunnelReadyNodes,
+		ztunnelCoverageKnown:  ztunnelCoverageKnown,
+		ztunnelPresent:        ztunnelPresent,
 		coveredPods:           map[string]struct{}{},
 		rootNamespace:         rootNamespace,
 		replicaSetOwners:      replicaSetDeploymentOwners(snapshot.ReplicaSets),
@@ -143,13 +147,16 @@ func Build(snapshot collect.Snapshot) Result {
 		Inventory: Inventory{
 			Counts: map[string]int{
 				"namespaces":            len(snapshot.Namespaces),
+				"nodes":                 len(snapshot.Nodes),
 				"pods":                  len(snapshot.Pods),
+				"ztunnelPods":           len(snapshot.ZtunnelPods),
 				"services":              len(snapshot.Services),
 				"endpointSlices":        len(snapshot.EndpointSlices),
 				"deployments":           len(snapshot.Deployments),
 				"replicasets":           len(snapshot.ReplicaSets),
 				"statefulsets":          len(snapshot.StatefulSets),
 				"daemonsets":            len(snapshot.DaemonSets),
+				"ztunnelDaemonSets":     len(snapshot.ZtunnelDaemonSets),
 				"peerAuthentications":   len(snapshot.PeerAuthentications),
 				"destinationRules":      len(snapshot.DestinationRules),
 				"sidecars":              len(snapshot.Sidecars),
@@ -157,6 +164,8 @@ func Build(snapshot collect.Snapshot) Result {
 				"gateways":              len(snapshot.Gateways),
 			},
 			DataPlaneMode: aggregateDataPlaneMode(workloads),
+			Ztunnel:       ztunnelInventory,
+			Waypoints:     waypointCount(gateways, snapshot.GatewaysAvailable()),
 			MultiCluster:  detectMultiCluster(snapshot),
 		},
 		Workloads: workloads,
@@ -175,6 +184,10 @@ type workloadBuilder struct {
 	gateways                          []gatewayProjection
 	clientProxies                     []clientProxy
 	clientProxiesKnown                bool
+	namespaceLabelsKnown              bool
+	ztunnelReadyNodes                 map[string]struct{}
+	ztunnelCoverageKnown              bool
+	ztunnelPresent                    bool
 	coveredPods                       map[string]struct{}
 	rootNamespace                     string
 	replicaSetOwners                  map[string]string
@@ -230,7 +243,15 @@ func (b *workloadBuilder) addController(kind, namespace, name string, template c
 	for _, pod := range pods {
 		b.coverPod(pod)
 	}
-	mode := detectDataPlaneMode(nsLabels, template.Labels, template.Annotations, template.Spec, pods, b.controllerPodEvidenceAvailable(kind, namespace))
+	mode := detectDataPlaneMode(
+		nsLabels,
+		template.Labels,
+		template.Annotations,
+		template.Spec,
+		pods,
+		b.controllerPodEvidenceAvailable(kind, namespace),
+		b.namespaceLabelsKnown,
+	)
 	policyInputs := b.policyInputs(namespace, labelSets, []corev1.PodSpec{template.Spec}, nil, labels, nsLabels)
 	if observedPolicyInputs != nil {
 		policyInputs = *observedPolicyInputs
@@ -247,7 +268,7 @@ func (b *workloadBuilder) addController(kind, namespace, name string, template c
 		Namespace: resolver.NamespaceInput{
 			Name:            namespace,
 			Labels:          copyStringMap(nsLabels),
-			AmbientEnrolled: resolver.Unobserved,
+			AmbientEnrolled: ambientNamespaceEnrollment(nsLabels, b.namespaceLabelsKnown),
 		},
 		MeshDefaults: resolver.MeshDefaults{
 			RootNamespace: b.rootNamespace,
@@ -259,13 +280,22 @@ func (b *workloadBuilder) addController(kind, namespace, name string, template c
 		DestinationRulesKnown: policyInputs.destinationRulesKnown,
 		AuthzPolicies:         policyInputs.authorizationPolicies,
 		Waypoint:              policyInputs.waypoint,
+		ZtunnelOnNode:         b.ztunnelOnPods(mode, pods),
 	})
 }
 
 func (b *workloadBuilder) addPod(pod corev1.Pod) {
 	labels := copyStringMap(pod.Labels)
 	nsLabels := b.namespaces[pod.Namespace]
-	mode := detectDataPlaneMode(nsLabels, pod.Labels, pod.Annotations, pod.Spec, []corev1.Pod{pod}, b.podsAvailable(pod.Namespace))
+	mode := detectDataPlaneMode(
+		nsLabels,
+		pod.Labels,
+		pod.Annotations,
+		pod.Spec,
+		[]corev1.Pod{pod},
+		b.podsAvailable(pod.Namespace),
+		b.namespaceLabelsKnown,
+	)
 	policyInputs := b.policyInputs(pod.Namespace, []map[string]string{labels}, []corev1.PodSpec{pod.Spec}, []string{pod.Name}, labels, nsLabels)
 
 	b.workloads = append(b.workloads, resolver.WorkloadInput{
@@ -279,7 +309,7 @@ func (b *workloadBuilder) addPod(pod corev1.Pod) {
 		Namespace: resolver.NamespaceInput{
 			Name:            pod.Namespace,
 			Labels:          copyStringMap(nsLabels),
-			AmbientEnrolled: resolver.Unobserved,
+			AmbientEnrolled: ambientNamespaceEnrollment(nsLabels, b.namespaceLabelsKnown),
 		},
 		MeshDefaults: resolver.MeshDefaults{
 			RootNamespace: b.rootNamespace,
@@ -291,6 +321,7 @@ func (b *workloadBuilder) addPod(pod corev1.Pod) {
 		DestinationRulesKnown: policyInputs.destinationRulesKnown,
 		AuthzPolicies:         policyInputs.authorizationPolicies,
 		Waypoint:              policyInputs.waypoint,
+		ZtunnelOnNode:         b.ztunnelOnPods(mode, []corev1.Pod{pod}),
 	})
 }
 
@@ -470,43 +501,102 @@ func detectDataPlaneMode(
 	templateSpec corev1.PodSpec,
 	pods []corev1.Pod,
 	podEvidenceAvailable bool,
+	namespaceLabelsKnown bool,
 ) resolver.DataPlaneMode {
 	if !podEvidenceAvailable {
 		return resolver.ModeUnknown
 	}
 	if len(pods) > 0 {
-		withProxy := 0
-		withoutProxy := 0
+		seen := map[resolver.DataPlaneMode]struct{}{}
 		for _, pod := range pods {
 			if hasIstioProxy(pod.Spec) {
-				withProxy++
+				seen[resolver.ModeSidecar] = struct{}{}
 				continue
 			}
-			withoutProxy++
+			if sidecarInjectionConfigured(namespaceLabels, pod.Labels, pod.Annotations) {
+				// Sidecar selection wins a sidecar/ambient label conflict, but
+				// an observed Pod without the selected proxy cannot be reported
+				// as protected by either data plane.
+				seen[resolver.ModeUnknown] = struct{}{}
+				continue
+			}
+			switch ambientEnrollment(namespaceLabels, pod.Labels, namespaceLabelsKnown) {
+			case resolver.True:
+				seen[resolver.ModeAmbient] = struct{}{}
+			case resolver.False:
+				seen[resolver.ModeNotApplicable] = struct{}{}
+			default:
+				seen[resolver.ModeUnknown] = struct{}{}
+			}
 		}
-		switch {
-		case withProxy > 0 && withoutProxy == 0:
-			return resolver.ModeSidecar
-		case withProxy > 0 && withoutProxy > 0:
+		if len(seen) > 1 {
 			return resolver.ModeMixed
-		default:
-			return resolver.ModeUnknown
+		}
+		for mode := range seen {
+			return mode
 		}
 	}
 	if hasIstioProxy(templateSpec) {
 		return resolver.ModeSidecar
 	}
-	if sidecarInjectionDisabled(workloadLabels, workloadAnnotations) {
-		return resolver.ModeUnknown
-	}
-	if sidecarInjectionEnabled(workloadLabels, workloadAnnotations) || sidecarInjectionEnabled(namespaceLabels, nil) {
+	sidecarDisabled := sidecarInjectionDisabled(workloadLabels, workloadAnnotations) ||
+		stringValue(namespaceLabels, "istio-injection") == "disabled"
+	if !sidecarDisabled &&
+		(sidecarInjectionEnabled(workloadLabels, workloadAnnotations) || sidecarInjectionEnabled(namespaceLabels, nil)) {
 		return resolver.ModeSidecar
 	}
-	return ambientDetectionStub(namespaceLabels, workloadLabels)
+	switch ambientEnrollment(namespaceLabels, workloadLabels, namespaceLabelsKnown) {
+	case resolver.True:
+		return resolver.ModeAmbient
+	case resolver.Unobserved:
+		return resolver.ModeUnknown
+	}
+	if sidecarDisabled || hasDataPlaneModeLabel(workloadLabels) || hasDataPlaneModeLabel(namespaceLabels) {
+		return resolver.ModeNotApplicable
+	}
+	return resolver.ModeUnknown
 }
 
-func ambientDetectionStub(map[string]string, map[string]string) resolver.DataPlaneMode {
-	return resolver.ModeUnknown
+// ambientEnrollment implements Istio's documented Pod-over-Namespace
+// enrollment precedence. A Pod value of none opts out of an ambient Namespace;
+// a Pod value of ambient opts into ambient independently of the Namespace.
+// Sidecar precedence is applied by detectDataPlaneMode before this result.
+// https://istio.io/latest/docs/ambient/usage/add-workloads/#pod-selection-logic-for-ambient-and-sidecar-modes
+func ambientEnrollment(
+	namespaceLabels map[string]string,
+	workloadLabels map[string]string,
+	namespaceLabelsKnown bool,
+) resolver.Tristate {
+	if mode, exists := workloadLabels["istio.io/dataplane-mode"]; exists {
+		switch mode {
+		case "ambient":
+			return resolver.True
+		case "none":
+			return resolver.False
+		default:
+			return resolver.Unobserved
+		}
+	}
+	if !namespaceLabelsKnown {
+		return resolver.Unobserved
+	}
+	switch namespaceLabels["istio.io/dataplane-mode"] {
+	case "ambient":
+		return resolver.True
+	case "", "none":
+		return resolver.False
+	default:
+		return resolver.Unobserved
+	}
+}
+
+func ambientNamespaceEnrollment(namespaceLabels map[string]string, namespaceLabelsKnown bool) resolver.Tristate {
+	return ambientEnrollment(namespaceLabels, nil, namespaceLabelsKnown)
+}
+
+func hasDataPlaneModeLabel(labels map[string]string) bool {
+	_, exists := labels["istio.io/dataplane-mode"]
+	return exists
 }
 
 func hasIstioProxy(spec corev1.PodSpec) bool {
@@ -516,6 +606,15 @@ func hasIstioProxy(spec corev1.PodSpec) bool {
 		}
 	}
 	return false
+}
+
+func sidecarInjectionConfigured(namespaceLabels, workloadLabels, workloadAnnotations map[string]string) bool {
+	if sidecarInjectionDisabled(workloadLabels, workloadAnnotations) ||
+		stringValue(namespaceLabels, "istio-injection") == "disabled" {
+		return false
+	}
+	return sidecarInjectionEnabled(workloadLabels, workloadAnnotations) ||
+		sidecarInjectionEnabled(namespaceLabels, nil)
 }
 
 func sidecarInjectionDisabled(labels, annotations map[string]string) bool {
@@ -528,6 +627,87 @@ func sidecarInjectionEnabled(labels, annotations map[string]string) bool {
 		stringValue(annotations, "sidecar.istio.io/inject") == "true" ||
 		stringValue(labels, "istio-injection") == "enabled" ||
 		stringValue(labels, "istio.io/rev") != ""
+}
+
+func namespacesKnown(snapshot collect.Snapshot) bool {
+	for _, permission := range snapshot.PermissionSummary {
+		if permission.APIGroup == "" && permission.Resource == "namespaces" {
+			return permission.Granted
+		}
+	}
+	return len(snapshot.Namespaces) > 0
+}
+
+func detectZtunnel(snapshot collect.Snapshot) (ZtunnelInventory, map[string]struct{}, bool, bool) {
+	inventory := ZtunnelInventory{}
+	present := len(snapshot.ZtunnelDaemonSets) > 0
+	if snapshot.ZtunnelDaemonSetsKnown {
+		inventory.Present = boolPointer(present)
+	}
+	if snapshot.NodesKnown {
+		inventory.NodesTotal = intPointer(len(snapshot.Nodes))
+	}
+
+	readyNodes := map[string]struct{}{}
+	coverageKnown := snapshot.ZtunnelDaemonSetsKnown && snapshot.ZtunnelPodsKnown
+	if coverageKnown {
+		if present {
+			for _, pod := range snapshot.ZtunnelPods {
+				if pod.Spec.NodeName != "" && podReady(pod) {
+					readyNodes[pod.Spec.NodeName] = struct{}{}
+				}
+			}
+		}
+		inventory.NodesCovered = intPointer(len(readyNodes))
+	}
+	return inventory, readyNodes, coverageKnown, present
+}
+
+func (b *workloadBuilder) ztunnelOnPods(mode resolver.DataPlaneMode, pods []corev1.Pod) resolver.Tristate {
+	if mode != resolver.ModeAmbient || !b.ztunnelCoverageKnown || len(pods) == 0 {
+		return resolver.Unobserved
+	}
+	if !b.ztunnelPresent {
+		return resolver.False
+	}
+	unobserved := false
+	for _, pod := range pods {
+		if pod.Spec.NodeName == "" {
+			unobserved = true
+			continue
+		}
+		if _, covered := b.ztunnelReadyNodes[pod.Spec.NodeName]; !covered {
+			return resolver.False
+		}
+	}
+	if unobserved {
+		return resolver.Unobserved
+	}
+	return resolver.True
+}
+
+func podReady(pod corev1.Pod) bool {
+	for _, condition := range pod.Status.Conditions {
+		if condition.Type == corev1.PodReady && condition.Status == corev1.ConditionTrue {
+			return true
+		}
+	}
+	return false
+}
+
+func waypointCount(gateways []gatewayProjection, known bool) *int {
+	if !known {
+		return nil
+	}
+	return intPointer(len(gateways))
+}
+
+func boolPointer(value bool) *bool {
+	return &value
+}
+
+func intPointer(value int) *int {
+	return &value
 }
 
 func aggregateDataPlaneMode(workloads []resolver.WorkloadInput) resolver.DataPlaneMode {

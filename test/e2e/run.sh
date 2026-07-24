@@ -39,11 +39,15 @@ started=$(date +%s)
 results="$E2E_STATE_DIR/results"
 basic_fixtures="$E2E_ROOT/test/fixtures/sidecar-basic"
 authz_fixtures="$E2E_ROOT/test/fixtures/sidecar-authz"
+ambient_fixtures="$E2E_ROOT/test/fixtures/ambient-basic"
+mixed_fixtures="$E2E_ROOT/test/fixtures/mixed-mode"
 cases="$E2E_STATE_DIR/all-cases.tsv"
 mkdir -p "$results"
 find "$results" -mindepth 1 -delete
-awk -F '\t' 'BEGIN {OFS="\t"} NF > 0 {print "sidecar-basic", $1, $2, $3, $4, $5}' "$basic_fixtures/cases.tsv" >"$cases"
-awk -F '\t' 'BEGIN {OFS="\t"} NF > 0 {print "sidecar-authz", $1, $2, $3, $4, $5}' "$authz_fixtures/cases.tsv" >>"$cases"
+awk -F '\t' 'BEGIN {OFS="\t"} NF > 0 {count=$6; if (count == "") count=1; scanner=$7; if (scanner == "") scanner="cluster"; print "sidecar-basic", $1, $2, $3, $4, count, $5, scanner}' "$basic_fixtures/cases.tsv" >"$cases"
+awk -F '\t' 'BEGIN {OFS="\t"} NF > 0 {count=$6; if (count == "") count=1; scanner=$7; if (scanner == "") scanner="cluster"; print "sidecar-authz", $1, $2, $3, $4, count, $5, scanner}' "$authz_fixtures/cases.tsv" >>"$cases"
+awk -F '\t' 'BEGIN {OFS="\t"} NF > 0 {count=$6; if (count == "") count=1; scanner=$7; if (scanner == "") scanner="cluster"; print "ambient-basic", $1, $2, $3, $4, count, $5, scanner}' "$ambient_fixtures/cases.tsv" >>"$cases"
+awk -F '\t' 'BEGIN {OFS="\t"} NF > 0 {count=$6; if (count == "") count=1; scanner=$7; if (scanner == "") scanner="cluster"; print "mixed-mode", $1, $2, $3, $4, count, $5, scanner}' "$mixed_fixtures/cases.tsv" >>"$cases"
 kubeconfigs=$(mktemp -d "$E2E_STATE_DIR/kubeconfigs.XXXXXX")
 chmod 700 "$kubeconfigs"
 scanner_home="$kubeconfigs/scanner-home"
@@ -187,6 +191,104 @@ assert_scanner_binding() {
 	fi
 }
 
+assert_cluster_scanner_bindings() {
+	bindings=$1
+	if ! printf '%s\n' "$bindings" | jq -e \
+		--arg harness_namespace "$E2E_HARNESS_NAMESPACE" \
+		--arg name "$E2E_CLUSTER_SCANNER" '
+		def affects_scanner:
+		  any(.subjects[]?;
+		    (.kind == "ServiceAccount" and .namespace == $harness_namespace and .name == $name) or
+		    (.kind == "User" and .name == ("system:serviceaccount:" + $harness_namespace + ":" + $name)) or
+		    (.kind == "Group" and (
+		      .name == "system:serviceaccounts" or
+		      .name == ("system:serviceaccounts:" + $harness_namespace) or
+		      .name == "system:authenticated"
+		    ))
+		  );
+		def verified_nonresource_default:
+		  .kind == "ClusterRoleBinding" and
+		  .roleRef.kind == "ClusterRole" and
+		  (
+		    .roleRef.name == "system:discovery" or
+		    .roleRef.name == "system:public-info-viewer" or
+		    .roleRef.name == "system:service-account-issuer-discovery"
+		  );
+		[
+		  .items[] |
+		  select(affects_scanner) |
+		  select(verified_nonresource_default | not) |
+		  {
+		    kind,
+		    namespace: (.metadata.namespace // ""),
+		    roleKind: .roleRef.kind,
+		    role: .roleRef.name
+		  }
+		] | sort_by(.role) == [
+		  {
+		    kind: "ClusterRoleBinding",
+		    namespace: "",
+		    roleKind: "ClusterRole",
+		    role: "openmeshguard-cluster-scan"
+		  },
+		  {
+		    kind: "ClusterRoleBinding",
+		    namespace: "",
+		    roleKind: "ClusterRole",
+		    role: "openmeshguard-evidence-nodes"
+		  }
+		]
+	' >/dev/null; then
+		echo "cluster scanner bindings differ from the published base and nodes add-on profiles; inspect $results/scanner-bindings.json" >&2
+		return 1
+	fi
+}
+
+assert_waypoint_limited_bindings() {
+	bindings=$1
+	if ! printf '%s\n' "$bindings" | jq -e \
+		--arg harness_namespace "$E2E_HARNESS_NAMESPACE" \
+		--arg name "$E2E_WAYPOINT_LIMITED_SCANNER" '
+		def affects_scanner:
+		  any(.subjects[]?;
+		    (.kind == "ServiceAccount" and .namespace == $harness_namespace and .name == $name) or
+		    (.kind == "User" and .name == ("system:serviceaccount:" + $harness_namespace + ":" + $name))
+		  );
+		[
+		  .items[] |
+		  select(affects_scanner) |
+		  {
+		    kind,
+		    namespace: (.metadata.namespace // ""),
+		    roleKind: .roleRef.kind,
+		    role: .roleRef.name
+		  }
+		] | sort_by(.namespace) == [
+		  {
+		    kind: "ClusterRoleBinding",
+		    namespace: "",
+		    roleKind: "ClusterRole",
+		    role: "openmeshguard-e2e-ztunnel-evidence"
+		  },
+		  {
+		    kind: "RoleBinding",
+		    namespace: "istio-system",
+		    roleKind: "ClusterRole",
+		    role: "openmeshguard-cluster-scan"
+		  },
+		  {
+		    kind: "RoleBinding",
+		    namespace: "omg-ambient-unavailable",
+		    roleKind: "ClusterRole",
+		    role: "openmeshguard-cluster-scan"
+		  }
+		]
+	' >/dev/null; then
+		echo "waypoint-limited scanner bindings differ from the test-only ztunnel evidence and two intended namespace-scoped bindings; inspect $results/scanner-bindings.json" >&2
+		return 1
+	fi
+}
+
 assert_nonresource_default_role() {
 	default_role_name=$1
 	# Artifact uploads reject ':' in file names, so sanitize role names like system:discovery.
@@ -221,8 +323,9 @@ assert_default_rbac_isolation() {
 assert_scanner_bindings() {
 	bindings=$(fixture_kubectl get clusterrolebindings,rolebindings -A -o json)
 	printf '%s\n' "$bindings" >"$results/scanner-bindings.json"
-	assert_scanner_binding "$bindings" "$E2E_CLUSTER_SCANNER" ClusterRoleBinding "" ClusterRole openmeshguard-cluster-scan
+	assert_cluster_scanner_bindings "$bindings"
 	assert_scanner_binding "$bindings" "$E2E_NAMESPACE_SCANNER" RoleBinding omg-strict Role openmeshguard-namespace-scan
+	assert_waypoint_limited_bindings "$bindings"
 }
 
 assert_schema_test_available() {
@@ -310,19 +413,21 @@ capture_audit() {
 assert_schema_test_available
 assert_golden_case_bijection "$basic_fixtures/cases.tsv" "$basic_fixtures/golden" true
 assert_golden_case_bijection "$authz_fixtures/cases.tsv" "$authz_fixtures/golden"
+assert_golden_case_bijection "$ambient_fixtures/cases.tsv" "$ambient_fixtures/golden"
+assert_golden_case_bijection "$mixed_fixtures/cases.tsv" "$mixed_fixtures/golden"
 
 echo "e2e: bootstrap distinct fixture-manager, scanner, and audit-probe identities"
 admin_kubectl apply -f "$E2E_ROOT/test/e2e/harness-bootstrap.yaml" >/dev/null
 make_sa_kubeconfig "$E2E_FIXTURE_MANAGER" "$kubeconfigs/fixture-manager.yaml" ""
 
 echo "e2e: reset and apply sidecar fixtures and published RBAC profiles"
-while IFS="$tab" read -r group name namespace deployment proxy expected_findings; do
+while IFS="$tab" read -r group name namespace deployment proxy expected_postures expected_findings scanner_profile; do
 	fixture_kubectl delete namespace "$namespace" --ignore-not-found --wait=false >/dev/null
 done <"$cases"
 attempt=0
 while :; do
 	remaining=0
-	while IFS="$tab" read -r group name namespace deployment proxy expected_findings; do
+	while IFS="$tab" read -r group name namespace deployment proxy expected_postures expected_findings scanner_profile; do
 		if fixture_kubectl get namespace "$namespace" >/dev/null 2>&1; then
 			remaining=1
 		fi
@@ -339,19 +444,34 @@ while :; do
 done
 fixture_kubectl apply -f "$basic_fixtures/manifests.yaml" >/dev/null
 fixture_kubectl apply -f "$authz_fixtures/manifests.yaml" >/dev/null
+fixture_kubectl apply -f "$ambient_fixtures/manifests.yaml" >/dev/null
+fixture_kubectl apply -f "$mixed_fixtures/manifests.yaml" >/dev/null
 fixture_kubectl apply -f "$E2E_ROOT/deploy/rbac/cluster-role.yaml" >/dev/null
+fixture_kubectl apply -f "$E2E_ROOT/deploy/rbac/addons/nodes-cluster-role.yaml" >/dev/null
 fixture_kubectl -n omg-strict apply -f "$E2E_ROOT/deploy/rbac/namespace-role.yaml" >/dev/null
 fixture_kubectl apply -f "$E2E_ROOT/test/e2e/scanner-bindings.yaml" >/dev/null
 
-echo "e2e: wait for fixture workloads and verify sidecar enrollment"
-while IFS="$tab" read -r group name namespace deployment proxy expected_findings; do
+echo "e2e: wait for fixture workloads and verify data-plane enrollment"
+while IFS="$tab" read -r group name namespace deployment proxy expected_postures expected_findings scanner_profile; do
 	fixture_kubectl -n "$namespace" rollout status "deployment/$deployment" --timeout=300s >/dev/null
+	if [ "$proxy" = mixed ]; then
+		fixture_kubectl -n "$namespace" rollout status deployment/mixed-ambient --timeout=300s >/dev/null
+	fi
 	pods="$kubeconfigs/$name-pods.json"
-	fixture_kubectl -n "$namespace" get pods -o json >"$pods"
+	fixture_kubectl -n "$namespace" get pods -l "app=$deployment" -o json >"$pods"
 	if [ "$proxy" = sidecar ]; then
 		assert_json "$namespace has one pod with istio-proxy" "$pods" '
 			.items | length == 1 and
 			all(.[]; ([.spec.containers[], .spec.initContainers[]?] | any(.name == "istio-proxy")))
+		'
+	elif [ "$proxy" = mixed ]; then
+		all_pods="$kubeconfigs/$name-all-pods.json"
+		fixture_kubectl -n "$namespace" get pods -o json >"$all_pods"
+		assert_json "$namespace has both sidecar and ambient application pods" "$all_pods" '
+			[.items[] | select(.metadata.labels.app == "mixed-sidecar" or .metadata.labels.app == "mixed-ambient")] |
+			length == 2 and
+			any(.[]; ([.spec.containers[], .spec.initContainers[]?] | any(.name == "istio-proxy"))) and
+			any(.[]; ([.spec.containers[], .spec.initContainers[]?] | all(.name != "istio-proxy")))
 		'
 	else
 		assert_json "$namespace has one pod without istio-proxy" "$pods" '
@@ -360,6 +480,9 @@ while IFS="$tab" read -r group name namespace deployment proxy expected_findings
 		'
 	fi
 done <"$cases"
+
+fixture_kubectl -n omg-ambient-ready wait \
+	--for=condition=Programmed=True gateway/ambient-ready-waypoint --timeout=300s >/dev/null
 
 fixture_kubectl -n omg-port-override get peerauthentication port-override -o json >"$kubeconfigs/port-policy.json"
 assert_json "live port override input is DISABLE on 8080" "$kubeconfigs/port-policy.json" '
@@ -377,15 +500,19 @@ assert_json "live workload policy overrides namespace STRICT with DISABLE" "$kub
 echo "e2e: prove each scanner has only its published resource-authorizing RBAC binding"
 assert_default_rbac_isolation
 assert_live_profile cluster-role "$E2E_ROOT/deploy/rbac/cluster-role.yaml" "" clusterrole/openmeshguard-cluster-scan
+assert_live_profile nodes-role "$E2E_ROOT/deploy/rbac/addons/nodes-cluster-role.yaml" "" clusterrole/openmeshguard-evidence-nodes
 assert_live_profile namespace-role "$E2E_ROOT/deploy/rbac/namespace-role.yaml" omg-strict role/openmeshguard-namespace-scan
 assert_scanner_bindings
 make_sa_kubeconfig "$E2E_CLUSTER_SCANNER" "$kubeconfigs/scanner-cluster.yaml" "$kubeconfigs/fixture-manager.yaml"
 make_sa_kubeconfig "$E2E_NAMESPACE_SCANNER" "$kubeconfigs/scanner-namespace.yaml" "$kubeconfigs/fixture-manager.yaml"
+make_sa_kubeconfig "$E2E_WAYPOINT_LIMITED_SCANNER" "$kubeconfigs/scanner-waypoint-limited.yaml" "$kubeconfigs/fixture-manager.yaml"
 make_sa_kubeconfig audit-probe "$kubeconfigs/audit-probe.yaml" "$kubeconfigs/fixture-manager.yaml"
 
 attempt=0
 while ! kubectl --kubeconfig "$kubeconfigs/scanner-cluster.yaml" --request-timeout=5s get namespace omg-strict >/dev/null 2>&1 ||
-	! kubectl --kubeconfig "$kubeconfigs/scanner-namespace.yaml" --request-timeout=5s -n omg-strict get pods >/dev/null 2>&1
+	! kubectl --kubeconfig "$kubeconfigs/scanner-namespace.yaml" --request-timeout=5s -n omg-strict get pods >/dev/null 2>&1 ||
+	! kubectl --kubeconfig "$kubeconfigs/scanner-waypoint-limited.yaml" --request-timeout=5s -n omg-ambient-unavailable get pods >/dev/null 2>&1 ||
+	! kubectl --kubeconfig "$kubeconfigs/scanner-waypoint-limited.yaml" --request-timeout=5s -n istio-system get authorizationpolicies.security.istio.io >/dev/null 2>&1
 do
 	attempt=$((attempt + 1))
 	if [ "$attempt" -ge 20 ]; then
@@ -490,8 +617,20 @@ if [ -e "$kubeconfigs/audit-probe.yaml" ]; then
 fi
 
 echo "e2e: scan namespace fixtures and compare canonical JSON goldens"
-while IFS="$tab" read -r group name namespace deployment proxy expected_findings; do
-	scan_fixture "$name" "$namespace" "$kubeconfigs/scanner-cluster.yaml"
+while IFS="$tab" read -r group name namespace deployment proxy expected_postures expected_findings scanner_profile; do
+	case "$scanner_profile" in
+	cluster)
+		scanner_kubeconfig="$kubeconfigs/scanner-cluster.yaml"
+		;;
+	waypoint-limited)
+		scanner_kubeconfig="$kubeconfigs/scanner-waypoint-limited.yaml"
+		;;
+	*)
+		echo "unknown fixture scanner profile: $scanner_profile" >&2
+		exit 1
+		;;
+	esac
+	scan_fixture "$name" "$namespace" "$scanner_kubeconfig"
 done <"$cases"
 
 echo "e2e: exercise the published ClusterRole with an all-namespaces scan"
@@ -500,7 +639,7 @@ assert_json "cluster scan workload targets are globally ordered" "$results/clust
 	[.workloadPostures[].workload | "\(.namespace)/\(.kind)/\(.name)"] as $targets |
 	$targets == ($targets | sort)
 '
-while IFS="$tab" read -r group name namespace deployment proxy expected_findings; do
+while IFS="$tab" read -r group name namespace deployment proxy expected_postures expected_findings scanner_profile; do
 	if ! jq -e --arg namespace "$namespace" --arg deployment "$deployment" '
 		any(.workloadPostures[];
 		  .workload.namespace == $namespace and
@@ -514,9 +653,9 @@ while IFS="$tab" read -r group name namespace deployment proxy expected_findings
 done <"$cases"
 
 capture_audit "$results/audit-cluster.jsonl"
-rm -f "$kubeconfigs/scanner-cluster.yaml"
-if [ -e "$kubeconfigs/scanner-cluster.yaml" ]; then
-	echo "cluster-scanner kubeconfig remained during namespace-scanner phase" >&2
+rm -f "$kubeconfigs/scanner-cluster.yaml" "$kubeconfigs/scanner-waypoint-limited.yaml"
+if [ -e "$kubeconfigs/scanner-cluster.yaml" ] || [ -e "$kubeconfigs/scanner-waypoint-limited.yaml" ]; then
+	echo "cluster-phase scanner kubeconfig remained during namespace-scanner phase" >&2
 	exit 1
 fi
 
@@ -548,19 +687,22 @@ capture_audit "$results/audit-namespace.jsonl"
 rm -f "$kubeconfigs/scanner-namespace.yaml"
 awk '1' "$results/audit-cluster.jsonl" "$results/audit-namespace.jsonl" >"$results/audit.jsonl"
 
-while IFS="$tab" read -r group name namespace deployment proxy expected_findings; do
-	assert_json "$name emits one workload posture and a findings array" "$results/$name.json" '
-		(.workloadPostures | length) == 1 and
+while IFS="$tab" read -r group name namespace deployment proxy expected_postures expected_findings scanner_profile; do
+	if ! jq -e --argjson expected_postures "$expected_postures" '
+		(.workloadPostures | length) == $expected_postures and
 		(.findings | type) == "array"
-	'
+	' "$results/$name.json" >/dev/null; then
+		echo "semantic assertion failed: $name emits the expected workload postures and a findings array ($results/$name.json)" >&2
+		exit 1
+	fi
 	assert_report_update_guard "$name" "$results/$name.json" "$expected_findings"
 done <"$cases"
 assert_json "namespace Role scan emits one workload posture and all built-in findings" "$results/namespace-role-degraded.json" '
 	(.workloadPostures | length) == 1 and
-	(.findings | length) == 11
+	(.findings | length) == 14
 '
 assert_report_update_guard namespace-role-degraded "$results/namespace-role-degraded.json" \
-	"MG-AUTHZ-001=unknown,MG-AUTHZ-002=unknown,MG-AUTHZ-003=unknown,MG-AUTHZ-004=unknown,MG-AUTHZ-005=unknown,MG-AUTHZ-006=unknown,MG-AUTHZ-007=unknown,MG-MTLS-001=unknown,MG-MTLS-002=unknown,MG-MTLS-003=unknown,MG-MTLS-007=unknown"
+	"MG-AUTHZ-001=unknown,MG-AUTHZ-002=unknown,MG-AUTHZ-003=unknown,MG-AUTHZ-004=unknown,MG-AUTHZ-005=unknown,MG-AUTHZ-006=unknown,MG-AUTHZ-007=unknown,MG-GW-005=not-applicable,MG-MTLS-001=unknown,MG-MTLS-002=unknown,MG-MTLS-003=unknown,MG-MTLS-005=not-applicable,MG-MTLS-006=not-applicable,MG-MTLS-007=unknown"
 
 assert_json "strict namespace resolves strict" "$results/strict.json" '
 	.workloadPostures | length == 1 and .[0].mtls.effective == "strict"
@@ -637,19 +779,83 @@ assert_json "selector mismatch is explicit in the authorization chain" "$results
 	((.[0].authorization.policiesInScope // []) == []) and
 	any(.[0].authorization.chain[]; .field == "spec.selector" and (.effect | contains("excludes policy")))
 '
-assert_json "injection-disabled fixture remains honest membership unknown" "$results/not-in-mesh.json" '
+assert_json "injection-disabled fixture resolves outside the mesh" "$results/not-in-mesh.json" '
 	.workloadPostures | length == 1 and
-	.[0].dataPlaneMode == "unknown" and
-	.[0].mtls.effective == "unknown" and
-	.[0].mtls.unknownReason == "data plane membership unavailable"
+	.[0].dataPlaneMode == "not-applicable" and
+	.[0].mtls.effective == "not-in-mesh" and
+	.[0].authorization.effective == "not-in-mesh"
+'
+assert_json "ambient L7 targetRef is enforced by a ready waypoint" "$results/ambient-ready.json" '
+	.inventory.dataPlane.mode == "mixed" and
+	.inventory.dataPlane.ztunnel.present == true and
+	.inventory.dataPlane.ztunnel.nodesCovered == .inventory.dataPlane.ztunnel.nodesTotal and
+	.inventory.dataPlane.waypoints == 1 and
+	any(.workloadPostures[];
+	  .workload.namespace == "omg-ambient-ready" and
+	  .workload.name == "ambient-ready" and
+	  .dataPlaneMode == "ambient" and
+	  .mtls.effective == "strict" and
+	  .authorization.effective == "allow-only" and
+	  any(.authorization.chain[];
+	    .kind == "Waypoint" and
+	    .name == "ambient-ready-waypoint" and
+	    (.effect | contains("ready and enforces"))
+	  )
+	)
+'
+assert_json "the same ambient L7 targetRef is unenforced without a ready waypoint" "$results/ambient-missing.json" '
+	.inventory.dataPlane.mode == "ambient" and
+	.inventory.dataPlane.ztunnel.present == true and
+	.inventory.dataPlane.ztunnel.nodesCovered == .inventory.dataPlane.ztunnel.nodesTotal and
+	.inventory.dataPlane.waypoints == 0 and
+	(.workloadPostures | length) == 1 and
+	.workloadPostures[0].workload.name == "ambient-missing" and
+	.workloadPostures[0].dataPlaneMode == "ambient" and
+	.workloadPostures[0].mtls.effective == "strict" and
+	.workloadPostures[0].authorization.effective == "waypoint-policy-unenforced" and
+	.workloadPostures[0].authorization.waypointUnenforced == ["omg-ambient-missing/allow-api"] and
+	any(.workloadPostures[0].authorization.chain[];
+	  .kind == "Waypoint" and
+	  .name == "ambient-missing-waypoint" and
+	  (.effect | contains("not ready"))
+	)
+'
+assert_json "unavailable waypoint evidence remains unknown end to end" "$results/ambient-unavailable.json" '
+	(.workloadPostures | length) == 1 and
+	.workloadPostures[0].workload.name == "ambient-unavailable" and
+	.workloadPostures[0].dataPlaneMode == "ambient" and
+	.workloadPostures[0].authorization.effective == "unknown" and
+	(.workloadPostures[0].authorization.unknownReason | contains("waypoint evidence unavailable")) and
+	any(.workloadPostures[0].authorization.chain[];
+	  .kind == "Waypoint" and
+	  .name == "unavailable-waypoint" and
+	  .namespace == "omg-waypoint-evidence" and
+	  (.effect | contains("evidence is unavailable"))
+	)
+'
+ready_effect=$(jq -r 'first(.workloadPostures[] | select(.workload.name == "ambient-ready")).authorization.effective' "$results/ambient-ready.json")
+missing_effect=$(jq -r 'first(.workloadPostures[] | select(.workload.name == "ambient-missing")).authorization.effective' "$results/ambient-missing.json")
+if [ "$ready_effect" = "$missing_effect" ]; then
+	echo "ambient ready and missing waypoint goldens resolved to the same authorization state" >&2
+	exit 1
+fi
+assert_json "mixed namespace preserves per-workload modes" "$results/mixed-mode.json" '
+	.inventory.dataPlane.mode == "mixed" and
+	([.workloadPostures[] | {name: .workload.name, mode: .dataPlaneMode}] | sort_by(.name)) ==
+	[
+	  {"name": "mixed-ambient", "mode": "ambient"},
+	  {"name": "mixed-sidecar", "mode": "sidecar"}
+	]
 '
 assert_json "namespace Role degrades denied root policy evidence" "$results/namespace-role-degraded.json" '
 	(.workloadPostures | length) > 0 and
 	(.findings | length) > 0 and
 	any(.permissionSummary[]; .apiGroup == "" and .resource == "namespaces" and .granted == false) and
+	any(.permissionSummary[]; .apiGroup == "" and .resource == "nodes" and .granted == false and .optional == true) and
 	any(.permissionSummary[]; .apiGroup == "security.istio.io" and .resource == "peerauthentications" and .granted == false) and
+	.inventory.dataPlane.ztunnel.nodesTotal == null and
 	all(.workloadPostures[]; .mtls.effective == "unknown") and
-	all(.findings[]; .status == "unknown")
+	all(.findings[]; .status == "unknown" or .status == "not-applicable")
 '
 
 echo "e2e: prove API-server audit saw only approved list calls and no privileged credential use"
@@ -658,15 +864,20 @@ if ! assert_scanner_audit "$results/audit.jsonl"; then
 	exit 1
 fi
 
-while IFS="$tab" read -r group name namespace deployment proxy expected_findings; do
+while IFS="$tab" read -r group name namespace deployment proxy expected_postures expected_findings scanner_profile; do
 	compare_golden "$group" "$name"
 done <"$cases"
 compare_golden sidecar-basic namespace-role-degraded
 
 events=$(jq -s \
 	--arg cluster_user "system:serviceaccount:$E2E_HARNESS_NAMESPACE:$E2E_CLUSTER_SCANNER" \
-	--arg namespace_user "system:serviceaccount:$E2E_HARNESS_NAMESPACE:$E2E_NAMESPACE_SCANNER" '
-	[.[] | select(.user.username == $cluster_user or .user.username == $namespace_user)] | length
+	--arg namespace_user "system:serviceaccount:$E2E_HARNESS_NAMESPACE:$E2E_NAMESPACE_SCANNER" \
+	--arg waypoint_limited_user "system:serviceaccount:$E2E_HARNESS_NAMESPACE:$E2E_WAYPOINT_LIMITED_SCANNER" '
+	[.[] | select(
+	  .user.username == $cluster_user or
+	  .user.username == $namespace_user or
+	  .user.username == $waypoint_limited_user
+	)] | length
 ' "$results/audit.jsonl")
 finished=$(date +%s)
 echo "RBAC proofs passed; scanner audit contains $events approved list events and no other calls"

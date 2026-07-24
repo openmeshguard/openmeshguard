@@ -12,6 +12,19 @@ subjects:
     namespace: openmeshguard-e2e
 ---
 apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: openmeshguard-e2e-cluster-scan-nodes
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: openmeshguard-evidence-nodes
+subjects:
+  - kind: ServiceAccount
+    name: scanner-cluster
+    namespace: openmeshguard-e2e
+---
+apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
   name: openmeshguard-e2e-namespace-scan
@@ -23,4 +36,63 @@ roleRef:
 subjects:
   - kind: ServiceAccount
     name: scanner-namespace
+    namespace: openmeshguard-e2e
+---
+# Acceptance-only evidence role: let the waypoint-limited scanner establish
+# ambient node coverage without granting access to Gateway API waypoint
+# inventory outside its two namespace-scoped bindings.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: openmeshguard-e2e-ztunnel-evidence
+rules:
+  - apiGroups: [""]
+    resources: ["nodes", "pods"]
+    verbs: ["get", "list"]
+  - apiGroups: ["apps"]
+    resources: ["daemonsets"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: openmeshguard-e2e-waypoint-limited-ztunnel
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: openmeshguard-e2e-ztunnel-evidence
+subjects:
+  - kind: ServiceAccount
+    name: scanner-waypoint-limited
+    namespace: openmeshguard-e2e
+---
+# Acceptance-only profile: reuse the published read-only ClusterRole through
+# namespace-scoped bindings. The scanner can resolve workload and mesh-root
+# policy but cannot observe the selected waypoint in any other namespace.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: openmeshguard-e2e-waypoint-limited-workload
+  namespace: omg-ambient-unavailable
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: openmeshguard-cluster-scan
+subjects:
+  - kind: ServiceAccount
+    name: scanner-waypoint-limited
+    namespace: openmeshguard-e2e
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: openmeshguard-e2e-waypoint-limited-root
+  namespace: istio-system
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: openmeshguard-cluster-scan
+subjects:
+  - kind: ServiceAccount
+    name: scanner-waypoint-limited
     namespace: openmeshguard-e2e

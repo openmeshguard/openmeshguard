@@ -17,6 +17,7 @@ mkdir -p "$E2E_ROOT" "$TEST_ROOT/fixtures/istio" "$TEST_ROOT/path"
 
 printf '%s\n' '#!/bin/sh' 'echo "kind test-kind-version"' >"$TEST_ROOT/fixtures/kind"
 printf '%s\n' '#!/bin/sh' 'echo "client version: test-istio-version"' >"$TEST_ROOT/fixtures/istio/istioctl"
+printf '%s\n' 'apiVersion: apiextensions.k8s.io/v1' 'kind: CustomResourceDefinition' >"$TEST_ROOT/fixtures/gateway-api.yaml"
 chmod +x "$TEST_ROOT/fixtures/kind" "$TEST_ROOT/fixtures/istio/istioctl"
 tar -czf "$TEST_ROOT/fixtures/istioctl.tar.gz" -C "$TEST_ROOT/fixtures/istio" istioctl
 
@@ -31,11 +32,14 @@ test_sha256() {
 
 test_kind_checksum=$(test_sha256 "$TEST_ROOT/fixtures/kind")
 test_istio_checksum=$(test_sha256 "$TEST_ROOT/fixtures/istioctl.tar.gz")
+test_gateway_api_checksum=$(test_sha256 "$TEST_ROOT/fixtures/gateway-api.yaml")
 {
 	printf 'kind: test-kind-version\n'
 	printf 'istio: test-istio-version\n'
+	printf 'gatewayAPI: test-gateway-api-version\n'
 	printf 'kindSHA256LinuxAMD64: %s\n' "$test_kind_checksum"
 	printf 'istioctlSHA256LinuxAMD64: %s\n' "$test_istio_checksum"
+	printf 'gatewayAPIExperimentalSHA256: %s\n' "$test_gateway_api_checksum"
 } >"$E2E_ROOT/versions.yaml"
 
 # Shadow installed tools with the wrong version so the helpers must use their
@@ -72,6 +76,9 @@ download() {
 		https://github.com/istio/istio/releases/download/test-istio-version/istioctl-test-istio-version-linux-amd64.tar.gz)
 			cp "$TEST_ROOT/fixtures/istioctl.tar.gz" "$test_download_output"
 			;;
+		https://github.com/kubernetes-sigs/gateway-api/releases/download/test-gateway-api-version/experimental-install.yaml)
+			cp "$TEST_ROOT/fixtures/gateway-api.yaml" "$test_download_output"
+			;;
 		*)
 			echo "unexpected download URL: $test_download_url" >&2
 			return 1
@@ -81,6 +88,7 @@ download() {
 
 test_kind_path=$(kind_binary)
 test_istio_path=$(istioctl_binary)
+test_gateway_api_path=$(gateway_api_crds_bundle)
 
 if [ "$test_kind_path" != "$E2E_STATE_DIR/bin/kind" ]; then
 	echo "kind fallback returned unexpected path: $test_kind_path" >&2
@@ -88,6 +96,10 @@ if [ "$test_kind_path" != "$E2E_STATE_DIR/bin/kind" ]; then
 fi
 if [ "$test_istio_path" != "$E2E_STATE_DIR/bin/istioctl" ]; then
 	echo "istioctl fallback returned unexpected path: $test_istio_path" >&2
+	exit 1
+fi
+if [ "$test_gateway_api_path" != "$E2E_STATE_DIR/downloads/gateway-api-test-gateway-api-version-experimental-install.yaml" ]; then
+	echo "Gateway API fallback returned unexpected path: $test_gateway_api_path" >&2
 	exit 1
 fi
 

@@ -22,7 +22,7 @@
     "scope": {
       "allNamespaces": false,
       "namespaces": [
-        "omg-strict"
+        "omg-mixed-mode"
       ]
     },
     "dataSources": {
@@ -302,25 +302,25 @@
   ],
   "inventory": {
     "counts": {
-      "authorizationPolicies": 1,
+      "authorizationPolicies": 3,
       "daemonsets": 0,
-      "deployments": 1,
+      "deployments": 2,
       "destinationRules": 0,
-      "endpointSlices": 1,
+      "endpointSlices": 2,
       "gateways": 0,
       "namespaces": 1,
       "nodes": 1,
       "peerAuthentications": 2,
-      "pods": 1,
-      "replicasets": 1,
-      "services": 1,
+      "pods": 2,
+      "replicasets": 2,
+      "services": 2,
       "sidecars": 0,
       "statefulsets": 0,
       "ztunnelDaemonSets": 1,
       "ztunnelPods": 1
     },
     "dataPlane": {
-      "mode": "sidecar",
+      "mode": "mixed",
       "ztunnel": {
         "present": true,
         "nodesCovered": 1,
@@ -336,8 +336,88 @@
   "workloadPostures": [
     {
       "workload": {
-        "namespace": "omg-strict",
-        "name": "strict-api",
+        "namespace": "omg-mixed-mode",
+        "name": "mixed-ambient",
+        "kind": "Deployment"
+      },
+      "dataPlaneMode": "ambient",
+      "mtls": {
+        "effective": "strict",
+        "byPort": {
+          "8080": "strict"
+        },
+        "clientTLSContradiction": false,
+        "chain": [
+          {
+            "order": 1,
+            "kind": "MeshConfigDefault",
+            "field": "defaultPeerAuthenticationMode",
+            "effect": "defaults mesh mTLS mode to PERMISSIVE when no PeerAuthentication mode overrides it"
+          },
+          {
+            "order": 2,
+            "kind": "PeerAuthentication",
+            "name": "default",
+            "namespace": "istio-system",
+            "field": "spec.mtls.mode",
+            "effect": "sets mesh-wide mTLS mode to STRICT"
+          },
+          {
+            "order": 3,
+            "kind": "PeerAuthentication",
+            "name": "default",
+            "namespace": "omg-mixed-mode",
+            "field": "spec.mtls.mode",
+            "effect": "sets namespace mTLS mode to STRICT"
+          }
+        ]
+      },
+      "authorization": {
+        "effective": "default-deny-explicit-allow",
+        "broadAllow": false,
+        "identityScoped": true,
+        "policiesInScope": [
+          "omg-mixed-mode/allow-client",
+          "omg-mixed-mode/default-deny"
+        ],
+        "chain": [
+          {
+            "order": 1,
+            "kind": "AuthorizationDefault",
+            "field": "implicitEnablement",
+            "effect": "establishes Istio's implicit allow when no applicable ALLOW policy exists"
+          },
+          {
+            "order": 2,
+            "kind": "AuthorizationPolicy",
+            "name": "authz-root-default-deny",
+            "namespace": "istio-system",
+            "field": "spec.selector",
+            "effect": "selector does not match the workload; excludes policy from authorization evaluation"
+          },
+          {
+            "order": 3,
+            "kind": "AuthorizationPolicy",
+            "name": "allow-client",
+            "namespace": "omg-mixed-mode",
+            "field": "spec.action",
+            "effect": "adds explicit rules to the additive ALLOW union"
+          },
+          {
+            "order": 4,
+            "kind": "AuthorizationPolicy",
+            "name": "default-deny",
+            "namespace": "omg-mixed-mode",
+            "field": "spec.action",
+            "effect": "adds an ALLOW policy with no rules; activates default deny for unmatched requests"
+          }
+        ]
+      }
+    },
+    {
+      "workload": {
+        "namespace": "omg-mixed-mode",
+        "name": "mixed-sidecar",
         "kind": "Deployment"
       },
       "dataPlaneMode": "sidecar",
@@ -366,16 +446,20 @@
             "order": 3,
             "kind": "PeerAuthentication",
             "name": "default",
-            "namespace": "omg-strict",
+            "namespace": "omg-mixed-mode",
             "field": "spec.mtls.mode",
             "effect": "sets namespace mTLS mode to STRICT"
           }
         ]
       },
       "authorization": {
-        "effective": "no-policy",
+        "effective": "default-deny-explicit-allow",
         "broadAllow": false,
-        "identityScoped": false,
+        "identityScoped": true,
+        "policiesInScope": [
+          "omg-mixed-mode/allow-client",
+          "omg-mixed-mode/default-deny"
+        ],
         "chain": [
           {
             "order": 1,
@@ -390,6 +474,22 @@
             "namespace": "istio-system",
             "field": "spec.selector",
             "effect": "selector does not match the workload; excludes policy from authorization evaluation"
+          },
+          {
+            "order": 3,
+            "kind": "AuthorizationPolicy",
+            "name": "allow-client",
+            "namespace": "omg-mixed-mode",
+            "field": "spec.action",
+            "effect": "adds explicit rules to the additive ALLOW union"
+          },
+          {
+            "order": 4,
+            "kind": "AuthorizationPolicy",
+            "name": "default-deny",
+            "namespace": "omg-mixed-mode",
+            "field": "spec.action",
+            "effect": "adds an ALLOW policy with no rules; activates default deny for unmatched requests"
           }
         ]
       }
@@ -397,171 +497,7 @@
   ],
   "findings": [
     {
-      "id": "MG-AUTHZ-001-51dc710d23e1",
-      "controlId": "MG-AUTHZ-001",
-      "title": "Mesh-managed workloads must have resolved authorization coverage",
-      "severity": "high",
-      "evidenceType": "config",
-      "status": "open",
-      "confidence": "resolved",
-      "dataPlaneMode": "sidecar",
-      "evidenceSources": [
-        "kubernetes-api",
-        "istio-crd"
-      ],
-      "resources": [
-        {
-          "kind": "Deployment",
-          "namespace": "omg-strict",
-          "name": "strict-api"
-        }
-      ],
-      "resolutionChain": [
-        {
-          "order": 1,
-          "kind": "AuthorizationDefault",
-          "field": "implicitEnablement",
-          "effect": "establishes Istio's implicit allow when no applicable ALLOW policy exists"
-        },
-        {
-          "order": 2,
-          "kind": "AuthorizationPolicy",
-          "name": "authz-root-default-deny",
-          "namespace": "istio-system",
-          "field": "spec.selector",
-          "effect": "selector does not match the workload; excludes policy from authorization evaluation"
-        }
-      ],
-      "reasoning": "omg-strict/strict-api has no resolved AuthorizationPolicy coverage.",
-      "remediation": {
-        "guidance": "Apply an AuthorizationPolicy that selects this workload and inspect the resolution chain to confirm its effective scope."
-      }
-    },
-    {
-      "id": "MG-AUTHZ-002-35c85047aa15",
-      "controlId": "MG-AUTHZ-002",
-      "title": "Workloads should resolve to default deny with explicit allow",
-      "severity": "high",
-      "evidenceType": "config",
-      "status": "open",
-      "confidence": "resolved",
-      "dataPlaneMode": "sidecar",
-      "evidenceSources": [
-        "kubernetes-api",
-        "istio-crd"
-      ],
-      "resources": [
-        {
-          "kind": "Deployment",
-          "namespace": "omg-strict",
-          "name": "strict-api"
-        }
-      ],
-      "resolutionChain": [
-        {
-          "order": 1,
-          "kind": "AuthorizationDefault",
-          "field": "implicitEnablement",
-          "effect": "establishes Istio's implicit allow when no applicable ALLOW policy exists"
-        },
-        {
-          "order": 2,
-          "kind": "AuthorizationPolicy",
-          "name": "authz-root-default-deny",
-          "namespace": "istio-system",
-          "field": "spec.selector",
-          "effect": "selector does not match the workload; excludes policy from authorization evaluation"
-        }
-      ],
-      "reasoning": "Authorization for omg-strict/strict-api resolves to no-policy, not default deny with explicit allow.",
-      "remediation": {
-        "guidance": "Establish an empty ALLOW policy for default deny and add narrowly scoped ALLOW rules for required traffic."
-      }
-    },
-    {
-      "id": "MG-AUTHZ-004-e1224b6d7c7d",
-      "controlId": "MG-AUTHZ-004",
-      "title": "Authorization access must be scoped to explicit identities",
-      "severity": "high",
-      "evidenceType": "config",
-      "status": "open",
-      "confidence": "resolved",
-      "dataPlaneMode": "sidecar",
-      "evidenceSources": [
-        "kubernetes-api",
-        "istio-crd"
-      ],
-      "resources": [
-        {
-          "kind": "Deployment",
-          "namespace": "omg-strict",
-          "name": "strict-api"
-        }
-      ],
-      "resolutionChain": [
-        {
-          "order": 1,
-          "kind": "AuthorizationDefault",
-          "field": "implicitEnablement",
-          "effect": "establishes Istio's implicit allow when no applicable ALLOW policy exists"
-        },
-        {
-          "order": 2,
-          "kind": "AuthorizationPolicy",
-          "name": "authz-root-default-deny",
-          "namespace": "istio-system",
-          "field": "spec.selector",
-          "effect": "selector does not match the workload; excludes policy from authorization evaluation"
-        }
-      ],
-      "reasoning": "Authorization access for omg-strict/strict-api is not scoped to explicit principals, namespaces, or workloads.",
-      "remediation": {
-        "guidance": "Scope ALLOW rules to approved principals, namespaces, service accounts, or workload identities."
-      }
-    },
-    {
-      "id": "MG-AUTHZ-005-6955419b2fad",
-      "controlId": "MG-AUTHZ-005",
-      "title": "Authorization coverage must resolve at workload level",
-      "severity": "high",
-      "evidenceType": "config",
-      "status": "open",
-      "confidence": "resolved",
-      "dataPlaneMode": "sidecar",
-      "evidenceSources": [
-        "kubernetes-api",
-        "istio-crd"
-      ],
-      "resources": [
-        {
-          "kind": "Deployment",
-          "namespace": "omg-strict",
-          "name": "strict-api"
-        }
-      ],
-      "resolutionChain": [
-        {
-          "order": 1,
-          "kind": "AuthorizationDefault",
-          "field": "implicitEnablement",
-          "effect": "establishes Istio's implicit allow when no applicable ALLOW policy exists"
-        },
-        {
-          "order": 2,
-          "kind": "AuthorizationPolicy",
-          "name": "authz-root-default-deny",
-          "namespace": "istio-system",
-          "field": "spec.selector",
-          "effect": "selector does not match the workload; excludes policy from authorization evaluation"
-        }
-      ],
-      "reasoning": "omg-strict/strict-api is not selected by any resolved AuthorizationPolicy.",
-      "remediation": {
-        "guidance": "Correct policy namespace, selector, or targetRefs so coverage reaches this workload rather than relying on policy resource presence alone."
-      }
-    },
-    {
-      "id": "MG-GW-005-0c9ee646c9fe",
+      "id": "MG-GW-005-2fe6337711af",
       "controlId": "MG-GW-005",
       "title": "Ambient waypoint authorization must have explicit ready enrollment",
       "severity": "high",
@@ -576,8 +512,8 @@
       "resources": [
         {
           "kind": "Deployment",
-          "namespace": "omg-strict",
-          "name": "strict-api"
+          "namespace": "omg-mixed-mode",
+          "name": "mixed-sidecar"
         }
       ],
       "resolutionChain": [
@@ -594,15 +530,31 @@
           "namespace": "istio-system",
           "field": "spec.selector",
           "effect": "selector does not match the workload; excludes policy from authorization evaluation"
+        },
+        {
+          "order": 3,
+          "kind": "AuthorizationPolicy",
+          "name": "allow-client",
+          "namespace": "omg-mixed-mode",
+          "field": "spec.action",
+          "effect": "adds explicit rules to the additive ALLOW union"
+        },
+        {
+          "order": 4,
+          "kind": "AuthorizationPolicy",
+          "name": "default-deny",
+          "namespace": "omg-mixed-mode",
+          "field": "spec.action",
+          "effect": "adds an ALLOW policy with no rules; activates default deny for unmatched requests"
         }
       ],
-      "reasoning": "Control MG-GW-005 does not apply to omg-strict/strict-api.",
+      "reasoning": "Control MG-GW-005 does not apply to omg-mixed-mode/mixed-sidecar.",
       "remediation": {
         "guidance": "Set istio.io/use-waypoint to a waypoint whose scope covers the target and wait for its Gateway Programmed condition to become true."
       }
     },
     {
-      "id": "MG-MTLS-005-440432516897",
+      "id": "MG-MTLS-005-df48588bdbf8",
       "controlId": "MG-MTLS-005",
       "title": "Ambient workloads must have validated L4 mTLS posture",
       "severity": "high",
@@ -617,8 +569,8 @@
       "resources": [
         {
           "kind": "Deployment",
-          "namespace": "omg-strict",
-          "name": "strict-api"
+          "namespace": "omg-mixed-mode",
+          "name": "mixed-sidecar"
         }
       ],
       "resolutionChain": [
@@ -640,18 +592,18 @@
           "order": 3,
           "kind": "PeerAuthentication",
           "name": "default",
-          "namespace": "omg-strict",
+          "namespace": "omg-mixed-mode",
           "field": "spec.mtls.mode",
           "effect": "sets namespace mTLS mode to STRICT"
         }
       ],
-      "reasoning": "Control MG-MTLS-005 does not apply to omg-strict/strict-api.",
+      "reasoning": "Control MG-MTLS-005 does not apply to omg-mixed-mode/mixed-sidecar.",
       "remediation": {
         "guidance": "Validate ztunnel coverage and apply a STRICT PeerAuthentication posture for the ambient workload, then inspect the attached resolution chain."
       }
     },
     {
-      "id": "MG-MTLS-006-c8e40c81e0cf",
+      "id": "MG-MTLS-006-badc1f9cc70f",
       "controlId": "MG-MTLS-006",
       "title": "Ambient workloads must have healthy ztunnel node coverage",
       "severity": "critical",
@@ -666,8 +618,8 @@
       "resources": [
         {
           "kind": "Deployment",
-          "namespace": "omg-strict",
-          "name": "strict-api"
+          "namespace": "omg-mixed-mode",
+          "name": "mixed-sidecar"
         }
       ],
       "resolutionChain": [
@@ -689,12 +641,12 @@
           "order": 3,
           "kind": "PeerAuthentication",
           "name": "default",
-          "namespace": "omg-strict",
+          "namespace": "omg-mixed-mode",
           "field": "spec.mtls.mode",
           "effect": "sets namespace mTLS mode to STRICT"
         }
       ],
-      "reasoning": "Control MG-MTLS-006 does not apply to omg-strict/strict-api.",
+      "reasoning": "Control MG-MTLS-006 does not apply to omg-mixed-mode/mixed-sidecar.",
       "remediation": {
         "guidance": "Restore a Ready ztunnel DaemonSet pod on every node that schedules ambient workloads."
       }
@@ -705,20 +657,21 @@
     "categories": [
       {
         "category": "authz",
-        "grade": "F",
-        "passRate": 0.42857142857142855,
-        "evaluated": 7
+        "grade": "A",
+        "passRate": 1,
+        "evaluated": 14
       },
       {
         "category": "exposure",
-        "grade": "unknown",
-        "passRate": null
+        "grade": "A",
+        "passRate": 1,
+        "evaluated": 1
       },
       {
         "category": "mtls",
         "grade": "A",
         "passRate": 1,
-        "evaluated": 4
+        "evaluated": 10
       }
     ]
   }

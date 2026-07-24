@@ -37,6 +37,12 @@ metadata:
   name: scanner-namespace
   namespace: openmeshguard-e2e
 ---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: scanner-waypoint-limited
+  namespace: openmeshguard-e2e
+---
 # Audit probe: intentionally has no RBAC binding. Its denied write attempt is
 # the positive control proving the API server audit path is live.
 apiVersion: v1

@@ -13,6 +13,9 @@ KIND=$(kind_binary)
 ISTIOCTL=$(istioctl_binary)
 KIND_NODE_IMAGE=$(version_value kindNodeImage)
 ISTIO_VERSION=$(version_value istio)
+ISTIO_PROFILE=$(version_value istioProfile)
+GATEWAY_API_VERSION=$(version_value gatewayAPI)
+GATEWAY_API_CRDS=$(gateway_api_crds_bundle)
 
 if "$KIND" get clusters 2>/dev/null | grep -Fx "$E2E_CLUSTER_NAME" >/dev/null; then
 	echo "Kind cluster $E2E_CLUSTER_NAME already exists; run make kind-down first" >&2
@@ -47,15 +50,21 @@ chmod 600 "$E2E_ADMIN_KUBECONFIG"
 # remove it from this disposable cluster before proving exclusive scanner RBAC.
 admin_kubectl delete clusterrolebinding system:basic-user --ignore-not-found >/dev/null
 
+# Istio does not install Gateway API CRDs. Waypoints require the experimental
+# bundle documented by the upstream ambient waypoint guide.
+# https://istio.io/latest/docs/ambient/usage/waypoint/#deploy-a-waypoint-proxy
+admin_kubectl apply --server-side -f "$GATEWAY_API_CRDS" >/dev/null
+
 "$ISTIOCTL" install \
 	--kubeconfig "$E2E_ADMIN_KUBECONFIG" \
 	--context "$E2E_CONTEXT" \
-	--set profile=default \
+	--set "profile=$ISTIO_PROFILE" \
 	--skip-confirmation
 
 admin_kubectl -n istio-system rollout status deployment/istiod --timeout=300s
+admin_kubectl -n istio-system rollout status daemonset/ztunnel --timeout=300s
 
 finished=$(date +%s)
-echo "Kind $($(kind_binary) version | awk '{print $2}'), node $KIND_NODE_IMAGE, Istio $ISTIO_VERSION"
+echo "Kind $($(kind_binary) version | awk '{print $2}'), node $KIND_NODE_IMAGE, Istio $ISTIO_VERSION profile $ISTIO_PROFILE, Gateway API $GATEWAY_API_VERSION"
 echo "kind-up duration: $((finished - started))s"
 kind_up_complete=1

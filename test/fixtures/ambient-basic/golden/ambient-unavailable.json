@@ -22,7 +22,7 @@
     "scope": {
       "allNamespaces": false,
       "namespaces": [
-        "omg-port-override"
+        "omg-ambient-unavailable"
       ]
     },
     "dataSources": {
@@ -39,8 +39,8 @@
       "verbs": [
         "list"
       ],
-      "granted": true,
-      "impact": "namespace labels and environment/data-plane inference may be unavailable"
+      "granted": false,
+      "impact": "namespace labels and environment/data-plane inference may be unavailable; denied scope(s): cluster"
     },
     {
       "apiGroup": "",
@@ -302,15 +302,15 @@
   ],
   "inventory": {
     "counts": {
-      "authorizationPolicies": 1,
+      "authorizationPolicies": 2,
       "daemonsets": 0,
       "deployments": 1,
       "destinationRules": 0,
       "endpointSlices": 1,
       "gateways": 0,
-      "namespaces": 1,
+      "namespaces": 0,
       "nodes": 1,
-      "peerAuthentications": 3,
+      "peerAuthentications": 2,
       "pods": 1,
       "replicasets": 1,
       "services": 1,
@@ -320,7 +320,7 @@
       "ztunnelPods": 1
     },
     "dataPlane": {
-      "mode": "sidecar",
+      "mode": "ambient",
       "ztunnel": {
         "present": true,
         "nodesCovered": 1,
@@ -336,15 +336,15 @@
   "workloadPostures": [
     {
       "workload": {
-        "namespace": "omg-port-override",
-        "name": "port-api",
+        "namespace": "omg-ambient-unavailable",
+        "name": "ambient-unavailable",
         "kind": "Deployment"
       },
-      "dataPlaneMode": "sidecar",
+      "dataPlaneMode": "ambient",
       "mtls": {
-        "effective": "disabled",
+        "effective": "strict",
         "byPort": {
-          "8080": "disabled"
+          "8080": "strict"
         },
         "clientTLSContradiction": false,
         "chain": [
@@ -366,32 +366,19 @@
             "order": 3,
             "kind": "PeerAuthentication",
             "name": "default",
-            "namespace": "omg-port-override",
+            "namespace": "omg-ambient-unavailable",
             "field": "spec.mtls.mode",
             "effect": "sets namespace mTLS mode to STRICT"
-          },
-          {
-            "order": 4,
-            "kind": "PeerAuthentication",
-            "name": "port-override",
-            "namespace": "omg-port-override",
-            "field": "spec.mtls.mode",
-            "effect": "sets workload mTLS mode to STRICT"
-          },
-          {
-            "order": 5,
-            "kind": "PeerAuthentication",
-            "name": "port-override",
-            "namespace": "omg-port-override",
-            "field": "spec.portLevelMtls[\"8080\"].mode",
-            "effect": "sets port 8080 mTLS mode to DISABLE"
           }
         ]
       },
       "authorization": {
-        "effective": "no-policy",
+        "effective": "unknown",
         "broadAllow": false,
-        "identityScoped": false,
+        "identityScoped": true,
+        "policiesInScope": [
+          "omg-ambient-unavailable/allow-api"
+        ],
         "chain": [
           {
             "order": 1,
@@ -406,21 +393,38 @@
             "namespace": "istio-system",
             "field": "spec.selector",
             "effect": "selector does not match the workload; excludes policy from authorization evaluation"
+          },
+          {
+            "order": 3,
+            "kind": "AuthorizationPolicy",
+            "name": "allow-api",
+            "namespace": "omg-ambient-unavailable",
+            "field": "spec.targetRefs[\"Service/api\"]",
+            "effect": "adds explicit rules to the additive ALLOW union"
+          },
+          {
+            "order": 4,
+            "kind": "Waypoint",
+            "name": "unavailable-waypoint",
+            "namespace": "omg-waypoint-evidence",
+            "field": "istio.io/use-waypoint",
+            "effect": "waypoint evidence is unavailable for waypoint-attached policy omg-ambient-unavailable/allow-api"
           }
-        ]
+        ],
+        "unknownReason": "Gateway API waypoint evidence unavailable"
       }
     }
   ],
   "findings": [
     {
-      "id": "MG-AUTHZ-001-04bb2c0c6a94",
+      "id": "MG-AUTHZ-001-27db97456536",
       "controlId": "MG-AUTHZ-001",
       "title": "Mesh-managed workloads must have resolved authorization coverage",
       "severity": "high",
       "evidenceType": "config",
-      "status": "open",
-      "confidence": "resolved",
-      "dataPlaneMode": "sidecar",
+      "status": "unknown",
+      "confidence": "unavailable",
+      "dataPlaneMode": "ambient",
       "evidenceSources": [
         "kubernetes-api",
         "istio-crd"
@@ -428,8 +432,8 @@
       "resources": [
         {
           "kind": "Deployment",
-          "namespace": "omg-port-override",
-          "name": "port-api"
+          "namespace": "omg-ambient-unavailable",
+          "name": "ambient-unavailable"
         }
       ],
       "resolutionChain": [
@@ -446,22 +450,39 @@
           "namespace": "istio-system",
           "field": "spec.selector",
           "effect": "selector does not match the workload; excludes policy from authorization evaluation"
+        },
+        {
+          "order": 3,
+          "kind": "AuthorizationPolicy",
+          "name": "allow-api",
+          "namespace": "omg-ambient-unavailable",
+          "field": "spec.targetRefs[\"Service/api\"]",
+          "effect": "adds explicit rules to the additive ALLOW union"
+        },
+        {
+          "order": 4,
+          "kind": "Waypoint",
+          "name": "unavailable-waypoint",
+          "namespace": "omg-waypoint-evidence",
+          "field": "istio.io/use-waypoint",
+          "effect": "waypoint evidence is unavailable for waypoint-attached policy omg-ambient-unavailable/allow-api"
         }
       ],
-      "reasoning": "omg-port-override/port-api has no resolved AuthorizationPolicy coverage.",
+      "reasoning": "Control MG-AUTHZ-001 could not be evaluated for omg-ambient-unavailable/ambient-unavailable: authorization.effective unavailable: Gateway API waypoint evidence unavailable.",
       "remediation": {
         "guidance": "Apply an AuthorizationPolicy that selects this workload and inspect the resolution chain to confirm its effective scope."
-      }
+      },
+      "unknownReason": "authorization.effective unavailable: Gateway API waypoint evidence unavailable"
     },
     {
-      "id": "MG-AUTHZ-002-862e92dbdf03",
+      "id": "MG-AUTHZ-002-b0de48939aa7",
       "controlId": "MG-AUTHZ-002",
       "title": "Workloads should resolve to default deny with explicit allow",
       "severity": "high",
       "evidenceType": "config",
-      "status": "open",
-      "confidence": "resolved",
-      "dataPlaneMode": "sidecar",
+      "status": "unknown",
+      "confidence": "unavailable",
+      "dataPlaneMode": "ambient",
       "evidenceSources": [
         "kubernetes-api",
         "istio-crd"
@@ -469,8 +490,8 @@
       "resources": [
         {
           "kind": "Deployment",
-          "namespace": "omg-port-override",
-          "name": "port-api"
+          "namespace": "omg-ambient-unavailable",
+          "name": "ambient-unavailable"
         }
       ],
       "resolutionChain": [
@@ -487,22 +508,97 @@
           "namespace": "istio-system",
           "field": "spec.selector",
           "effect": "selector does not match the workload; excludes policy from authorization evaluation"
+        },
+        {
+          "order": 3,
+          "kind": "AuthorizationPolicy",
+          "name": "allow-api",
+          "namespace": "omg-ambient-unavailable",
+          "field": "spec.targetRefs[\"Service/api\"]",
+          "effect": "adds explicit rules to the additive ALLOW union"
+        },
+        {
+          "order": 4,
+          "kind": "Waypoint",
+          "name": "unavailable-waypoint",
+          "namespace": "omg-waypoint-evidence",
+          "field": "istio.io/use-waypoint",
+          "effect": "waypoint evidence is unavailable for waypoint-attached policy omg-ambient-unavailable/allow-api"
         }
       ],
-      "reasoning": "Authorization for omg-port-override/port-api resolves to no-policy, not default deny with explicit allow.",
+      "reasoning": "Control MG-AUTHZ-002 could not be evaluated for omg-ambient-unavailable/ambient-unavailable: authorization.effective unavailable: Gateway API waypoint evidence unavailable.",
       "remediation": {
         "guidance": "Establish an empty ALLOW policy for default deny and add narrowly scoped ALLOW rules for required traffic."
-      }
+      },
+      "unknownReason": "authorization.effective unavailable: Gateway API waypoint evidence unavailable"
     },
     {
-      "id": "MG-AUTHZ-004-64dbd167a797",
+      "id": "MG-AUTHZ-003-7a336ece954c",
+      "controlId": "MG-AUTHZ-003",
+      "title": "Authorization policies must not grant structurally broad access",
+      "severity": "high",
+      "evidenceType": "config",
+      "status": "unknown",
+      "confidence": "unavailable",
+      "dataPlaneMode": "ambient",
+      "evidenceSources": [
+        "kubernetes-api",
+        "istio-crd"
+      ],
+      "resources": [
+        {
+          "kind": "Deployment",
+          "namespace": "omg-ambient-unavailable",
+          "name": "ambient-unavailable"
+        }
+      ],
+      "resolutionChain": [
+        {
+          "order": 1,
+          "kind": "AuthorizationDefault",
+          "field": "implicitEnablement",
+          "effect": "establishes Istio's implicit allow when no applicable ALLOW policy exists"
+        },
+        {
+          "order": 2,
+          "kind": "AuthorizationPolicy",
+          "name": "authz-root-default-deny",
+          "namespace": "istio-system",
+          "field": "spec.selector",
+          "effect": "selector does not match the workload; excludes policy from authorization evaluation"
+        },
+        {
+          "order": 3,
+          "kind": "AuthorizationPolicy",
+          "name": "allow-api",
+          "namespace": "omg-ambient-unavailable",
+          "field": "spec.targetRefs[\"Service/api\"]",
+          "effect": "adds explicit rules to the additive ALLOW union"
+        },
+        {
+          "order": 4,
+          "kind": "Waypoint",
+          "name": "unavailable-waypoint",
+          "namespace": "omg-waypoint-evidence",
+          "field": "istio.io/use-waypoint",
+          "effect": "waypoint evidence is unavailable for waypoint-attached policy omg-ambient-unavailable/allow-api"
+        }
+      ],
+      "reasoning": "Control MG-AUTHZ-003 could not be evaluated for omg-ambient-unavailable/ambient-unavailable: authorization.effective unavailable: Gateway API waypoint evidence unavailable.",
+      "remediation": {
+        "guidance": "Replace empty rules and wildcard principals or namespaces with the narrow identities and operations the workload requires."
+      },
+      "unknownReason": "authorization.effective unavailable: Gateway API waypoint evidence unavailable"
+    },
+    {
+      "id": "MG-AUTHZ-004-3fd8f9aaeb13",
       "controlId": "MG-AUTHZ-004",
       "title": "Authorization access must be scoped to explicit identities",
       "severity": "high",
       "evidenceType": "config",
-      "status": "open",
-      "confidence": "resolved",
-      "dataPlaneMode": "sidecar",
+      "status": "unknown",
+      "confidence": "unavailable",
+      "dataPlaneMode": "ambient",
       "evidenceSources": [
         "kubernetes-api",
         "istio-crd"
@@ -510,8 +606,8 @@
       "resources": [
         {
           "kind": "Deployment",
-          "namespace": "omg-port-override",
-          "name": "port-api"
+          "namespace": "omg-ambient-unavailable",
+          "name": "ambient-unavailable"
         }
       ],
       "resolutionChain": [
@@ -528,22 +624,39 @@
           "namespace": "istio-system",
           "field": "spec.selector",
           "effect": "selector does not match the workload; excludes policy from authorization evaluation"
+        },
+        {
+          "order": 3,
+          "kind": "AuthorizationPolicy",
+          "name": "allow-api",
+          "namespace": "omg-ambient-unavailable",
+          "field": "spec.targetRefs[\"Service/api\"]",
+          "effect": "adds explicit rules to the additive ALLOW union"
+        },
+        {
+          "order": 4,
+          "kind": "Waypoint",
+          "name": "unavailable-waypoint",
+          "namespace": "omg-waypoint-evidence",
+          "field": "istio.io/use-waypoint",
+          "effect": "waypoint evidence is unavailable for waypoint-attached policy omg-ambient-unavailable/allow-api"
         }
       ],
-      "reasoning": "Authorization access for omg-port-override/port-api is not scoped to explicit principals, namespaces, or workloads.",
+      "reasoning": "Control MG-AUTHZ-004 could not be evaluated for omg-ambient-unavailable/ambient-unavailable: authorization.effective unavailable: Gateway API waypoint evidence unavailable.",
       "remediation": {
         "guidance": "Scope ALLOW rules to approved principals, namespaces, service accounts, or workload identities."
-      }
+      },
+      "unknownReason": "authorization.effective unavailable: Gateway API waypoint evidence unavailable"
     },
     {
-      "id": "MG-AUTHZ-005-9dabaa764f4a",
+      "id": "MG-AUTHZ-005-72c49469b63e",
       "controlId": "MG-AUTHZ-005",
       "title": "Authorization coverage must resolve at workload level",
       "severity": "high",
       "evidenceType": "config",
-      "status": "open",
-      "confidence": "resolved",
-      "dataPlaneMode": "sidecar",
+      "status": "unknown",
+      "confidence": "unavailable",
+      "dataPlaneMode": "ambient",
       "evidenceSources": [
         "kubernetes-api",
         "istio-crd"
@@ -551,8 +664,8 @@
       "resources": [
         {
           "kind": "Deployment",
-          "namespace": "omg-port-override",
-          "name": "port-api"
+          "namespace": "omg-ambient-unavailable",
+          "name": "ambient-unavailable"
         }
       ],
       "resolutionChain": [
@@ -569,22 +682,155 @@
           "namespace": "istio-system",
           "field": "spec.selector",
           "effect": "selector does not match the workload; excludes policy from authorization evaluation"
+        },
+        {
+          "order": 3,
+          "kind": "AuthorizationPolicy",
+          "name": "allow-api",
+          "namespace": "omg-ambient-unavailable",
+          "field": "spec.targetRefs[\"Service/api\"]",
+          "effect": "adds explicit rules to the additive ALLOW union"
+        },
+        {
+          "order": 4,
+          "kind": "Waypoint",
+          "name": "unavailable-waypoint",
+          "namespace": "omg-waypoint-evidence",
+          "field": "istio.io/use-waypoint",
+          "effect": "waypoint evidence is unavailable for waypoint-attached policy omg-ambient-unavailable/allow-api"
         }
       ],
-      "reasoning": "omg-port-override/port-api is not selected by any resolved AuthorizationPolicy.",
+      "reasoning": "Control MG-AUTHZ-005 could not be evaluated for omg-ambient-unavailable/ambient-unavailable: authorization.effective unavailable: Gateway API waypoint evidence unavailable; authorization.policiesInScope unavailable: Gateway API waypoint evidence unavailable.",
       "remediation": {
         "guidance": "Correct policy namespace, selector, or targetRefs so coverage reaches this workload rather than relying on policy resource presence alone."
-      }
+      },
+      "unknownReason": "authorization.effective unavailable: Gateway API waypoint evidence unavailable; authorization.policiesInScope unavailable: Gateway API waypoint evidence unavailable"
     },
     {
-      "id": "MG-GW-005-453498551b06",
+      "id": "MG-AUTHZ-006-a40382fc6ca3",
+      "controlId": "MG-AUTHZ-006",
+      "title": "Waypoint-attached authorization must have a ready enforcement path",
+      "severity": "high",
+      "evidenceType": "config",
+      "status": "unknown",
+      "confidence": "unavailable",
+      "dataPlaneMode": "ambient",
+      "evidenceSources": [
+        "kubernetes-api",
+        "istio-crd"
+      ],
+      "resources": [
+        {
+          "kind": "Deployment",
+          "namespace": "omg-ambient-unavailable",
+          "name": "ambient-unavailable"
+        }
+      ],
+      "resolutionChain": [
+        {
+          "order": 1,
+          "kind": "AuthorizationDefault",
+          "field": "implicitEnablement",
+          "effect": "establishes Istio's implicit allow when no applicable ALLOW policy exists"
+        },
+        {
+          "order": 2,
+          "kind": "AuthorizationPolicy",
+          "name": "authz-root-default-deny",
+          "namespace": "istio-system",
+          "field": "spec.selector",
+          "effect": "selector does not match the workload; excludes policy from authorization evaluation"
+        },
+        {
+          "order": 3,
+          "kind": "AuthorizationPolicy",
+          "name": "allow-api",
+          "namespace": "omg-ambient-unavailable",
+          "field": "spec.targetRefs[\"Service/api\"]",
+          "effect": "adds explicit rules to the additive ALLOW union"
+        },
+        {
+          "order": 4,
+          "kind": "Waypoint",
+          "name": "unavailable-waypoint",
+          "namespace": "omg-waypoint-evidence",
+          "field": "istio.io/use-waypoint",
+          "effect": "waypoint evidence is unavailable for waypoint-attached policy omg-ambient-unavailable/allow-api"
+        }
+      ],
+      "reasoning": "Control MG-AUTHZ-006 could not be evaluated for omg-ambient-unavailable/ambient-unavailable: authorization.effective unavailable: Gateway API waypoint evidence unavailable; authorization.waypointUnenforced unavailable: Gateway API waypoint evidence unavailable.",
+      "remediation": {
+        "guidance": "Attach the policy with targetRefs and select a ready waypoint whose scope includes the workload."
+      },
+      "unknownReason": "authorization.effective unavailable: Gateway API waypoint evidence unavailable; authorization.waypointUnenforced unavailable: Gateway API waypoint evidence unavailable"
+    },
+    {
+      "id": "MG-AUTHZ-007-ae974fff8adc",
+      "controlId": "MG-AUTHZ-007",
+      "title": "Unenforced waypoint authorization must be reported",
+      "severity": "high",
+      "evidenceType": "config",
+      "status": "unknown",
+      "confidence": "unavailable",
+      "dataPlaneMode": "ambient",
+      "evidenceSources": [
+        "kubernetes-api",
+        "istio-crd"
+      ],
+      "resources": [
+        {
+          "kind": "Deployment",
+          "namespace": "omg-ambient-unavailable",
+          "name": "ambient-unavailable"
+        }
+      ],
+      "resolutionChain": [
+        {
+          "order": 1,
+          "kind": "AuthorizationDefault",
+          "field": "implicitEnablement",
+          "effect": "establishes Istio's implicit allow when no applicable ALLOW policy exists"
+        },
+        {
+          "order": 2,
+          "kind": "AuthorizationPolicy",
+          "name": "authz-root-default-deny",
+          "namespace": "istio-system",
+          "field": "spec.selector",
+          "effect": "selector does not match the workload; excludes policy from authorization evaluation"
+        },
+        {
+          "order": 3,
+          "kind": "AuthorizationPolicy",
+          "name": "allow-api",
+          "namespace": "omg-ambient-unavailable",
+          "field": "spec.targetRefs[\"Service/api\"]",
+          "effect": "adds explicit rules to the additive ALLOW union"
+        },
+        {
+          "order": 4,
+          "kind": "Waypoint",
+          "name": "unavailable-waypoint",
+          "namespace": "omg-waypoint-evidence",
+          "field": "istio.io/use-waypoint",
+          "effect": "waypoint evidence is unavailable for waypoint-attached policy omg-ambient-unavailable/allow-api"
+        }
+      ],
+      "reasoning": "Control MG-AUTHZ-007 could not be evaluated for omg-ambient-unavailable/ambient-unavailable: authorization.effective unavailable: Gateway API waypoint evidence unavailable.",
+      "remediation": {
+        "guidance": "Provision or repair the selected waypoint and confirm that policy targetRefs attach through that enforcement path."
+      },
+      "unknownReason": "authorization.effective unavailable: Gateway API waypoint evidence unavailable"
+    },
+    {
+      "id": "MG-GW-005-8b7abacffb56",
       "controlId": "MG-GW-005",
       "title": "Ambient waypoint authorization must have explicit ready enrollment",
       "severity": "high",
       "evidenceType": "config",
-      "status": "not-applicable",
-      "confidence": "resolved",
-      "dataPlaneMode": "sidecar",
+      "status": "unknown",
+      "confidence": "unavailable",
+      "dataPlaneMode": "ambient",
       "evidenceSources": [
         "kubernetes-api",
         "istio-crd"
@@ -592,8 +838,8 @@
       "resources": [
         {
           "kind": "Deployment",
-          "namespace": "omg-port-override",
-          "name": "port-api"
+          "namespace": "omg-ambient-unavailable",
+          "name": "ambient-unavailable"
         }
       ],
       "resolutionChain": [
@@ -610,338 +856,29 @@
           "namespace": "istio-system",
           "field": "spec.selector",
           "effect": "selector does not match the workload; excludes policy from authorization evaluation"
+        },
+        {
+          "order": 3,
+          "kind": "AuthorizationPolicy",
+          "name": "allow-api",
+          "namespace": "omg-ambient-unavailable",
+          "field": "spec.targetRefs[\"Service/api\"]",
+          "effect": "adds explicit rules to the additive ALLOW union"
+        },
+        {
+          "order": 4,
+          "kind": "Waypoint",
+          "name": "unavailable-waypoint",
+          "namespace": "omg-waypoint-evidence",
+          "field": "istio.io/use-waypoint",
+          "effect": "waypoint evidence is unavailable for waypoint-attached policy omg-ambient-unavailable/allow-api"
         }
       ],
-      "reasoning": "Control MG-GW-005 does not apply to omg-port-override/port-api.",
+      "reasoning": "Control MG-GW-005 could not be evaluated for omg-ambient-unavailable/ambient-unavailable: authorization.effective unavailable: Gateway API waypoint evidence unavailable; authorization.waypointUnenforced unavailable: Gateway API waypoint evidence unavailable.",
       "remediation": {
         "guidance": "Set istio.io/use-waypoint to a waypoint whose scope covers the target and wait for its Gateway Programmed condition to become true."
-      }
-    },
-    {
-      "id": "MG-MTLS-001-80d7e54b438e",
-      "controlId": "MG-MTLS-001",
-      "title": "Mesh-managed workloads must resolve to strict mTLS",
-      "severity": "high",
-      "evidenceType": "config",
-      "status": "open",
-      "confidence": "resolved",
-      "dataPlaneMode": "sidecar",
-      "evidenceSources": [
-        "kubernetes-api",
-        "istio-crd"
-      ],
-      "resources": [
-        {
-          "kind": "Deployment",
-          "namespace": "omg-port-override",
-          "name": "port-api"
-        }
-      ],
-      "resolutionChain": [
-        {
-          "order": 1,
-          "kind": "MeshConfigDefault",
-          "field": "defaultPeerAuthenticationMode",
-          "effect": "defaults mesh mTLS mode to PERMISSIVE when no PeerAuthentication mode overrides it"
-        },
-        {
-          "order": 2,
-          "kind": "PeerAuthentication",
-          "name": "default",
-          "namespace": "istio-system",
-          "field": "spec.mtls.mode",
-          "effect": "sets mesh-wide mTLS mode to STRICT"
-        },
-        {
-          "order": 3,
-          "kind": "PeerAuthentication",
-          "name": "default",
-          "namespace": "omg-port-override",
-          "field": "spec.mtls.mode",
-          "effect": "sets namespace mTLS mode to STRICT"
-        },
-        {
-          "order": 4,
-          "kind": "PeerAuthentication",
-          "name": "port-override",
-          "namespace": "omg-port-override",
-          "field": "spec.mtls.mode",
-          "effect": "sets workload mTLS mode to STRICT"
-        },
-        {
-          "order": 5,
-          "kind": "PeerAuthentication",
-          "name": "port-override",
-          "namespace": "omg-port-override",
-          "field": "spec.portLevelMtls[\"8080\"].mode",
-          "effect": "sets port 8080 mTLS mode to DISABLE"
-        }
-      ],
-      "reasoning": "Effective mTLS for omg-port-override/port-api resolves to disabled, not strict.",
-      "remediation": {
-        "guidance": "Apply or correct PeerAuthentication so the workload resolves to STRICT, then inspect the attached resolution chain.",
-        "suggestedYAML": "apiVersion: security.istio.io/v1\nkind: PeerAuthentication\nmetadata:\n  name: default\n  namespace: omg-port-override\nspec:\n  mtls:\n    mode: STRICT"
-      }
-    },
-    {
-      "id": "MG-MTLS-002-b8e058bf1dcf",
-      "controlId": "MG-MTLS-002",
-      "title": "Declared workload ports must resolve to strict mTLS",
-      "severity": "high",
-      "evidenceType": "config",
-      "status": "open",
-      "confidence": "resolved",
-      "dataPlaneMode": "sidecar",
-      "evidenceSources": [
-        "kubernetes-api",
-        "istio-crd"
-      ],
-      "resources": [
-        {
-          "kind": "Deployment",
-          "namespace": "omg-port-override",
-          "name": "port-api"
-        }
-      ],
-      "resolutionChain": [
-        {
-          "order": 1,
-          "kind": "MeshConfigDefault",
-          "field": "defaultPeerAuthenticationMode",
-          "effect": "defaults mesh mTLS mode to PERMISSIVE when no PeerAuthentication mode overrides it"
-        },
-        {
-          "order": 2,
-          "kind": "PeerAuthentication",
-          "name": "default",
-          "namespace": "istio-system",
-          "field": "spec.mtls.mode",
-          "effect": "sets mesh-wide mTLS mode to STRICT"
-        },
-        {
-          "order": 3,
-          "kind": "PeerAuthentication",
-          "name": "default",
-          "namespace": "omg-port-override",
-          "field": "spec.mtls.mode",
-          "effect": "sets namespace mTLS mode to STRICT"
-        },
-        {
-          "order": 4,
-          "kind": "PeerAuthentication",
-          "name": "port-override",
-          "namespace": "omg-port-override",
-          "field": "spec.mtls.mode",
-          "effect": "sets workload mTLS mode to STRICT"
-        },
-        {
-          "order": 5,
-          "kind": "PeerAuthentication",
-          "name": "port-override",
-          "namespace": "omg-port-override",
-          "field": "spec.portLevelMtls[\"8080\"].mode",
-          "effect": "sets port 8080 mTLS mode to DISABLE"
-        }
-      ],
-      "reasoning": "Effective mTLS for omg-port-override/port-api permits plaintext on one or more declared workload ports.",
-      "remediation": {
-        "guidance": "Correct workload-level port mTLS overrides so every declared, Service-bound workload port resolves to STRICT."
-      }
-    },
-    {
-      "id": "MG-MTLS-003-3f227819eee2",
-      "controlId": "MG-MTLS-003",
-      "title": "Workloads must never resolve to globally disabled mTLS",
-      "severity": "critical",
-      "evidenceType": "config",
-      "status": "open",
-      "confidence": "resolved",
-      "dataPlaneMode": "sidecar",
-      "evidenceSources": [
-        "kubernetes-api",
-        "istio-crd"
-      ],
-      "resources": [
-        {
-          "kind": "Deployment",
-          "namespace": "omg-port-override",
-          "name": "port-api"
-        }
-      ],
-      "resolutionChain": [
-        {
-          "order": 1,
-          "kind": "MeshConfigDefault",
-          "field": "defaultPeerAuthenticationMode",
-          "effect": "defaults mesh mTLS mode to PERMISSIVE when no PeerAuthentication mode overrides it"
-        },
-        {
-          "order": 2,
-          "kind": "PeerAuthentication",
-          "name": "default",
-          "namespace": "istio-system",
-          "field": "spec.mtls.mode",
-          "effect": "sets mesh-wide mTLS mode to STRICT"
-        },
-        {
-          "order": 3,
-          "kind": "PeerAuthentication",
-          "name": "default",
-          "namespace": "omg-port-override",
-          "field": "spec.mtls.mode",
-          "effect": "sets namespace mTLS mode to STRICT"
-        },
-        {
-          "order": 4,
-          "kind": "PeerAuthentication",
-          "name": "port-override",
-          "namespace": "omg-port-override",
-          "field": "spec.mtls.mode",
-          "effect": "sets workload mTLS mode to STRICT"
-        },
-        {
-          "order": 5,
-          "kind": "PeerAuthentication",
-          "name": "port-override",
-          "namespace": "omg-port-override",
-          "field": "spec.portLevelMtls[\"8080\"].mode",
-          "effect": "sets port 8080 mTLS mode to DISABLE"
-        }
-      ],
-      "reasoning": "Effective mTLS for omg-port-override/port-api is disabled.",
-      "remediation": {
-        "guidance": "Apply or correct PeerAuthentication so the workload no longer resolves to DISABLE, then inspect the attached resolution chain."
-      }
-    },
-    {
-      "id": "MG-MTLS-005-a77c391e3cc3",
-      "controlId": "MG-MTLS-005",
-      "title": "Ambient workloads must have validated L4 mTLS posture",
-      "severity": "high",
-      "evidenceType": "config",
-      "status": "not-applicable",
-      "confidence": "resolved",
-      "dataPlaneMode": "sidecar",
-      "evidenceSources": [
-        "kubernetes-api",
-        "istio-crd"
-      ],
-      "resources": [
-        {
-          "kind": "Deployment",
-          "namespace": "omg-port-override",
-          "name": "port-api"
-        }
-      ],
-      "resolutionChain": [
-        {
-          "order": 1,
-          "kind": "MeshConfigDefault",
-          "field": "defaultPeerAuthenticationMode",
-          "effect": "defaults mesh mTLS mode to PERMISSIVE when no PeerAuthentication mode overrides it"
-        },
-        {
-          "order": 2,
-          "kind": "PeerAuthentication",
-          "name": "default",
-          "namespace": "istio-system",
-          "field": "spec.mtls.mode",
-          "effect": "sets mesh-wide mTLS mode to STRICT"
-        },
-        {
-          "order": 3,
-          "kind": "PeerAuthentication",
-          "name": "default",
-          "namespace": "omg-port-override",
-          "field": "spec.mtls.mode",
-          "effect": "sets namespace mTLS mode to STRICT"
-        },
-        {
-          "order": 4,
-          "kind": "PeerAuthentication",
-          "name": "port-override",
-          "namespace": "omg-port-override",
-          "field": "spec.mtls.mode",
-          "effect": "sets workload mTLS mode to STRICT"
-        },
-        {
-          "order": 5,
-          "kind": "PeerAuthentication",
-          "name": "port-override",
-          "namespace": "omg-port-override",
-          "field": "spec.portLevelMtls[\"8080\"].mode",
-          "effect": "sets port 8080 mTLS mode to DISABLE"
-        }
-      ],
-      "reasoning": "Control MG-MTLS-005 does not apply to omg-port-override/port-api.",
-      "remediation": {
-        "guidance": "Validate ztunnel coverage and apply a STRICT PeerAuthentication posture for the ambient workload, then inspect the attached resolution chain."
-      }
-    },
-    {
-      "id": "MG-MTLS-006-6c97ee423a2f",
-      "controlId": "MG-MTLS-006",
-      "title": "Ambient workloads must have healthy ztunnel node coverage",
-      "severity": "critical",
-      "evidenceType": "config",
-      "status": "not-applicable",
-      "confidence": "resolved",
-      "dataPlaneMode": "sidecar",
-      "evidenceSources": [
-        "kubernetes-api",
-        "istio-crd"
-      ],
-      "resources": [
-        {
-          "kind": "Deployment",
-          "namespace": "omg-port-override",
-          "name": "port-api"
-        }
-      ],
-      "resolutionChain": [
-        {
-          "order": 1,
-          "kind": "MeshConfigDefault",
-          "field": "defaultPeerAuthenticationMode",
-          "effect": "defaults mesh mTLS mode to PERMISSIVE when no PeerAuthentication mode overrides it"
-        },
-        {
-          "order": 2,
-          "kind": "PeerAuthentication",
-          "name": "default",
-          "namespace": "istio-system",
-          "field": "spec.mtls.mode",
-          "effect": "sets mesh-wide mTLS mode to STRICT"
-        },
-        {
-          "order": 3,
-          "kind": "PeerAuthentication",
-          "name": "default",
-          "namespace": "omg-port-override",
-          "field": "spec.mtls.mode",
-          "effect": "sets namespace mTLS mode to STRICT"
-        },
-        {
-          "order": 4,
-          "kind": "PeerAuthentication",
-          "name": "port-override",
-          "namespace": "omg-port-override",
-          "field": "spec.mtls.mode",
-          "effect": "sets workload mTLS mode to STRICT"
-        },
-        {
-          "order": 5,
-          "kind": "PeerAuthentication",
-          "name": "port-override",
-          "namespace": "omg-port-override",
-          "field": "spec.portLevelMtls[\"8080\"].mode",
-          "effect": "sets port 8080 mTLS mode to DISABLE"
-        }
-      ],
-      "reasoning": "Control MG-MTLS-006 does not apply to omg-port-override/port-api.",
-      "remediation": {
-        "guidance": "Restore a Ready ztunnel DaemonSet pod on every node that schedules ambient workloads."
-      }
+      },
+      "unknownReason": "authorization.effective unavailable: Gateway API waypoint evidence unavailable; authorization.waypointUnenforced unavailable: Gateway API waypoint evidence unavailable"
     }
   ],
   "scores": {
@@ -949,20 +886,21 @@
     "categories": [
       {
         "category": "authz",
-        "grade": "F",
-        "passRate": 0.42857142857142855,
-        "evaluated": 7
+        "grade": "unknown",
+        "passRate": null,
+        "unknown": 7
       },
       {
         "category": "exposure",
         "grade": "unknown",
-        "passRate": null
+        "passRate": null,
+        "unknown": 1
       },
       {
         "category": "mtls",
-        "grade": "F",
-        "passRate": 0.25,
-        "evaluated": 4
+        "grade": "A",
+        "passRate": 1,
+        "evaluated": 6
       }
     ]
   }
