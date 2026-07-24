@@ -15,6 +15,10 @@ permissive_expected=$(awk -F '\t' '$1 == "permissive" {print $5}' "$fixtures/cas
 assert_golden_case_bijection "$fixtures/cases.tsv" "$fixtures/golden" true
 assert_report_update_guard strict "$fixtures/golden/strict.json" "$strict_expected"
 assert_report_update_guard permissive "$fixtures/golden/permissive.json" "$permissive_expected"
+degraded="$fixtures/golden/namespace-role-degraded.json"
+degraded_expected=$(jq -r '
+	[.findings[] | "\(.controlId)=\(.status)"] | sort | join(",")
+' "$degraded")
 
 mkdir -p "$TEST_ROOT/bijection/golden"
 printf 'strict\tnamespace\tdeployment\tsidecar\tfinding=unknown\n' >"$TEST_ROOT/bijection/cases.tsv"
@@ -52,6 +56,14 @@ jq '(.findings[].resolutionChain) = []' \
 	"$fixtures/golden/permissive.json" >"$TEST_ROOT/missing-finding-chain.json"
 if assert_report_update_guard permissive "$TEST_ROOT/missing-finding-chain.json" "$permissive_expected" 2>/dev/null; then
 	echo "report guard accepted resolved findings without chains" >&2
+	exit 1
+fi
+
+jq '
+	(.findings[] | select(.status != "unknown") | .resolutionChain) = []
+' "$degraded" >"$TEST_ROOT/missing-degraded-finding-chain.json"
+if assert_report_update_guard namespace-role-degraded "$TEST_ROOT/missing-degraded-finding-chain.json" "$degraded_expected" 2>/dev/null; then
+	echo "report guard accepted degraded resolved findings without chains" >&2
 	exit 1
 fi
 

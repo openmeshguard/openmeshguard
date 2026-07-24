@@ -281,6 +281,22 @@ func assembleFinding(control Control, target evaluationTarget, status, confidenc
 		}
 		remediation.SuggestedYAML = rendered
 	}
+	chain := resolutionChain(control, target.workload)
+	if status != statusUnknown && len(chain) == 0 {
+		field := "expression"
+		effect := fmt.Sprintf("control %s expression resolved to an open finding", control.ID)
+		if status == statusNotApplicable {
+			field = "applicability"
+			effect = fmt.Sprintf("control %s applicability resolved to not-applicable", control.ID)
+		}
+		chain = []resolver.Step{{
+			Order:  1,
+			Kind:   "Control",
+			Name:   control.ID,
+			Field:  field,
+			Effect: effect,
+		}}
+	}
 	return Finding{
 		ID:              deterministicFindingID(control.ID, target),
 		ControlID:       control.ID,
@@ -292,7 +308,7 @@ func assembleFinding(control Control, target evaluationTarget, status, confidenc
 		DataPlaneMode:   target.dataPlaneMode,
 		EvidenceSources: findingEvidence(control, target, status),
 		Resources:       []ResourceRef{target.resource},
-		ResolutionChain: resolutionChain(control, target.workload),
+		ResolutionChain: chain,
 		Remediation:     remediation,
 	}, nil
 }

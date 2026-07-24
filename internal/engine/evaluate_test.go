@@ -763,6 +763,29 @@ func TestUnknownDataPlaneModeCannotPassOrFail(t *testing.T) {
 	}
 }
 
+func TestResolvedNotApplicableFindingHasControlChainFallback(t *testing.T) {
+	packs, err := LoadBuiltins()
+	if err != nil {
+		t.Fatalf("LoadBuiltins returned error: %v", err)
+	}
+	workload := unknownWorkload("PeerAuthentication resources unavailable")
+	workload.Posture.Mode = resolver.ModeSidecar
+	result, err := Evaluate([]Pack{packWithControl(t, packs, "MG-MTLS-005")}, Input{Workloads: []WorkloadInput{workload}})
+	if err != nil {
+		t.Fatalf("Evaluate returned error: %v", err)
+	}
+	if len(result.Findings) != 1 || result.Findings[0].Status != statusNotApplicable {
+		t.Fatalf("findings = %#v, want one not-applicable finding", result.Findings)
+	}
+	want := []resolver.Step{{
+		Order: 1, Kind: "Control", Name: "MG-MTLS-005", Field: "applicability",
+		Effect: "control MG-MTLS-005 applicability resolved to not-applicable",
+	}}
+	if !reflect.DeepEqual(result.Findings[0].ResolutionChain, want) {
+		t.Fatalf("resolution chain = %#v, want %#v", result.Findings[0].ResolutionChain, want)
+	}
+}
+
 func TestBracketDependencyUnavailableBecomesUnknown(t *testing.T) {
 	pack := decodePackForTest(t, `
 apiVersion: openmeshguard.io/v1alpha1
