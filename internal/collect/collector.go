@@ -26,6 +26,7 @@ import (
 const (
 	defaultMaxConcurrentLists = 4
 	defaultListLimit          = int64(500)
+	ztunnelPodLabelSelector   = "app=ztunnel,app.kubernetes.io/name=ztunnel"
 )
 
 // Collector performs bounded, read-only list collection through typed clients.
@@ -179,7 +180,7 @@ func (c *Collector) Collect(ctx context.Context, scope Scope) (Snapshot, error) 
 		},
 		func(ctx context.Context) error {
 			items, err := listPages(ctx, func(ctx context.Context, opts metav1.ListOptions) ([]corev1.Pod, string, error) {
-				opts.LabelSelector = "app=ztunnel"
+				opts.LabelSelector = ztunnelPodLabelSelector
 				list, err := c.kube.CoreV1().Pods(metav1.NamespaceAll).List(ctx, opts)
 				if err != nil {
 					return nil, "", err
@@ -460,14 +461,39 @@ func (c *Collector) Collect(ctx context.Context, scope Scope) (Snapshot, error) 
 	if err := c.runBounded(ctx, tasks); err != nil {
 		return Snapshot{}, err
 	}
+	snapshot.ZtunnelPods = ownedZtunnelPods(snapshot.ZtunnelPods, snapshot.ZtunnelDaemonSets)
 	snapshot.PermissionSummary = mergePermissions(snapshot.PermissionSummary)
 
 	return snapshot, nil
 }
 
 func isZtunnelDaemonSet(daemonSet appsv1.DaemonSet) bool {
-	return daemonSet.Spec.Selector != nil &&
-		daemonSet.Spec.Selector.MatchLabels["app"] == "ztunnel"
+	return daemonSet.Labels["app.kubernetes.io/name"] == "ztunnel" &&
+		daemonSet.Spec.Selector != nil &&
+		daemonSet.Spec.Selector.MatchLabels["app"] == "ztunnel" &&
+		daemonSet.Spec.Template.Labels["app"] == "ztunnel" &&
+		daemonSet.Spec.Template.Labels["app.kubernetes.io/name"] == "ztunnel"
+}
+
+func ownedZtunnelPods(pods []corev1.Pod, daemonSets []appsv1.DaemonSet) []corev1.Pod {
+	out := make([]corev1.Pod, 0, len(pods))
+	for _, pod := range pods {
+		controller := metav1.GetControllerOf(&pod)
+		if controller == nil || controller.APIVersion != "apps/v1" || controller.Kind != "DaemonSet" {
+			continue
+		}
+		for _, daemonSet := range daemonSets {
+			if pod.Namespace != daemonSet.Namespace || controller.Name != daemonSet.Name {
+				continue
+			}
+			if controller.UID != "" && daemonSet.UID != "" && controller.UID != daemonSet.UID {
+				continue
+			}
+			out = append(out, pod)
+			break
+		}
+	}
+	return out
 }
 
 func (c *Collector) collectNamespaces(ctx context.Context, scope Scope) ([]corev1.Namespace, error) {

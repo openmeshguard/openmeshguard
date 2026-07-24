@@ -19,6 +19,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 	kubefake "k8s.io/client-go/kubernetes/fake"
 	ktesting "k8s.io/client-go/testing"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
@@ -26,13 +27,25 @@ import (
 )
 
 func TestCollectorActionAuditOnlyGetListAndNeverSecrets(t *testing.T) {
+	ztunnelUID := types.UID("ztunnel-daemonset")
 	kube := kubefake.NewSimpleClientset(
 		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "foo"}},
 		&corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "worker"}},
 		&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "api-1", Namespace: "foo"}},
 		&corev1.Pod{
-			ObjectMeta: metav1.ObjectMeta{Name: "ztunnel-1", Namespace: "istio-system", Labels: map[string]string{"app": "ztunnel"}},
-			Spec:       corev1.PodSpec{NodeName: "worker"},
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "ztunnel-1",
+				Namespace: "istio-system",
+				Labels:    map[string]string{"app": "ztunnel", "app.kubernetes.io/name": "ztunnel"},
+				OwnerReferences: []metav1.OwnerReference{{
+					APIVersion: "apps/v1",
+					Kind:       "DaemonSet",
+					Name:       "ztunnel",
+					UID:        ztunnelUID,
+					Controller: boolPointer(true),
+				}},
+			},
+			Spec: corev1.PodSpec{NodeName: "worker"},
 			Status: corev1.PodStatus{Conditions: []corev1.PodCondition{{
 				Type: corev1.PodReady, Status: corev1.ConditionTrue,
 			}}},
@@ -44,9 +57,17 @@ func TestCollectorActionAuditOnlyGetListAndNeverSecrets(t *testing.T) {
 		&appsv1.StatefulSet{ObjectMeta: metav1.ObjectMeta{Name: "db", Namespace: "foo"}},
 		&appsv1.DaemonSet{ObjectMeta: metav1.ObjectMeta{Name: "node-agent", Namespace: "foo"}},
 		&appsv1.DaemonSet{
-			ObjectMeta: metav1.ObjectMeta{Name: "ztunnel", Namespace: "istio-system"},
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "ztunnel",
+				Namespace: "istio-system",
+				UID:       ztunnelUID,
+				Labels:    map[string]string{"app.kubernetes.io/name": "ztunnel"},
+			},
 			Spec: appsv1.DaemonSetSpec{
 				Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "ztunnel"}},
+				Template: corev1.PodTemplateSpec{ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{"app": "ztunnel", "app.kubernetes.io/name": "ztunnel"},
+				}},
 			},
 		},
 	)
@@ -104,7 +125,7 @@ func TestCollectorActionAuditOnlyGetListAndNeverSecrets(t *testing.T) {
 		}
 		seenResources[resource] = true
 		if listAction, ok := action.(ktesting.ListAction); ok &&
-			listAction.GetListRestrictions().Labels.String() == "app=ztunnel" {
+			listAction.GetListRestrictions().Labels.String() == "app=ztunnel,app.kubernetes.io/name=ztunnel" {
 			if resource == "pods" {
 				seenZtunnelPods = true
 			}
@@ -153,6 +174,49 @@ func TestCollectorActionAuditOnlyGetListAndNeverSecrets(t *testing.T) {
 			snapshot.ZtunnelDaemonSetsKnown,
 			len(snapshot.ZtunnelDaemonSets),
 		)
+	}
+}
+
+func TestCollectorRejectsUnownedAndNonCanonicalZtunnelResources(t *testing.T) {
+	ztunnelUID := types.UID("ztunnel-daemonset")
+	kube := kubefake.NewSimpleClientset(
+		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "payments"}},
+		&appsv1.DaemonSet{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "ztunnel",
+				Namespace: "istio-system",
+				UID:       ztunnelUID,
+				Labels:    map[string]string{"app.kubernetes.io/name": "ztunnel"},
+			},
+			Spec: appsv1.DaemonSetSpec{
+				Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "ztunnel"}},
+				Template: corev1.PodTemplateSpec{ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{"app": "ztunnel", "app.kubernetes.io/name": "ztunnel"},
+				}},
+			},
+		},
+		&appsv1.DaemonSet{
+			ObjectMeta: metav1.ObjectMeta{Name: "spoof", Namespace: "payments"},
+			Spec: appsv1.DaemonSetSpec{
+				Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "ztunnel"}},
+			},
+		},
+		ztunnelPod("ztunnel-1", "istio-system", "worker-a", "ztunnel", ztunnelUID),
+		ztunnelPod("unowned-spoof", "payments", "worker-b", "", ""),
+	)
+
+	snapshot, err := newTestCollector(kube, istiofake.NewSimpleClientset()).Collect(
+		context.Background(),
+		Scope{AllNamespaces: true},
+	)
+	if err != nil {
+		t.Fatalf("collect: %v", err)
+	}
+	if len(snapshot.ZtunnelDaemonSets) != 1 || snapshot.ZtunnelDaemonSets[0].Name != "ztunnel" {
+		t.Fatalf("ztunnel DaemonSets = %#v, want only canonical ztunnel", snapshot.ZtunnelDaemonSets)
+	}
+	if len(snapshot.ZtunnelPods) != 1 || snapshot.ZtunnelPods[0].Name != "ztunnel-1" {
+		t.Fatalf("ztunnel Pods = %#v, want only canonical DaemonSet-owned Pod", snapshot.ZtunnelPods)
 	}
 }
 
@@ -205,7 +269,7 @@ func TestCollectorKeepsOptionalNodeAndZtunnelEvidenceUnknownOnDenial(t *testing.
 		kube.PrependReactor("list", resource, func(action ktesting.Action) (bool, runtime.Object, error) {
 			listAction, ok := action.(ktesting.ListAction)
 			isZtunnelList := resource == "pods" && ok &&
-				listAction.GetListRestrictions().Labels.String() == "app=ztunnel"
+				listAction.GetListRestrictions().Labels.String() == ztunnelPodLabelSelector
 			if resource == "daemonsets" {
 				isZtunnelList = action.GetNamespace() == ""
 			}
@@ -613,6 +677,34 @@ func TestPermissionMetadataDoesNotEmbedControlCatalog(t *testing.T) {
 
 func newTestCollector(kube *kubefake.Clientset, istio *istiofake.Clientset) *Collector {
 	return New(kube, istio, gatewayfake.NewSimpleClientset())
+}
+
+func ztunnelPod(name, namespace, node, ownerName string, ownerUID types.UID) *corev1.Pod {
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: namespace,
+			Labels:    map[string]string{"app": "ztunnel", "app.kubernetes.io/name": "ztunnel"},
+		},
+		Spec: corev1.PodSpec{NodeName: node},
+		Status: corev1.PodStatus{Conditions: []corev1.PodCondition{{
+			Type: corev1.PodReady, Status: corev1.ConditionTrue,
+		}}},
+	}
+	if ownerName != "" {
+		pod.OwnerReferences = []metav1.OwnerReference{{
+			APIVersion: "apps/v1",
+			Kind:       "DaemonSet",
+			Name:       ownerName,
+			UID:        ownerUID,
+			Controller: boolPointer(true),
+		}}
+	}
+	return pod
+}
+
+func boolPointer(value bool) *bool {
+	return &value
 }
 
 func assertPermission(t *testing.T, permissions []Permission, apiGroup, resource string, granted bool) {
