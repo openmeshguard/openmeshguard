@@ -11,6 +11,7 @@ import (
 
 	"github.com/openmeshguard/openmeshguard/internal/collect"
 	"github.com/openmeshguard/openmeshguard/internal/engine"
+	"github.com/openmeshguard/openmeshguard/internal/normalize"
 	"github.com/openmeshguard/openmeshguard/internal/resolver"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -204,6 +205,13 @@ func TestNamespaceInputsAggregateMeshEnrollment(t *testing.T) {
 				t.Fatalf("namespace inputs = %#v, want meshEnrollment %q", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestDataPlaneInventoryCanonicalizesNotApplicableMode(t *testing.T) {
+	got := dataPlaneInventory(normalize.Inventory{DataPlaneMode: resolver.ModeNotApplicable})
+	if got["mode"] != string(resolver.ModeUnknown) {
+		t.Fatalf("inventory data plane mode = %#v, want canonical unknown", got["mode"])
 	}
 }
 

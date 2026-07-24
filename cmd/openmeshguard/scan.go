@@ -404,6 +404,10 @@ func inventoryPathsForResource(apiGroup, resource string) []string {
 }
 
 func dataPlaneInventory(inventory normalize.Inventory) map[string]any {
+	mode := string(inventory.DataPlaneMode)
+	if mode == string(resolver.ModeNotApplicable) || mode == "" {
+		mode = string(resolver.ModeUnknown)
+	}
 	ztunnel := map[string]any{"nodesTotal": nil}
 	if inventory.Ztunnel.Present != nil {
 		ztunnel["present"] = *inventory.Ztunnel.Present
@@ -415,7 +419,7 @@ func dataPlaneInventory(inventory normalize.Inventory) map[string]any {
 		ztunnel["nodesTotal"] = *inventory.Ztunnel.NodesTotal
 	}
 	value := map[string]any{
-		"mode":    string(inventory.DataPlaneMode),
+		"mode":    mode,
 		"ztunnel": ztunnel,
 	}
 	if inventory.Waypoints != nil {
