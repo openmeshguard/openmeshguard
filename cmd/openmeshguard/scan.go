@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -34,6 +35,8 @@ type scanOptions struct {
 	OwnershipImport   string
 	Exceptions        []string
 	InferEnvironments bool
+	FailOn            string
+	FailOnUnknown     bool
 }
 
 func newScanCommand(info versionInfo) *cobra.Command {
@@ -58,6 +61,8 @@ func newScanCommand(info versionInfo) *cobra.Command {
 	cmd.Flags().StringVar(&opts.OwnershipImport, "ownership-import", "", "ownership import YAML or CSV path")
 	cmd.Flags().StringArrayVar(&opts.Exceptions, "exceptions", nil, "exception record file or directory; may be repeated")
 	cmd.Flags().BoolVar(&opts.InferEnvironments, "infer-environments", false, "infer production from namespace names and disclose inferred confidence")
+	cmd.Flags().StringVar(&opts.FailOn, "fail-on", "", "exit 1 for open findings at or above this severity")
+	cmd.Flags().BoolVar(&opts.FailOnUnknown, "fail-on-unknown", false, "exit 1 when any finding is unknown")
 	return cmd
 }
 
@@ -106,6 +111,11 @@ func (o *scanOptions) normalizeAndValidate() error {
 		exceptions = append(exceptions, path)
 	}
 	o.Exceptions = exceptions
+	failOn, err := normalizeFailOn(o.FailOn)
+	if err != nil {
+		return err
+	}
+	o.FailOn = failOn
 	return nil
 }
 
@@ -257,7 +267,8 @@ func runScan(ctx context.Context, info versionInfo, opts scanOptions, stdout io.
 		len(exceptionPaths) > 0,
 	)
 
-	return output.WriteScanJSONWithEvaluation(stdout, output.ScanInput{
+	var canonical bytes.Buffer
+	if err := output.WriteScanJSONWithEvaluation(&canonical, output.ScanInput{
 		GeneratedAt:       evaluationTime,
 		ScannerVersion:    info.Version,
 		ResolverVersion:   resolved.Version(),
@@ -266,7 +277,20 @@ func runScan(ctx context.Context, info versionInfo, opts scanOptions, stdout io.
 		PermissionSummary: snapshot.PermissionSummary,
 		Inventory:         normalized.Inventory,
 		WorkloadPostures:  workloadPostures,
-	}, packs, evaluated)
+	}, packs, evaluated); err != nil {
+		return err
+	}
+	if _, err := io.Copy(stdout, bytes.NewReader(canonical.Bytes())); err != nil {
+		return fmt.Errorf("write canonical report: %w", err)
+	}
+	failed, err := output.FailsThreshold(bytes.NewReader(canonical.Bytes()), opts.FailOn, opts.FailOnUnknown)
+	if err != nil {
+		return fmt.Errorf("evaluate scan exit status: %w", err)
+	}
+	if failed {
+		return fmt.Errorf("%w: canonical findings meet the configured failure condition", errFindingsThreshold)
+	}
+	return nil
 }
 
 func validateScanControlScopes(packs []engine.Pack) error {

@@ -41,17 +41,136 @@ func TestVersionCommandPrintsScannerAndResolverVersions(t *testing.T) {
 	}
 }
 
-func TestStubCommandsReturnNotImplementedExitCode(t *testing.T) {
-	for _, name := range []string{"report", "export", "score"} {
-		t.Run(name, func(t *testing.T) {
-			_, _, err := executeForTest(t, defaultVersionInfo(), name)
-			if !errors.Is(err, errNotImplemented) {
-				t.Fatalf("%s returned %v, want errNotImplemented", name, err)
+func TestProjectionCommandsReadCanonicalJSON(t *testing.T) {
+	root := filepath.Join("..", "..")
+	golden := filepath.Join(
+		root,
+		"test",
+		"fixtures",
+		"governance-context",
+		"golden",
+		"governance-active-exception.json",
+	)
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{name: "report", args: []string{"report", "--input", golden}, want: "<!doctype html>"},
+		{name: "export", args: []string{"export", "--input", golden}, want: `"version": "2.1.0"`},
+		{name: "score", args: []string{"score", "--input", golden}, want: "OpenMeshGuard score:"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			stdout, stderr, err := executeForTest(t, defaultVersionInfo(), tt.args...)
+			if err != nil {
+				t.Fatalf("%s returned error: %v", tt.name, err)
 			}
-			if got := exitCode(err); got != 2 {
-				t.Fatalf("%s exit code = %d, want 2", name, got)
+			if stderr != "" {
+				t.Fatalf("%s wrote stderr %q", tt.name, stderr)
+			}
+			if !strings.Contains(stdout, tt.want) {
+				t.Fatalf("%s output missing %q: %q", tt.name, tt.want, stdout)
 			}
 		})
+	}
+}
+
+func TestProjectionCommandWritesRequestedOutput(t *testing.T) {
+	golden := filepath.Join(
+		"..",
+		"..",
+		"test",
+		"fixtures",
+		"sidecar-basic",
+		"golden",
+		"namespace-role-degraded.json",
+	)
+	outputPath := filepath.Join(t.TempDir(), "report.html")
+	stdout, _, err := executeForTest(
+		t,
+		defaultVersionInfo(),
+		"report",
+		"--input",
+		golden,
+		"--output",
+		outputPath,
+	)
+	if err != nil {
+		t.Fatalf("report command returned error: %v", err)
+	}
+	if stdout != "" {
+		t.Fatalf("report command wrote stdout with --output: %q", stdout)
+	}
+	data, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatalf("read report output: %v", err)
+	}
+	if !bytes.Contains(data, []byte("Declared / Verified / Unknown")) {
+		t.Fatalf("report output missing summary: %s", data)
+	}
+}
+
+func TestScoreCommandExitCodeContract(t *testing.T) {
+	root := filepath.Join("..", "..", "test", "fixtures")
+	active := filepath.Join(root, "governance-context", "golden", "governance-active-exception.json")
+	degraded := filepath.Join(root, "sidecar-basic", "golden", "namespace-role-degraded.json")
+	tests := []struct {
+		name     string
+		input    string
+		flags    []string
+		wantCode int
+	}{
+		{name: "excepted critical does not fail critical", input: active, flags: []string{"--fail-on", "critical"}, wantCode: 0},
+		{name: "open high fails high", input: active, flags: []string{"--fail-on", "high"}, wantCode: 1},
+		{name: "unknown critical excluded by default", input: degraded, flags: []string{"--fail-on", "critical"}, wantCode: 0},
+		{name: "unknown opt in", input: degraded, flags: []string{"--fail-on", "critical", "--fail-on-unknown"}, wantCode: 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			args := []string{"score", "--input", tt.input}
+			args = append(args, tt.flags...)
+			stdout, _, err := executeForTest(t, defaultVersionInfo(), args...)
+			if !strings.Contains(stdout, "OpenMeshGuard score:") {
+				t.Fatalf("score output missing despite exit contract evaluation: %q", stdout)
+			}
+			if tt.wantCode == 0 {
+				if err != nil {
+					t.Fatalf("score returned error: %v", err)
+				}
+				return
+			}
+			if !errors.Is(err, errFindingsThreshold) {
+				t.Fatalf("score error = %v, want threshold sentinel", err)
+			}
+			if got := exitCode(err); got != tt.wantCode {
+				t.Fatalf("score exit code = %d, want %d", got, tt.wantCode)
+			}
+		})
+	}
+}
+
+func TestExitCodeUsesTwoForScanOrProjectionErrors(t *testing.T) {
+	if got := exitCode(fmt.Errorf("scan failed")); got != 2 {
+		t.Fatalf("scan error exit code = %d, want 2", got)
+	}
+	if got := exitCode(fmt.Errorf("wrapped: %w", errFindingsThreshold)); got != 1 {
+		t.Fatalf("threshold error exit code = %d, want 1", got)
+	}
+}
+
+func TestScanAndScoreRejectInvalidThresholdBeforeWork(t *testing.T) {
+	for _, args := range [][]string{
+		{"scan", "--all-namespaces", "--fail-on", "urgent"},
+		{"score", "--fail-on", "urgent"},
+	} {
+		_, _, err := executeForTest(t, defaultVersionInfo(), args...)
+		if err == nil || !strings.Contains(err.Error(), "invalid --fail-on severity") {
+			t.Fatalf("%v error = %v, want threshold validation", args, err)
+		}
+		if got := exitCode(err); got != 2 {
+			t.Fatalf("%v exit code = %d, want 2", args, got)
+		}
 	}
 }
 
@@ -109,7 +228,14 @@ func TestScanControlPackFlagIsRepeatable(t *testing.T) {
 
 func TestScanGovernanceFlags(t *testing.T) {
 	cmd := newScanCommand(defaultVersionInfo())
-	for _, name := range []string{"scan-config", "ownership-import", "exceptions", "infer-environments"} {
+	for _, name := range []string{
+		"scan-config",
+		"ownership-import",
+		"exceptions",
+		"infer-environments",
+		"fail-on",
+		"fail-on-unknown",
+	} {
 		if cmd.Flags().Lookup(name) == nil {
 			t.Fatalf("scan command missing %s flag", name)
 		}
