@@ -177,6 +177,7 @@ type ExceptionEvidence struct {
 
 type ExceptionInput struct {
 	ID         string
+	Owner      string
 	ControlIDs []string
 	Valid      bool
 	Expired    bool
@@ -188,6 +189,8 @@ type ExceptionInput struct {
 type ExceptionBinding struct {
 	Resource    ResourceRef
 	ExceptionID string
+	Owner       string
+	OwnerKnown  bool
 }
 
 type CategoryScore struct {

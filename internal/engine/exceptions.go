@@ -10,9 +10,9 @@ func ApplyExceptions(result Result, exceptions []ExceptionInput, bindings []Exce
 	for _, exception := range exceptions {
 		records[exception.ID] = exception
 	}
-	bound := make(map[string]string, len(bindings))
+	bound := make(map[string]ExceptionBinding, len(bindings))
 	for _, binding := range bindings {
-		bound[resourceIdentity(binding.Resource)] = binding.ExceptionID
+		bound[resourceIdentity(binding.Resource)] = binding
 	}
 	for index := range result.Findings {
 		finding := &result.Findings[index]
@@ -22,12 +22,18 @@ func ApplyExceptions(result Result, exceptions []ExceptionInput, bindings []Exce
 			len(finding.Resources) == 0 {
 			continue
 		}
-		exceptionID := strings.TrimSpace(bound[resourceIdentity(finding.Resources[0])])
+		binding := bound[resourceIdentity(finding.Resources[0])]
+		exceptionID := strings.TrimSpace(binding.ExceptionID)
 		if exceptionID == "" {
 			continue
 		}
 		exception, exists := records[exceptionID]
-		if !exists || !exception.Valid || !exceptionCoversControl(exception.ControlIDs, finding.ControlID) {
+		if !exists ||
+			!exception.Valid ||
+			!binding.OwnerKnown ||
+			strings.TrimSpace(binding.Owner) == "" ||
+			strings.TrimSpace(exception.Owner) != strings.TrimSpace(binding.Owner) ||
+			!exceptionCoversControl(exception.ControlIDs, finding.ControlID) {
 			continue
 		}
 		finding.Exception = &ExceptionEvidence{

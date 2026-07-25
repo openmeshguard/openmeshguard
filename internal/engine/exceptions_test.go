@@ -13,7 +13,10 @@ func TestApplyExceptionsNeverRemovesFindings(t *testing.T) {
 		Resources:       []ResourceRef{{Kind: "Deployment", Namespace: "payments", Name: "api"}},
 	}}}
 	bindings := []ExceptionBinding{{
-		Resource: ResourceRef{Kind: "Deployment", Namespace: "payments", Name: "api"}, ExceptionID: "EXC-42",
+		Resource:    ResourceRef{Kind: "Deployment", Namespace: "payments", Name: "api"},
+		ExceptionID: "EXC-42",
+		Owner:       "payments-team",
+		OwnerKnown:  true,
 	}}
 	tests := []struct {
 		name       string
@@ -25,7 +28,7 @@ func TestApplyExceptionsNeverRemovesFindings(t *testing.T) {
 			name: "active exception marks finding without changing severity",
 			exception: ExceptionInput{
 				ID: "EXC-42", ControlIDs: []string{"MG-MTLS-001"}, Valid: true,
-				ExpiresAt: expiresAt, Approver: "security", Ticket: "https://tickets.example/42",
+				Owner: "payments-team", ExpiresAt: expiresAt, Approver: "security", Ticket: "https://tickets.example/42",
 			},
 			wantStatus: "excepted", wantAttach: true,
 		},
@@ -33,7 +36,7 @@ func TestApplyExceptionsNeverRemovesFindings(t *testing.T) {
 			name: "expired exception restores open finding",
 			exception: ExceptionInput{
 				ID: "EXC-42", ControlIDs: []string{"MG-MTLS-001"}, Valid: true, Expired: true,
-				ExpiresAt: expiresAt, Approver: "security", Ticket: "https://tickets.example/42",
+				Owner: "payments-team", ExpiresAt: expiresAt, Approver: "security", Ticket: "https://tickets.example/42",
 			},
 			wantStatus: statusOpen, wantAttach: true,
 		},
@@ -52,6 +55,47 @@ func TestApplyExceptionsNeverRemovesFindings(t *testing.T) {
 			}
 			if (finding.Exception != nil) != tt.wantAttach {
 				t.Fatalf("finding exception = %#v, want attached %v", finding.Exception, tt.wantAttach)
+			}
+		})
+	}
+}
+
+func TestApplyExceptionsRequiresKnownMatchingOwner(t *testing.T) {
+	base := Result{Findings: []Finding{{
+		ID: "finding", ControlID: "MG-MTLS-001", Severity: "high", Status: statusOpen,
+		Resources: []ResourceRef{{Kind: "Deployment", Namespace: "payments", Name: "api"}},
+	}}}
+	tests := []struct {
+		name    string
+		binding ExceptionBinding
+	}{
+		{
+			name: "mismatched owner",
+			binding: ExceptionBinding{
+				Resource: ResourceRef{Kind: "Deployment", Namespace: "payments", Name: "api"},
+				Owner:    "other-team", OwnerKnown: true,
+			},
+		},
+		{
+			name: "unknown owner",
+			binding: ExceptionBinding{
+				Resource: ResourceRef{Kind: "Deployment", Namespace: "payments", Name: "api"},
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tt.binding.ExceptionID = "EXC-42"
+			got := ApplyExceptions(
+				base,
+				[]ExceptionInput{{
+					ID: "EXC-42", Owner: "payments-team",
+					ControlIDs: []string{"MG-MTLS-001"}, Valid: true,
+				}},
+				[]ExceptionBinding{tt.binding},
+			)
+			if got.Findings[0].Status != statusOpen || got.Findings[0].Exception != nil {
+				t.Fatalf("finding = %#v, want unmatched exception to leave it open", got.Findings[0])
 			}
 		})
 	}

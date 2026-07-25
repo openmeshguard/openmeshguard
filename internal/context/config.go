@@ -128,6 +128,9 @@ func LoadScanConfig(path string) (ScanConfig, error) {
 	if strings.TrimSpace(path) == "" {
 		return ScanConfig{}, nil
 	}
+	if err := validateScanConfigEnvironmentTypes(path); err != nil {
+		return ScanConfig{}, err
+	}
 	var config ScanConfig
 	if err := decodeSingleYAML(path, &config); err != nil {
 		return ScanConfig{}, err
@@ -279,13 +282,16 @@ func validateClassification(config ClassificationConfig) error {
 				if _, err := regexp.Compile(rule.Pattern); err != nil {
 					return fmt.Errorf("%s.rules[%d].pattern: %w", prefix, ruleIndex, err)
 				}
-				if strings.TrimSpace(rule.Environment) == "" {
-					return fmt.Errorf("%s.rules[%d].environment must not be empty", prefix, ruleIndex)
+				if err := validateEnvironmentName(rule.Environment, fmt.Sprintf("%s.rules[%d].environment", prefix, ruleIndex)); err != nil {
+					return err
 				}
 			}
 		case "cluster":
-			if strings.TrimSpace(source.Environment) == "" || len(source.Mappings) > 0 || len(source.Keys) > 0 || len(source.Rules) > 0 {
+			if len(source.Mappings) > 0 || len(source.Keys) > 0 || len(source.Rules) > 0 {
 				return fmt.Errorf("%s: cluster requires only environment", prefix)
+			}
+			if err := validateEnvironmentName(source.Environment, prefix+".environment"); err != nil {
+				return err
 			}
 		case "cluster-context":
 			if len(source.Mappings) == 0 || len(source.Keys) > 0 || len(source.Rules) > 0 || source.Environment != "" {
@@ -295,8 +301,11 @@ func validateClassification(config ClassificationConfig) error {
 			return fmt.Errorf("%s.type %q is unsupported", prefix, source.Type)
 		}
 		for key, environment := range source.Mappings {
-			if strings.TrimSpace(key) == "" || strings.TrimSpace(environment) == "" {
-				return fmt.Errorf("%s.mappings keys and environments must not be empty", prefix)
+			if strings.TrimSpace(key) == "" {
+				return fmt.Errorf("%s.mappings keys must not be empty", prefix)
+			}
+			if err := validateEnvironmentName(environment, prefix+".mappings["+key+"]"); err != nil {
+				return err
 			}
 		}
 	}
@@ -332,6 +341,11 @@ func validateApplications(applications []Application) error {
 func validateControls(config ControlsConfig) error {
 	seen := map[string]struct{}{}
 	validSeverity := map[string]struct{}{"critical": {}, "high": {}, "medium": {}, "low": {}, "info": {}}
+	for environment := range config.Parameters.Environments {
+		if err := validateEnvironmentName(environment, "parameters.environments"); err != nil {
+			return err
+		}
+	}
 	for index, override := range config.Overrides {
 		if !controlIDPattern.MatchString(override.ControlID) {
 			return fmt.Errorf("overrides[%d].controlId %q is invalid", index, override.ControlID)
@@ -341,18 +355,56 @@ func validateControls(config ControlsConfig) error {
 		}
 		seen[override.ControlID] = struct{}{}
 		if override.Environments != nil {
+			if mandatoryGovernanceControl(override.ControlID) {
+				return fmt.Errorf(
+					"overrides[%d]: cannot override environments for mandatory governance control %s",
+					index,
+					override.ControlID,
+				)
+			}
 			if err := validateNonEmptyUnique(*override.Environments, fmt.Sprintf("overrides[%d].environments", index)); err != nil {
 				return err
 			}
+			for environmentIndex, environment := range *override.Environments {
+				if err := validateEnvironmentName(
+					environment,
+					fmt.Sprintf("overrides[%d].environments[%d]", index, environmentIndex),
+				); err != nil {
+					return err
+				}
+			}
 		}
 		for environment, severity := range override.SeverityByEnvironment {
-			if strings.TrimSpace(environment) == "" {
-				return fmt.Errorf("overrides[%d].severityByEnvironment contains an empty environment", index)
+			if err := validateEnvironmentName(
+				environment,
+				fmt.Sprintf("overrides[%d].severityByEnvironment", index),
+			); err != nil {
+				return err
 			}
 			if _, ok := validSeverity[severity]; !ok {
 				return fmt.Errorf("overrides[%d].severityByEnvironment[%q] %q is invalid", index, environment, severity)
 			}
 		}
+	}
+	return nil
+}
+
+func mandatoryGovernanceControl(controlID string) bool {
+	switch controlID {
+	case "MG-ENV-001", "MG-OWN-001", "MG-EXC-001", "MG-EXC-002":
+		return true
+	default:
+		return false
+	}
+}
+
+func validateEnvironmentName(value, field string) error {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return fmt.Errorf("%s must not be empty", field)
+	}
+	if trimmed != value {
+		return fmt.Errorf("%s must not contain surrounding whitespace", field)
 	}
 	return nil
 }
@@ -409,7 +461,7 @@ func decodeExceptionDocuments(path string) ([]ExceptionRecord, error) {
 		} else if err != nil {
 			return nil, fmt.Errorf("decode %s document %d: %w", path, document, err)
 		}
-		if record.APIVersion == "" && record.Kind == "" && record.Metadata.Name == "" {
+		if exceptionRecordEmpty(record) {
 			continue
 		}
 		if record.APIVersion != APIVersion {
@@ -423,6 +475,131 @@ func decodeExceptionDocuments(path string) ([]ExceptionRecord, error) {
 		records = append(records, record)
 	}
 	return records, nil
+}
+
+func exceptionRecordEmpty(record ExceptionRecord) bool {
+	return record.APIVersion == "" &&
+		record.Kind == "" &&
+		record.Metadata.Name == "" &&
+		record.Metadata.Version == "" &&
+		len(record.Spec.ControlIDs) == 0 &&
+		record.Spec.Owner == "" &&
+		record.Spec.Approver == "" &&
+		record.Spec.Justification == "" &&
+		record.Spec.Ticket == "" &&
+		record.Spec.ExpiresAt == ""
+}
+
+func validateScanConfigEnvironmentTypes(path string) error {
+	file, err := os.Open(path)
+	if err != nil {
+		return fmt.Errorf("open %s: %w", path, err)
+	}
+	defer file.Close()
+	var document yaml.Node
+	if err := yaml.NewDecoder(file).Decode(&document); err != nil {
+		return fmt.Errorf("decode %s: %w", path, err)
+	}
+	if len(document.Content) == 0 {
+		return nil
+	}
+	root := document.Content[0]
+	classification := yamlMappingValue(root, "classification")
+	sources := yamlMappingValue(classification, "sources")
+	if sources != nil && sources.Kind == yaml.SequenceNode {
+		for index, source := range sources.Content {
+			prefix := fmt.Sprintf("classification.sources[%d]", index)
+			if err := requireYAMLString(yamlMappingValue(source, "environment"), prefix+".environment"); err != nil {
+				return fmt.Errorf("%s: %w", path, err)
+			}
+			mappings := yamlMappingValue(source, "mappings")
+			if mappings != nil && mappings.Kind == yaml.MappingNode {
+				for mappingIndex := 0; mappingIndex+1 < len(mappings.Content); mappingIndex += 2 {
+					if err := requireYAMLString(
+						mappings.Content[mappingIndex+1],
+						prefix+".mappings",
+					); err != nil {
+						return fmt.Errorf("%s: %w", path, err)
+					}
+				}
+			}
+			rules := yamlMappingValue(source, "rules")
+			if rules != nil && rules.Kind == yaml.SequenceNode {
+				for ruleIndex, rule := range rules.Content {
+					if err := requireYAMLString(
+						yamlMappingValue(rule, "environment"),
+						fmt.Sprintf("%s.rules[%d].environment", prefix, ruleIndex),
+					); err != nil {
+						return fmt.Errorf("%s: %w", path, err)
+					}
+				}
+			}
+		}
+	}
+	controls := yamlMappingValue(root, "controls")
+	parameters := yamlMappingValue(controls, "parameters")
+	parameterEnvironments := yamlMappingValue(parameters, "environments")
+	if parameterEnvironments != nil && parameterEnvironments.Kind == yaml.MappingNode {
+		for index := 0; index+1 < len(parameterEnvironments.Content); index += 2 {
+			if err := requireYAMLString(parameterEnvironments.Content[index], "controls.parameters.environments"); err != nil {
+				return fmt.Errorf("%s: %w", path, err)
+			}
+		}
+	}
+	overrides := yamlMappingValue(controls, "overrides")
+	if overrides != nil && overrides.Kind == yaml.SequenceNode {
+		for overrideIndex, override := range overrides.Content {
+			environments := yamlMappingValue(override, "environments")
+			if environments != nil && environments.Kind == yaml.SequenceNode {
+				for environmentIndex, environment := range environments.Content {
+					if err := requireYAMLString(
+						environment,
+						fmt.Sprintf(
+							"controls.overrides[%d].environments[%d]",
+							overrideIndex,
+							environmentIndex,
+						),
+					); err != nil {
+						return fmt.Errorf("%s: %w", path, err)
+					}
+				}
+			}
+			severities := yamlMappingValue(override, "severityByEnvironment")
+			if severities != nil && severities.Kind == yaml.MappingNode {
+				for index := 0; index+1 < len(severities.Content); index += 2 {
+					if err := requireYAMLString(
+						severities.Content[index],
+						fmt.Sprintf("controls.overrides[%d].severityByEnvironment", overrideIndex),
+					); err != nil {
+						return fmt.Errorf("%s: %w", path, err)
+					}
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func yamlMappingValue(node *yaml.Node, key string) *yaml.Node {
+	if node == nil || node.Kind != yaml.MappingNode {
+		return nil
+	}
+	for index := 0; index+1 < len(node.Content); index += 2 {
+		if node.Content[index].Value == key {
+			return node.Content[index+1]
+		}
+	}
+	return nil
+}
+
+func requireYAMLString(node *yaml.Node, field string) error {
+	if node == nil {
+		return nil
+	}
+	if node.Kind != yaml.ScalarNode || node.Tag != "!!str" {
+		return fmt.Errorf("%s must be a string", field)
+	}
+	return nil
 }
 
 func validateExceptionRecord(record *ExceptionRecord) {

@@ -16,6 +16,7 @@ import (
 	"github.com/openmeshguard/openmeshguard/internal/resolver"
 	"github.com/spf13/cobra"
 	istioclient "istio.io/client-go/pkg/clientset/versioned"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
@@ -130,6 +131,7 @@ func runScan(ctx context.Context, info versionInfo, opts scanOptions, stdout io.
 	if err != nil {
 		return fmt.Errorf("load control packs: %w", err)
 	}
+	exceptionRecords = validateExceptionControlIDs(exceptionRecords, packs)
 	controlOverrides, err := engineControlOverrides(scanConfig.Controls.Overrides, packs)
 	if err != nil {
 		return fmt.Errorf("load scan config: %w", err)
@@ -358,10 +360,11 @@ func governanceWorkloadInputs(snapshot collect.Snapshot, workloads []resolver.Wo
 		if namespace == "" {
 			namespace = workload.Ref.Namespace
 		}
+		metadata := collectedWorkloadMetadata(snapshot, workload.Ref, 0)
 		out = append(out, governance.WorkloadInput{
 			Ref:         workload.Ref,
-			Labels:      workload.Labels,
-			Annotations: workloadAnnotations(snapshot, workload.Ref),
+			Labels:      mergeStringValues(workload.Labels, metadata.Labels),
+			Annotations: metadata.Annotations,
 			Namespace: governance.NamespaceInput{
 				Name:        namespace,
 				Labels:      workload.Namespace.Labels,
@@ -387,34 +390,148 @@ func namespaceLabelsKnown(namespace engine.NamespaceInput) bool {
 	return !exists || availability.Available
 }
 
-func workloadAnnotations(snapshot collect.Snapshot, ref resolver.WorkloadRef) map[string]string {
+type workloadMetadata struct {
+	Labels      map[string]string
+	Annotations map[string]string
+}
+
+func collectedWorkloadMetadata(snapshot collect.Snapshot, ref resolver.WorkloadRef, depth int) workloadMetadata {
+	if depth > 2 {
+		return workloadMetadata{}
+	}
 	switch ref.Kind {
 	case "Deployment":
 		for _, resource := range snapshot.Deployments {
 			if resource.Namespace == ref.Namespace && resource.Name == ref.Name {
-				return copyStringValues(resource.Annotations)
+				return mergeWorkloadMetadata(
+					workloadMetadata{
+						Labels:      copyStringValues(resource.Spec.Template.Labels),
+						Annotations: copyStringValues(resource.Spec.Template.Annotations),
+					},
+					workloadMetadata{
+						Labels:      copyStringValues(resource.Labels),
+						Annotations: copyStringValues(resource.Annotations),
+					},
+				)
+			}
+		}
+	case "ReplicaSet":
+		for _, resource := range snapshot.ReplicaSets {
+			if resource.Namespace == ref.Namespace && resource.Name == ref.Name {
+				parent := ownerWorkloadMetadata(snapshot, resource.Namespace, resource.OwnerReferences, depth+1)
+				current := mergeWorkloadMetadata(
+					workloadMetadata{
+						Labels:      copyStringValues(resource.Spec.Template.Labels),
+						Annotations: copyStringValues(resource.Spec.Template.Annotations),
+					},
+					workloadMetadata{
+						Labels:      copyStringValues(resource.Labels),
+						Annotations: copyStringValues(resource.Annotations),
+					},
+				)
+				return mergeWorkloadMetadata(current, parent)
 			}
 		}
 	case "StatefulSet":
 		for _, resource := range snapshot.StatefulSets {
 			if resource.Namespace == ref.Namespace && resource.Name == ref.Name {
-				return copyStringValues(resource.Annotations)
+				return mergeWorkloadMetadata(
+					workloadMetadata{
+						Labels:      copyStringValues(resource.Spec.Template.Labels),
+						Annotations: copyStringValues(resource.Spec.Template.Annotations),
+					},
+					workloadMetadata{
+						Labels:      copyStringValues(resource.Labels),
+						Annotations: copyStringValues(resource.Annotations),
+					},
+				)
 			}
 		}
 	case "DaemonSet":
 		for _, resource := range snapshot.DaemonSets {
 			if resource.Namespace == ref.Namespace && resource.Name == ref.Name {
-				return copyStringValues(resource.Annotations)
+				return mergeWorkloadMetadata(
+					workloadMetadata{
+						Labels:      copyStringValues(resource.Spec.Template.Labels),
+						Annotations: copyStringValues(resource.Spec.Template.Annotations),
+					},
+					workloadMetadata{
+						Labels:      copyStringValues(resource.Labels),
+						Annotations: copyStringValues(resource.Annotations),
+					},
+				)
 			}
 		}
 	case "Pod":
 		for _, resource := range snapshot.Pods {
 			if resource.Namespace == ref.Namespace && resource.Name == ref.Name {
-				return copyStringValues(resource.Annotations)
+				parent := ownerWorkloadMetadata(snapshot, resource.Namespace, resource.OwnerReferences, depth+1)
+				return mergeWorkloadMetadata(workloadMetadata{
+					Labels:      copyStringValues(resource.Labels),
+					Annotations: copyStringValues(resource.Annotations),
+				}, parent)
 			}
 		}
 	}
-	return nil
+	return workloadMetadata{}
+}
+
+func ownerWorkloadMetadata(
+	snapshot collect.Snapshot,
+	namespace string,
+	owners []metav1.OwnerReference,
+	depth int,
+) workloadMetadata {
+	for _, owner := range owners {
+		if owner.Controller == nil || !*owner.Controller {
+			continue
+		}
+		if metadata, matched := knownOwnerWorkloadMetadata(snapshot, namespace, owner, depth); matched {
+			return metadata
+		}
+	}
+	for _, owner := range owners {
+		if metadata, matched := knownOwnerWorkloadMetadata(snapshot, namespace, owner, depth); matched {
+			return metadata
+		}
+	}
+	return workloadMetadata{}
+}
+
+func knownOwnerWorkloadMetadata(
+	snapshot collect.Snapshot,
+	namespace string,
+	owner metav1.OwnerReference,
+	depth int,
+) (workloadMetadata, bool) {
+	switch owner.Kind {
+	case "Deployment", "ReplicaSet", "StatefulSet", "DaemonSet":
+		return collectedWorkloadMetadata(snapshot, resolver.WorkloadRef{
+			Kind:      owner.Kind,
+			Namespace: namespace,
+			Name:      owner.Name,
+		}, depth), true
+	default:
+		return workloadMetadata{}, false
+	}
+}
+
+func mergeWorkloadMetadata(base, override workloadMetadata) workloadMetadata {
+	return workloadMetadata{
+		Labels:      mergeStringValues(base.Labels, override.Labels),
+		Annotations: mergeStringValues(base.Annotations, override.Annotations),
+	}
+}
+
+func mergeStringValues(base, override map[string]string) map[string]string {
+	out := copyStringValues(base)
+	if out == nil && override != nil {
+		out = make(map[string]string, len(override))
+	}
+	for key, value := range override {
+		out[key] = value
+	}
+	return out
 }
 
 func namespaceAnnotations(snapshot collect.Snapshot, name string) map[string]string {
@@ -531,6 +648,7 @@ func engineExceptionInputs(
 		})
 		exceptions = append(exceptions, engine.ExceptionInput{
 			ID:         record.Metadata.Name,
+			Owner:      record.Spec.Owner,
 			ControlIDs: append([]string(nil), record.Spec.ControlIDs...),
 			Valid:      valid,
 			Expired:    expired,
@@ -550,23 +668,103 @@ func engineExceptionInputs(
 			Namespace: workload.Ref.Namespace,
 			Name:      workload.Ref.Name,
 		}
-		bindings = append(bindings, engine.ExceptionBinding{Resource: resource, ExceptionID: workload.ExceptionID})
-		if _, exists := byID[workload.ExceptionID]; exists {
+		bindings = append(bindings, engine.ExceptionBinding{
+			Resource:    resource,
+			ExceptionID: workload.ExceptionID,
+			Owner:       workload.Ownership.Owner,
+			OwnerKnown:  workload.Ownership.OwnerKnown,
+		})
+		record, exists := byID[workload.ExceptionID]
+		if !exists {
+			resources = append(resources, exceptionReferenceInput(
+				workload,
+				[]any{"annotation references an exception record that was not loaded"},
+				"",
+				false,
+			))
 			continue
 		}
-		name := workload.ExceptionID + "@" + workload.Ref.Kind + "/" + workload.Ref.Namespace + "/" + workload.Ref.Name
-		resources = append(resources, engine.ResourceInput{
-			APIVersion: governance.APIVersion,
-			Kind:       "ExceptionReference",
-			Namespace:  workload.Ref.Namespace,
-			Name:       name,
-			Fields: map[string]any{
-				"validationErrors": []any{"annotation references an exception record that was not loaded"},
-			},
-			EvidenceSources: []string{"kubernetes-api"},
-		})
+		if len(record.ValidationErrors) > 0 {
+			continue
+		}
+		if !workload.Ownership.OwnerKnown {
+			reason := workload.Ownership.OwnerReason
+			if reason == "" {
+				reason = "workload owner evidence unavailable"
+			}
+			resources = append(resources, exceptionReferenceInput(workload, []any{}, reason, true))
+			continue
+		}
+		if strings.TrimSpace(workload.Ownership.Owner) == "" ||
+			strings.TrimSpace(record.Spec.Owner) != strings.TrimSpace(workload.Ownership.Owner) {
+			resources = append(resources, exceptionReferenceInput(
+				workload,
+				[]any{fmt.Sprintf(
+					"exception owner %q does not match workload owner %q",
+					record.Spec.Owner,
+					workload.Ownership.Owner,
+				)},
+				"",
+				true,
+			))
+		}
 	}
 	return resources, exceptions, bindings
+}
+
+func exceptionReferenceInput(
+	workload governance.WorkloadContext,
+	validationErrors []any,
+	unknownReason string,
+	recordLoaded bool,
+) engine.ResourceInput {
+	input := engine.ResourceInput{
+		APIVersion: governance.APIVersion,
+		Kind:       "ExceptionReference",
+		Namespace:  workload.Ref.Namespace,
+		Name: workload.ExceptionID + "@" +
+			workload.Ref.Kind + "/" + workload.Ref.Namespace + "/" + workload.Ref.Name,
+		Fields: map[string]any{
+			"validationErrors": validationErrors,
+		},
+		EvidenceSources: []string{"kubernetes-api"},
+	}
+	if recordLoaded {
+		input.EvidenceSources = append(input.EvidenceSources, "exception-record")
+	}
+	if unknownReason != "" {
+		input.Availability = map[string]engine.Availability{
+			"validationErrors": {Reason: unknownReason},
+		}
+	}
+	return input
+}
+
+func validateExceptionControlIDs(
+	records []governance.ExceptionRecord,
+	packs []engine.Pack,
+) []governance.ExceptionRecord {
+	known := make(map[string]struct{})
+	for _, pack := range packs {
+		for _, control := range pack.Controls {
+			known[control.ID] = struct{}{}
+		}
+	}
+	out := append([]governance.ExceptionRecord(nil), records...)
+	for index := range out {
+		out[index].ValidationErrors = append([]string(nil), records[index].ValidationErrors...)
+		for _, controlID := range out[index].Spec.ControlIDs {
+			if _, exists := known[controlID]; exists {
+				continue
+			}
+			out[index].ValidationErrors = append(
+				out[index].ValidationErrors,
+				fmt.Sprintf("spec.controlIds references unknown control %q", controlID),
+			)
+		}
+		sort.Strings(out[index].ValidationErrors)
+	}
+	return out
 }
 
 func reportContext(
@@ -675,9 +873,12 @@ func workloadEnrollmentObservation(workload resolver.WorkloadInput) resolver.Tri
 	case resolver.ModeNotApplicable:
 		return resolver.False
 	case resolver.ModeUnknown:
-		return workload.Namespace.AmbientEnrolled
+		if workload.Namespace.AmbientEnrolled == resolver.True {
+			return resolver.True
+		}
+		return resolver.Unobserved
 	default:
-		return workload.Namespace.AmbientEnrolled
+		return resolver.Unobserved
 	}
 }
 
@@ -692,19 +893,19 @@ func meshNamespaceInputs(namespaces []engine.NamespaceInput) []engine.NamespaceI
 }
 
 func mergeMeshEnrollment(current string, observed resolver.Tristate) string {
+	if current == "enrolled" {
+		return current
+	}
 	switch observed {
 	case resolver.True:
 		return "enrolled"
 	case resolver.False:
-		if current == "" || current == "unknown" {
+		if current == "" {
 			return "not-enrolled"
 		}
 		return current
 	default:
-		if current == "" {
-			return "unknown"
-		}
-		return current
+		return "unknown"
 	}
 }
 

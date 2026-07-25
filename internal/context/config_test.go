@@ -65,6 +65,13 @@ func TestLoadScanConfigRejectsInvalidSourcesAndOverrides(t *testing.T) {
 		{name: "invalid name regex", fragment: "    - type: namespace-name\n      rules: [{pattern: '[', environment: production}]\n", want: "missing closing ]"},
 		{name: "duplicate control override", fragment: "controls:\n  overrides:\n    - {controlId: MG-MTLS-001}\n    - {controlId: MG-MTLS-001}\n", want: "duplicate controlId"},
 		{name: "invalid severity", fragment: "controls:\n  overrides:\n    - controlId: MG-MTLS-001\n      severityByEnvironment: {production: emergency}\n", want: `"emergency" is invalid`},
+		{name: "boolean environment", fragment: "    - type: cluster\n      environment: true\n", want: "environment must be a string"},
+		{name: "boolean override environment", fragment: "controls:\n  overrides:\n    - controlId: MG-MTLS-001\n      environments: [true]\n", want: "environments[0] must be a string"},
+		{name: "environment with surrounding whitespace", fragment: "    - type: cluster\n      environment: ' production '\n", want: "environment must not contain surrounding whitespace"},
+		{name: "environment coverage control override", fragment: "controls:\n  overrides:\n    - controlId: MG-ENV-001\n      environments: [production]\n", want: "cannot override environments for mandatory governance control"},
+		{name: "ownership coverage control override", fragment: "controls:\n  overrides:\n    - controlId: MG-OWN-001\n      environments: [production]\n", want: "cannot override environments for mandatory governance control"},
+		{name: "exception validation control override", fragment: "controls:\n  overrides:\n    - controlId: MG-EXC-001\n      environments: [production]\n", want: "cannot override environments for mandatory governance control"},
+		{name: "exception expiry control override", fragment: "controls:\n  overrides:\n    - controlId: MG-EXC-002\n      environments: [production]\n", want: "cannot override environments for mandatory governance control"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -168,6 +175,21 @@ spec:
 	if len(records) != 1 ||
 		!containsText(records[0].ValidationErrors, "cannot except exception hygiene control") {
 		t.Fatalf("exception validation errors = %#v, want hygiene-control rejection", records)
+	}
+}
+
+func TestLoadExceptionsRejectsNonemptyHeaderlessDocument(t *testing.T) {
+	path := writeTestFile(t, "headerless-exception.yaml", `spec:
+  controlIds: [MG-MTLS-001]
+  owner: payments
+  approver: security@example.com
+  justification: Migration window
+  ticket: https://tickets.example.com/SEC-42
+  expiresAt: 2026-09-01T00:00:00Z
+`)
+	_, err := LoadExceptions([]string{path})
+	if err == nil || !strings.Contains(err.Error(), "apiVersion must be") {
+		t.Fatalf("LoadExceptions error = %v, want missing apiVersion rejection", err)
 	}
 }
 
