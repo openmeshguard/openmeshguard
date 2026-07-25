@@ -193,4 +193,5 @@ Ambient (M6a), HTML/SARIF/score/exit-codes (M6c), Prometheus (M7).
   scanner credential survived cleanup.
 - `make kind-up` completed in 94 seconds with Kind v0.31.0, digest-pinned
   Kubernetes 1.35.0, Istio 1.30.2 ambient, and Gateway API v1.5.1.
+  `make kind-down` removed the disposable cluster in 1 second.
   `git diff --check` and the frozen-contract/RBAC diff checks are clean.
