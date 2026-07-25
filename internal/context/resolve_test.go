@@ -120,20 +120,59 @@ func TestOwnershipUsesConfiguredIdentityThenConfigAndImport(t *testing.T) {
 }
 
 func TestOwnershipUnknownDoesNotFallThroughUnavailableNamespaceLabels(t *testing.T) {
-	workload := WorkloadInput{
-		Ref:       workloadRef("payments", "api"),
-		Labels:    map[string]string{"platform.example.com/application-id": "payments"},
-		Namespace: NamespaceInput{Name: "payments", LabelsKnown: false},
+	tests := []struct {
+		name         string
+		labels       map[string]string
+		wantAppID    string
+		wantOwner    string
+		wantAppKnown bool
+		wantOwnKnown bool
+	}{
+		{
+			name:         "known app ID does not bypass unknown owner metadata",
+			labels:       map[string]string{"platform.example.com/application-id": "payments"},
+			wantAppID:    "payments",
+			wantAppKnown: true,
+		},
+		{
+			name:         "known owner survives unknown app ID metadata",
+			labels:       map[string]string{"platform.example.com/team": "payments-team"},
+			wantOwner:    "payments-team",
+			wantOwnKnown: true,
+		},
 	}
-	got := resolveOwnership(
-		workload,
-		[]string{"platform.example.com/application-id"},
-		[]string{"platform.example.com/team"},
-		nil,
-		map[string]string{"payments": "payments-team"},
-	)
-	if got.OwnerKnown || got.Owner != "" || got.OwnerReason == "" {
-		t.Fatalf("ownership = %#v, want unavailable owner without import fallback", got)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			workload := WorkloadInput{
+				Ref:       workloadRef("payments", "api"),
+				Labels:    tt.labels,
+				Namespace: NamespaceInput{Name: "payments", LabelsKnown: false},
+			}
+			got := resolveOwnership(
+				workload,
+				[]string{"platform.example.com/application-id"},
+				[]string{"platform.example.com/team"},
+				nil,
+				map[string]string{"payments": "import-team"},
+			)
+			if got.AppID != tt.wantAppID ||
+				got.Owner != tt.wantOwner ||
+				got.AppIDKnown != tt.wantAppKnown ||
+				got.OwnerKnown != tt.wantOwnKnown {
+				t.Fatalf(
+					"ownership = %#v, want app/owner/known %q/%q/%v/%v",
+					got,
+					tt.wantAppID,
+					tt.wantOwner,
+					tt.wantAppKnown,
+					tt.wantOwnKnown,
+				)
+			}
+			if (!got.AppIDKnown && got.AppIDReason == "") ||
+				(!got.OwnerKnown && got.OwnerReason == "") {
+				t.Fatalf("ownership = %#v, want reasons for unavailable fields", got)
+			}
+		})
 	}
 }
 

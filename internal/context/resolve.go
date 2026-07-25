@@ -176,19 +176,20 @@ func resolveOwnership(
 		appIDKeys,
 		"workload",
 	)
+	appIDKnown := true
+	appIDReason := ""
 	if appID == "" {
 		if !workload.Namespace.LabelsKnown {
-			return Ownership{
-				AppIDReason: "namespace label evidence unavailable",
-				OwnerReason: "namespace label evidence unavailable",
-			}
+			appIDKnown = false
+			appIDReason = "namespace label and annotation evidence unavailable"
+		} else {
+			appID, appIDSource = firstMetadataValue(
+				workload.Namespace.Labels,
+				workload.Namespace.Annotations,
+				appIDKeys,
+				"namespace",
+			)
 		}
-		appID, appIDSource = firstMetadataValue(
-			workload.Namespace.Labels,
-			workload.Namespace.Annotations,
-			appIDKeys,
-			"namespace",
-		)
 	}
 	owner, ownerSource := firstMetadataValue(
 		workload.Labels,
@@ -196,32 +197,33 @@ func resolveOwnership(
 		ownerKeys,
 		"workload",
 	)
+	ownerKnown := true
+	ownerReason := ""
 	if owner == "" {
 		if !workload.Namespace.LabelsKnown {
-			return Ownership{
-				AppID:       appID,
-				AppIDKnown:  appID != "",
-				AppIDSource: appIDSource,
-				OwnerReason: "namespace label evidence unavailable",
-			}
+			ownerKnown = false
+			ownerReason = "namespace label and annotation evidence unavailable"
+		} else {
+			owner, ownerSource = firstMetadataValue(
+				workload.Namespace.Labels,
+				workload.Namespace.Annotations,
+				ownerKeys,
+				"namespace",
+			)
 		}
-		owner, ownerSource = firstMetadataValue(
-			workload.Namespace.Labels,
-			workload.Namespace.Annotations,
-			ownerKeys,
-			"namespace",
-		)
 	}
 
 	ownership := Ownership{
 		AppID:       appID,
 		Owner:       owner,
-		AppIDKnown:  true,
-		OwnerKnown:  true,
+		AppIDKnown:  appIDKnown,
+		OwnerKnown:  ownerKnown,
 		AppIDSource: appIDSource,
 		OwnerSource: ownerSource,
+		AppIDReason: appIDReason,
+		OwnerReason: ownerReason,
 	}
-	if owner == "" && appID != "" {
+	if ownerKnown && owner == "" && appIDKnown && appID != "" {
 		if configuredOwner := configOwners[appID]; configuredOwner != "" {
 			ownership.Owner = configuredOwner
 			ownership.OwnerSource = "scan-config"
