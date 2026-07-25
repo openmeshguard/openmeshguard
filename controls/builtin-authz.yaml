@@ -2,7 +2,7 @@ apiVersion: openmeshguard.io/v1alpha1
 kind: ControlPack
 metadata:
   name: builtin-authz
-  version: 0.2.0
+  version: 0.3.0
 controls:
   - id: MG-AUTHZ-001
     title: Mesh-managed workloads must have resolved authorization coverage
@@ -10,7 +10,7 @@ controls:
     severity: high
     evidenceType: config
     scope: workload
-    environments: []
+    environments: [production]
     requires:
       - authorization.effective
     applicability: 'workload.dataPlaneMode != "not-applicable"'
@@ -32,7 +32,7 @@ controls:
     severity: high
     evidenceType: config
     scope: workload
-    environments: []
+    environments: [production]
     requires:
       - authorization.effective
     applicability: 'workload.dataPlaneMode != "not-applicable"'

@@ -1,6 +1,8 @@
 package engine
 
 import (
+	"time"
+
 	"github.com/google/cel-go/cel"
 	"github.com/openmeshguard/openmeshguard/internal/resolver"
 )
@@ -79,23 +81,31 @@ type Availability struct {
 // NamespaceInput is the normalized namespace view exposed to namespace and
 // workload CEL environments.
 type NamespaceInput struct {
-	Name           string
-	Labels         map[string]string
-	Environment    string
-	MeshEnrollment string
-	Availability   map[string]Availability
+	Name                  string
+	Labels                map[string]string
+	Environment           string
+	EnvironmentConfidence string
+	EnvironmentKnown      bool
+	MeshEnrollment        string
+	EvidenceSources       []string
+	Availability          map[string]Availability
 }
 
 // WorkloadInput joins one resolver output to its namespace context and any
 // producer-supplied availability facts.
 type WorkloadInput struct {
-	Posture      resolver.WorkloadResult
-	Namespace    NamespaceInput
-	Environment  string
-	Owner        string
-	AppID        string
-	Verified     map[string]any
-	Availability map[string]Availability
+	Posture               resolver.WorkloadResult
+	Namespace             NamespaceInput
+	Environment           string
+	EnvironmentConfidence string
+	EnvironmentKnown      bool
+	Owner                 string
+	OwnerKnown            bool
+	AppID                 string
+	AppIDKnown            bool
+	EvidenceSources       []string
+	Verified              map[string]any
+	Availability          map[string]Availability
 }
 
 // ResourceInput is the normalized resource view for resource-scoped controls.
@@ -123,6 +133,13 @@ type Input struct {
 	Inventory                map[string]any
 	InventoryAvailability    map[string]Availability
 	Params                   map[string]any
+	EnvironmentParams        map[string]map[string]any
+	ControlOverrides         map[string]ControlOverride
+}
+
+type ControlOverride struct {
+	Environments          *[]string
+	SeverityByEnvironment map[string]string
 }
 
 type ResourceRef struct {
@@ -146,7 +163,34 @@ type Finding struct {
 	ResolutionChain []resolver.Step
 	Reasoning       string
 	Remediation     Remediation
+	Exception       *ExceptionEvidence
 	UnknownReason   string
+}
+
+type ExceptionEvidence struct {
+	ID        string
+	Expired   bool
+	ExpiresAt time.Time
+	Approver  string
+	Ticket    string
+}
+
+type ExceptionInput struct {
+	ID         string
+	Owner      string
+	ControlIDs []string
+	Valid      bool
+	Expired    bool
+	ExpiresAt  time.Time
+	Approver   string
+	Ticket     string
+}
+
+type ExceptionBinding struct {
+	Resource    ResourceRef
+	ExceptionID string
+	Owner       string
+	OwnerKnown  bool
 }
 
 type CategoryScore struct {
@@ -160,6 +204,33 @@ type CategoryScore struct {
 type Result struct {
 	Findings []Finding
 	Scores   []CategoryScore
+	Context  ReportContext
+}
+
+type ReportContext struct {
+	EnvironmentInference bool
+	ScanConfig           bool
+	OwnershipImport      bool
+	Exceptions           bool
+	Classification       ClassificationSummary
+	Workloads            []WorkloadContext
+}
+
+type ClassificationSummary struct {
+	NamespacesClassified   int
+	NamespacesUnclassified int
+	ByEnvironment          map[string]int
+}
+
+type WorkloadContext struct {
+	Ref                   resolver.WorkloadRef
+	Environment           string
+	EnvironmentConfidence string
+	EnvironmentKnown      bool
+	Owner                 string
+	OwnerKnown            bool
+	AppID                 string
+	AppIDKnown            bool
 }
 
 type Provenance struct {

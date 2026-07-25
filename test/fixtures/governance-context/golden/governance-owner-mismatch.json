@@ -19,6 +19,11 @@
         "name": "builtin-mtls",
         "version": "0.3.0",
         "source": "builtin"
+      },
+      {
+        "name": "scan-config:e2e-governance",
+        "version": "0.1.0",
+        "source": "user"
       }
     ]
   },
@@ -27,7 +32,7 @@
     "scope": {
       "allNamespaces": false,
       "namespaces": [
-        "omg-authz-broad"
+        "omg-governance-active"
       ]
     },
     "dataSources": {
@@ -36,9 +41,9 @@
         "enabled": false
       },
       "contextFiles": {
-        "scanConfig": false,
-        "ownershipImport": false,
-        "exceptions": false
+        "scanConfig": true,
+        "ownershipImport": true,
+        "exceptions": true
       }
     },
     "environmentInference": false
@@ -343,7 +348,7 @@
   ],
   "inventory": {
     "counts": {
-      "authorizationPolicies": 3,
+      "authorizationPolicies": 1,
       "daemonsets": 0,
       "deployments": 1,
       "destinationRules": 0,
@@ -351,7 +356,7 @@
       "gateways": 0,
       "namespaces": 1,
       "nodes": 1,
-      "peerAuthentications": 1,
+      "peerAuthentications": 2,
       "pods": 1,
       "replicasets": 1,
       "services": 1,
@@ -374,29 +379,29 @@
       "evaluated": false
     },
     "classification": {
-      "namespacesClassified": 0,
-      "namespacesUnclassified": 1,
+      "namespacesClassified": 1,
+      "namespacesUnclassified": 0,
       "byEnvironment": {
-        "unclassified": 1
+        "production": 1
       }
     }
   },
   "workloadPostures": [
     {
       "workload": {
-        "namespace": "omg-authz-broad",
-        "name": "authz-broad",
+        "namespace": "omg-governance-active",
+        "name": "active-api",
         "kind": "Deployment"
       },
-      "environment": "unclassified",
-      "environmentConfidence": "resolved",
-      "owner": null,
-      "appId": null,
+      "environment": "production",
+      "environmentConfidence": "observed",
+      "owner": "team-payments",
+      "appId": "payments-api",
       "dataPlaneMode": "sidecar",
       "mtls": {
-        "effective": "strict",
+        "effective": "permissive",
         "byPort": {
-          "8080": "strict"
+          "8080": "permissive"
         },
         "clientTLSContradiction": false,
         "chain": [
@@ -413,17 +418,21 @@
             "namespace": "istio-system",
             "field": "spec.mtls.mode",
             "effect": "sets mesh-wide mTLS mode to STRICT"
+          },
+          {
+            "order": 3,
+            "kind": "PeerAuthentication",
+            "name": "default",
+            "namespace": "omg-governance-active",
+            "field": "spec.mtls.mode",
+            "effect": "sets namespace mTLS mode to PERMISSIVE"
           }
         ]
       },
       "authorization": {
-        "effective": "default-deny-explicit-allow",
-        "broadAllow": true,
+        "effective": "no-policy",
+        "broadAllow": false,
         "identityScoped": false,
-        "policiesInScope": [
-          "omg-authz-broad/allow-all",
-          "omg-authz-broad/default-deny"
-        ],
         "chain": [
           {
             "order": 1,
@@ -438,22 +447,6 @@
             "namespace": "istio-system",
             "field": "spec.selector",
             "effect": "selector does not match the workload; excludes policy from authorization evaluation"
-          },
-          {
-            "order": 3,
-            "kind": "AuthorizationPolicy",
-            "name": "allow-all",
-            "namespace": "omg-authz-broad",
-            "field": "spec.action",
-            "effect": "adds a structurally broad rule to the additive ALLOW union"
-          },
-          {
-            "order": 4,
-            "kind": "AuthorizationPolicy",
-            "name": "default-deny",
-            "namespace": "omg-authz-broad",
-            "field": "spec.action",
-            "effect": "adds an ALLOW policy with no rules; activates default deny for unmatched requests"
           }
         ]
       }
@@ -461,9 +454,9 @@
   ],
   "findings": [
     {
-      "id": "MG-AUTHZ-003-22c47ecb25f5",
-      "controlId": "MG-AUTHZ-003",
-      "title": "Authorization policies must not grant structurally broad access",
+      "id": "MG-AUTHZ-001-a47bcea573f9",
+      "controlId": "MG-AUTHZ-001",
+      "title": "Mesh-managed workloads must have resolved authorization coverage",
       "severity": "high",
       "evidenceType": "config",
       "status": "open",
@@ -471,13 +464,14 @@
       "dataPlaneMode": "sidecar",
       "evidenceSources": [
         "kubernetes-api",
+        "ownership-import",
         "istio-crd"
       ],
       "resources": [
         {
           "kind": "Deployment",
-          "namespace": "omg-authz-broad",
-          "name": "authz-broad"
+          "namespace": "omg-governance-active",
+          "name": "active-api"
         }
       ],
       "resolutionChain": [
@@ -494,31 +488,57 @@
           "namespace": "istio-system",
           "field": "spec.selector",
           "effect": "selector does not match the workload; excludes policy from authorization evaluation"
-        },
-        {
-          "order": 3,
-          "kind": "AuthorizationPolicy",
-          "name": "allow-all",
-          "namespace": "omg-authz-broad",
-          "field": "spec.action",
-          "effect": "adds a structurally broad rule to the additive ALLOW union"
-        },
-        {
-          "order": 4,
-          "kind": "AuthorizationPolicy",
-          "name": "default-deny",
-          "namespace": "omg-authz-broad",
-          "field": "spec.action",
-          "effect": "adds an ALLOW policy with no rules; activates default deny for unmatched requests"
         }
       ],
-      "reasoning": "AuthorizationPolicy coverage for omg-authz-broad/authz-broad includes an unrestricted rule or wildcard source.",
+      "reasoning": "omg-governance-active/active-api has no resolved AuthorizationPolicy coverage.",
       "remediation": {
-        "guidance": "Replace empty rules and wildcard principals or namespaces with the narrow identities and operations the workload requires."
+        "guidance": "Apply an AuthorizationPolicy that selects this workload and inspect the resolution chain to confirm its effective scope."
       }
     },
     {
-      "id": "MG-AUTHZ-004-3a2d3dc1d283",
+      "id": "MG-AUTHZ-002-72256101fa57",
+      "controlId": "MG-AUTHZ-002",
+      "title": "Workloads should resolve to default deny with explicit allow",
+      "severity": "high",
+      "evidenceType": "config",
+      "status": "open",
+      "confidence": "resolved",
+      "dataPlaneMode": "sidecar",
+      "evidenceSources": [
+        "kubernetes-api",
+        "ownership-import",
+        "istio-crd"
+      ],
+      "resources": [
+        {
+          "kind": "Deployment",
+          "namespace": "omg-governance-active",
+          "name": "active-api"
+        }
+      ],
+      "resolutionChain": [
+        {
+          "order": 1,
+          "kind": "AuthorizationDefault",
+          "field": "implicitEnablement",
+          "effect": "establishes Istio's implicit allow when no applicable ALLOW policy exists"
+        },
+        {
+          "order": 2,
+          "kind": "AuthorizationPolicy",
+          "name": "authz-root-default-deny",
+          "namespace": "istio-system",
+          "field": "spec.selector",
+          "effect": "selector does not match the workload; excludes policy from authorization evaluation"
+        }
+      ],
+      "reasoning": "Authorization for omg-governance-active/active-api resolves to no-policy, not default deny with explicit allow.",
+      "remediation": {
+        "guidance": "Establish an empty ALLOW policy for default deny and add narrowly scoped ALLOW rules for required traffic."
+      }
+    },
+    {
+      "id": "MG-AUTHZ-004-6c411b3dc9eb",
       "controlId": "MG-AUTHZ-004",
       "title": "Authorization access must be scoped to explicit identities",
       "severity": "high",
@@ -528,13 +548,14 @@
       "dataPlaneMode": "sidecar",
       "evidenceSources": [
         "kubernetes-api",
+        "ownership-import",
         "istio-crd"
       ],
       "resources": [
         {
           "kind": "Deployment",
-          "namespace": "omg-authz-broad",
-          "name": "authz-broad"
+          "namespace": "omg-governance-active",
+          "name": "active-api"
         }
       ],
       "resolutionChain": [
@@ -551,62 +572,91 @@
           "namespace": "istio-system",
           "field": "spec.selector",
           "effect": "selector does not match the workload; excludes policy from authorization evaluation"
-        },
-        {
-          "order": 3,
-          "kind": "AuthorizationPolicy",
-          "name": "allow-all",
-          "namespace": "omg-authz-broad",
-          "field": "spec.action",
-          "effect": "adds a structurally broad rule to the additive ALLOW union"
-        },
-        {
-          "order": 4,
-          "kind": "AuthorizationPolicy",
-          "name": "default-deny",
-          "namespace": "omg-authz-broad",
-          "field": "spec.action",
-          "effect": "adds an ALLOW policy with no rules; activates default deny for unmatched requests"
         }
       ],
-      "reasoning": "Authorization access for omg-authz-broad/authz-broad is not scoped to explicit principals, namespaces, or workloads.",
+      "reasoning": "Authorization access for omg-governance-active/active-api is not scoped to explicit principals, namespaces, or workloads.",
       "remediation": {
         "guidance": "Scope ALLOW rules to approved principals, namespaces, service accounts, or workload identities."
       }
     },
     {
-      "id": "MG-ENV-001-e3ecfe3fb780",
-      "controlId": "MG-ENV-001",
-      "title": "Mesh namespaces must be classified to an environment",
-      "severity": "medium",
+      "id": "MG-AUTHZ-005-5d8f663f0fd3",
+      "controlId": "MG-AUTHZ-005",
+      "title": "Authorization coverage must resolve at workload level",
+      "severity": "high",
+      "evidenceType": "config",
+      "status": "open",
+      "confidence": "resolved",
+      "dataPlaneMode": "sidecar",
+      "evidenceSources": [
+        "kubernetes-api",
+        "ownership-import",
+        "istio-crd"
+      ],
+      "resources": [
+        {
+          "kind": "Deployment",
+          "namespace": "omg-governance-active",
+          "name": "active-api"
+        }
+      ],
+      "resolutionChain": [
+        {
+          "order": 1,
+          "kind": "AuthorizationDefault",
+          "field": "implicitEnablement",
+          "effect": "establishes Istio's implicit allow when no applicable ALLOW policy exists"
+        },
+        {
+          "order": 2,
+          "kind": "AuthorizationPolicy",
+          "name": "authz-root-default-deny",
+          "namespace": "istio-system",
+          "field": "spec.selector",
+          "effect": "selector does not match the workload; excludes policy from authorization evaluation"
+        }
+      ],
+      "reasoning": "omg-governance-active/active-api is not selected by any resolved AuthorizationPolicy.",
+      "remediation": {
+        "guidance": "Correct policy namespace, selector, or targetRefs so coverage reaches this workload rather than relying on policy resource presence alone."
+      }
+    },
+    {
+      "id": "MG-EXC-001-08abeabdcfe3",
+      "controlId": "MG-EXC-001",
+      "title": "Exception records and references must be valid",
+      "severity": "high",
       "evidenceType": "context",
       "status": "open",
       "confidence": "resolved",
       "evidenceSources": [
-        "kubernetes-api"
+        "kubernetes-api",
+        "exception-record"
       ],
       "resources": [
         {
-          "kind": "Namespace",
-          "name": "omg-authz-broad"
+          "apiVersion": "openmeshguard.io/v1alpha1",
+          "kind": "ExceptionReference",
+          "namespace": "omg-governance-active",
+          "name": "EXC-ACTIVE@Deployment/omg-governance-active/active-api"
         }
       ],
       "resolutionChain": [
         {
           "order": 1,
           "kind": "Control",
-          "name": "MG-ENV-001",
+          "name": "MG-EXC-001",
           "field": "expression",
-          "effect": "control MG-ENV-001 expression resolved to an open finding"
+          "effect": "control MG-EXC-001 expression resolved to an open finding"
         }
       ],
-      "reasoning": "Namespace omg-authz-broad is not classified to an environment.",
+      "reasoning": "Exception input omg-governance-active/EXC-ACTIVE@Deployment/omg-governance-active/active-api is invalid and cannot except a finding.",
       "remediation": {
-        "guidance": "Configure an environment source or add the organization-approved environment label to the namespace."
+        "guidance": "Correct the exception record or remove the dangling resource annotation. Invalid exception input never changes finding status."
       }
     },
     {
-      "id": "MG-GW-005-310c4222502c",
+      "id": "MG-GW-005-f5c7e0b0ff30",
       "controlId": "MG-GW-005",
       "title": "Ambient waypoint authorization must have explicit ready enrollment",
       "severity": "high",
@@ -616,13 +666,14 @@
       "dataPlaneMode": "sidecar",
       "evidenceSources": [
         "kubernetes-api",
+        "ownership-import",
         "istio-crd"
       ],
       "resources": [
         {
           "kind": "Deployment",
-          "namespace": "omg-authz-broad",
-          "name": "authz-broad"
+          "namespace": "omg-governance-active",
+          "name": "active-api"
         }
       ],
       "resolutionChain": [
@@ -639,31 +690,116 @@
           "namespace": "istio-system",
           "field": "spec.selector",
           "effect": "selector does not match the workload; excludes policy from authorization evaluation"
-        },
-        {
-          "order": 3,
-          "kind": "AuthorizationPolicy",
-          "name": "allow-all",
-          "namespace": "omg-authz-broad",
-          "field": "spec.action",
-          "effect": "adds a structurally broad rule to the additive ALLOW union"
-        },
-        {
-          "order": 4,
-          "kind": "AuthorizationPolicy",
-          "name": "default-deny",
-          "namespace": "omg-authz-broad",
-          "field": "spec.action",
-          "effect": "adds an ALLOW policy with no rules; activates default deny for unmatched requests"
         }
       ],
-      "reasoning": "Control MG-GW-005 does not apply to omg-authz-broad/authz-broad.",
+      "reasoning": "Control MG-GW-005 does not apply to omg-governance-active/active-api.",
       "remediation": {
         "guidance": "Set istio.io/use-waypoint to a waypoint whose scope covers the target and wait for its Gateway Programmed condition to become true."
       }
     },
     {
-      "id": "MG-MTLS-005-197f7959660e",
+      "id": "MG-MTLS-001-3275180ae6ce",
+      "controlId": "MG-MTLS-001",
+      "title": "Mesh-managed workloads must resolve to strict mTLS",
+      "severity": "critical",
+      "evidenceType": "config",
+      "status": "open",
+      "confidence": "resolved",
+      "dataPlaneMode": "sidecar",
+      "evidenceSources": [
+        "kubernetes-api",
+        "ownership-import",
+        "istio-crd"
+      ],
+      "resources": [
+        {
+          "kind": "Deployment",
+          "namespace": "omg-governance-active",
+          "name": "active-api"
+        }
+      ],
+      "resolutionChain": [
+        {
+          "order": 1,
+          "kind": "MeshConfigDefault",
+          "field": "defaultPeerAuthenticationMode",
+          "effect": "defaults mesh mTLS mode to PERMISSIVE when no PeerAuthentication mode overrides it"
+        },
+        {
+          "order": 2,
+          "kind": "PeerAuthentication",
+          "name": "default",
+          "namespace": "istio-system",
+          "field": "spec.mtls.mode",
+          "effect": "sets mesh-wide mTLS mode to STRICT"
+        },
+        {
+          "order": 3,
+          "kind": "PeerAuthentication",
+          "name": "default",
+          "namespace": "omg-governance-active",
+          "field": "spec.mtls.mode",
+          "effect": "sets namespace mTLS mode to PERMISSIVE"
+        }
+      ],
+      "reasoning": "Effective mTLS for omg-governance-active/active-api resolves to permissive, not strict.",
+      "remediation": {
+        "guidance": "Apply or correct PeerAuthentication so the workload resolves to STRICT, then inspect the attached resolution chain.",
+        "suggestedYAML": "apiVersion: security.istio.io/v1\nkind: PeerAuthentication\nmetadata:\n  name: default\n  namespace: omg-governance-active\nspec:\n  mtls:\n    mode: STRICT"
+      }
+    },
+    {
+      "id": "MG-MTLS-002-2d071f52322e",
+      "controlId": "MG-MTLS-002",
+      "title": "Declared workload ports must resolve to strict mTLS",
+      "severity": "high",
+      "evidenceType": "config",
+      "status": "open",
+      "confidence": "resolved",
+      "dataPlaneMode": "sidecar",
+      "evidenceSources": [
+        "kubernetes-api",
+        "ownership-import",
+        "istio-crd"
+      ],
+      "resources": [
+        {
+          "kind": "Deployment",
+          "namespace": "omg-governance-active",
+          "name": "active-api"
+        }
+      ],
+      "resolutionChain": [
+        {
+          "order": 1,
+          "kind": "MeshConfigDefault",
+          "field": "defaultPeerAuthenticationMode",
+          "effect": "defaults mesh mTLS mode to PERMISSIVE when no PeerAuthentication mode overrides it"
+        },
+        {
+          "order": 2,
+          "kind": "PeerAuthentication",
+          "name": "default",
+          "namespace": "istio-system",
+          "field": "spec.mtls.mode",
+          "effect": "sets mesh-wide mTLS mode to STRICT"
+        },
+        {
+          "order": 3,
+          "kind": "PeerAuthentication",
+          "name": "default",
+          "namespace": "omg-governance-active",
+          "field": "spec.mtls.mode",
+          "effect": "sets namespace mTLS mode to PERMISSIVE"
+        }
+      ],
+      "reasoning": "Effective mTLS for omg-governance-active/active-api permits plaintext on one or more declared workload ports.",
+      "remediation": {
+        "guidance": "Correct workload-level port mTLS overrides so every declared, Service-bound workload port resolves to STRICT."
+      }
+    },
+    {
+      "id": "MG-MTLS-005-183f2a0336bb",
       "controlId": "MG-MTLS-005",
       "title": "Ambient workloads must have validated L4 mTLS posture",
       "severity": "high",
@@ -673,13 +809,14 @@
       "dataPlaneMode": "sidecar",
       "evidenceSources": [
         "kubernetes-api",
+        "ownership-import",
         "istio-crd"
       ],
       "resources": [
         {
           "kind": "Deployment",
-          "namespace": "omg-authz-broad",
-          "name": "authz-broad"
+          "namespace": "omg-governance-active",
+          "name": "active-api"
         }
       ],
       "resolutionChain": [
@@ -696,15 +833,23 @@
           "namespace": "istio-system",
           "field": "spec.mtls.mode",
           "effect": "sets mesh-wide mTLS mode to STRICT"
+        },
+        {
+          "order": 3,
+          "kind": "PeerAuthentication",
+          "name": "default",
+          "namespace": "omg-governance-active",
+          "field": "spec.mtls.mode",
+          "effect": "sets namespace mTLS mode to PERMISSIVE"
         }
       ],
-      "reasoning": "Control MG-MTLS-005 does not apply to omg-authz-broad/authz-broad.",
+      "reasoning": "Control MG-MTLS-005 does not apply to omg-governance-active/active-api.",
       "remediation": {
         "guidance": "Validate ztunnel coverage and apply a STRICT PeerAuthentication posture for the ambient workload, then inspect the attached resolution chain."
       }
     },
     {
-      "id": "MG-MTLS-006-d90aac3571b4",
+      "id": "MG-MTLS-006-b851d7ba5b80",
       "controlId": "MG-MTLS-006",
       "title": "Ambient workloads must have healthy ztunnel node coverage",
       "severity": "critical",
@@ -714,13 +859,14 @@
       "dataPlaneMode": "sidecar",
       "evidenceSources": [
         "kubernetes-api",
+        "ownership-import",
         "istio-crd"
       ],
       "resources": [
         {
           "kind": "Deployment",
-          "namespace": "omg-authz-broad",
-          "name": "authz-broad"
+          "namespace": "omg-governance-active",
+          "name": "active-api"
         }
       ],
       "resolutionChain": [
@@ -737,44 +883,19 @@
           "namespace": "istio-system",
           "field": "spec.mtls.mode",
           "effect": "sets mesh-wide mTLS mode to STRICT"
+        },
+        {
+          "order": 3,
+          "kind": "PeerAuthentication",
+          "name": "default",
+          "namespace": "omg-governance-active",
+          "field": "spec.mtls.mode",
+          "effect": "sets namespace mTLS mode to PERMISSIVE"
         }
       ],
-      "reasoning": "Control MG-MTLS-006 does not apply to omg-authz-broad/authz-broad.",
+      "reasoning": "Control MG-MTLS-006 does not apply to omg-governance-active/active-api.",
       "remediation": {
         "guidance": "Restore a Ready ztunnel DaemonSet pod on every node that schedules ambient workloads."
-      }
-    },
-    {
-      "id": "MG-OWN-001-3d7eae68d196",
-      "controlId": "MG-OWN-001",
-      "title": "Mesh workloads must map to an application owner",
-      "severity": "medium",
-      "evidenceType": "context",
-      "status": "open",
-      "confidence": "resolved",
-      "dataPlaneMode": "sidecar",
-      "evidenceSources": [
-        "kubernetes-api"
-      ],
-      "resources": [
-        {
-          "kind": "Deployment",
-          "namespace": "omg-authz-broad",
-          "name": "authz-broad"
-        }
-      ],
-      "resolutionChain": [
-        {
-          "order": 1,
-          "kind": "Control",
-          "name": "MG-OWN-001",
-          "field": "expression",
-          "effect": "control MG-OWN-001 expression resolved to an open finding"
-        }
-      ],
-      "reasoning": "Workload omg-authz-broad/authz-broad does not resolve to an application owner.",
-      "remediation": {
-        "guidance": "Add an organization-approved owner label or map the workload's application ID through the scan config or ownership import."
       }
     }
   ],
@@ -783,9 +904,9 @@
     "categories": [
       {
         "category": "authz",
-        "grade": "D",
-        "passRate": 0.6,
-        "evaluated": 5
+        "grade": "F",
+        "passRate": 0.42857142857142855,
+        "evaluated": 7
       },
       {
         "category": "exposure",
@@ -794,15 +915,15 @@
       },
       {
         "category": "governance",
-        "grade": "F",
-        "passRate": 0,
-        "evaluated": 2
+        "grade": "B",
+        "passRate": 0.8333333333333334,
+        "evaluated": 6
       },
       {
         "category": "mtls",
-        "grade": "A",
-        "passRate": 1,
-        "evaluated": 3
+        "grade": "F",
+        "passRate": 0.5,
+        "evaluated": 4
       }
     ]
   }

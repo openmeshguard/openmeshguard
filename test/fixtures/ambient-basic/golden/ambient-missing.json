@@ -7,12 +7,17 @@
     "controlPacks": [
       {
         "name": "builtin-authz",
-        "version": "0.2.0",
+        "version": "0.3.0",
+        "source": "builtin"
+      },
+      {
+        "name": "builtin-context",
+        "version": "0.3.0",
         "source": "builtin"
       },
       {
         "name": "builtin-mtls",
-        "version": "0.2.0",
+        "version": "0.3.0",
         "source": "builtin"
       }
     ]
@@ -29,8 +34,14 @@
       "kubernetesAPI": true,
       "prometheus": {
         "enabled": false
+      },
+      "contextFiles": {
+        "scanConfig": false,
+        "ownershipImport": false,
+        "exceptions": false
       }
-    }
+    },
+    "environmentInference": false
   },
   "permissionSummary": [
     {
@@ -40,7 +51,26 @@
         "list"
       ],
       "granted": true,
-      "impact": "namespace labels and environment/data-plane inference may be unavailable"
+      "impact": "namespace labels and environment/data-plane inference may be unavailable",
+      "affectedControls": [
+        "MG-AUTHZ-001",
+        "MG-AUTHZ-002",
+        "MG-AUTHZ-003",
+        "MG-AUTHZ-004",
+        "MG-AUTHZ-005",
+        "MG-AUTHZ-006",
+        "MG-AUTHZ-007",
+        "MG-ENV-001",
+        "MG-GW-005",
+        "MG-MTLS-001",
+        "MG-MTLS-002",
+        "MG-MTLS-003",
+        "MG-MTLS-005",
+        "MG-MTLS-006",
+        "MG-MTLS-007",
+        "MG-OWN-001",
+        "MG-OWN-002"
+      ]
     },
     {
       "apiGroup": "",
@@ -68,13 +98,16 @@
         "MG-AUTHZ-005",
         "MG-AUTHZ-006",
         "MG-AUTHZ-007",
+        "MG-ENV-001",
         "MG-GW-005",
         "MG-MTLS-001",
         "MG-MTLS-002",
         "MG-MTLS-003",
         "MG-MTLS-005",
         "MG-MTLS-006",
-        "MG-MTLS-007"
+        "MG-MTLS-007",
+        "MG-OWN-001",
+        "MG-OWN-002"
       ]
     },
     {
@@ -120,7 +153,9 @@
         "MG-MTLS-003",
         "MG-MTLS-005",
         "MG-MTLS-006",
-        "MG-MTLS-007"
+        "MG-MTLS-007",
+        "MG-OWN-001",
+        "MG-OWN-002"
       ]
     },
     {
@@ -145,7 +180,9 @@
         "MG-MTLS-003",
         "MG-MTLS-005",
         "MG-MTLS-006",
-        "MG-MTLS-007"
+        "MG-MTLS-007",
+        "MG-OWN-001",
+        "MG-OWN-002"
       ]
     },
     {
@@ -170,7 +207,9 @@
         "MG-MTLS-003",
         "MG-MTLS-005",
         "MG-MTLS-006",
-        "MG-MTLS-007"
+        "MG-MTLS-007",
+        "MG-OWN-001",
+        "MG-OWN-002"
       ]
     },
     {
@@ -195,7 +234,9 @@
         "MG-MTLS-003",
         "MG-MTLS-005",
         "MG-MTLS-006",
-        "MG-MTLS-007"
+        "MG-MTLS-007",
+        "MG-OWN-001",
+        "MG-OWN-002"
       ]
     },
     {
@@ -331,6 +372,13 @@
     "multiCluster": {
       "participationDetected": false,
       "evaluated": false
+    },
+    "classification": {
+      "namespacesClassified": 0,
+      "namespacesUnclassified": 1,
+      "byEnvironment": {
+        "unclassified": 1
+      }
     }
   },
   "workloadPostures": [
@@ -340,6 +388,10 @@
         "name": "ambient-missing",
         "kind": "Deployment"
       },
+      "environment": "unclassified",
+      "environmentConfidence": "resolved",
+      "owner": null,
+      "appId": null,
       "dataPlaneMode": "ambient",
       "mtls": {
         "effective": "strict",
@@ -418,63 +470,6 @@
     }
   ],
   "findings": [
-    {
-      "id": "MG-AUTHZ-002-b50b807591af",
-      "controlId": "MG-AUTHZ-002",
-      "title": "Workloads should resolve to default deny with explicit allow",
-      "severity": "high",
-      "evidenceType": "config",
-      "status": "open",
-      "confidence": "resolved",
-      "dataPlaneMode": "ambient",
-      "evidenceSources": [
-        "kubernetes-api",
-        "istio-crd"
-      ],
-      "resources": [
-        {
-          "kind": "Deployment",
-          "namespace": "omg-ambient-missing",
-          "name": "ambient-missing"
-        }
-      ],
-      "resolutionChain": [
-        {
-          "order": 1,
-          "kind": "AuthorizationDefault",
-          "field": "implicitEnablement",
-          "effect": "establishes Istio's implicit allow when no applicable ALLOW policy exists"
-        },
-        {
-          "order": 2,
-          "kind": "AuthorizationPolicy",
-          "name": "authz-root-default-deny",
-          "namespace": "istio-system",
-          "field": "spec.selector",
-          "effect": "selector does not match the workload; excludes policy from authorization evaluation"
-        },
-        {
-          "order": 3,
-          "kind": "AuthorizationPolicy",
-          "name": "allow-api",
-          "namespace": "omg-ambient-missing",
-          "field": "spec.targetRefs[\"Service/api\"]",
-          "effect": "adds explicit rules to the additive ALLOW union"
-        },
-        {
-          "order": 4,
-          "kind": "Waypoint",
-          "name": "ambient-missing-waypoint",
-          "namespace": "omg-ambient-missing",
-          "field": "status.conditions[Programmed]",
-          "effect": "selected namespace waypoint is not ready; waypoint-attached policy omg-ambient-missing/allow-api is not enforced"
-        }
-      ],
-      "reasoning": "Authorization for omg-ambient-missing/ambient-missing resolves to waypoint-policy-unenforced, not default deny with explicit allow.",
-      "remediation": {
-        "guidance": "Establish an empty ALLOW policy for default deny and add narrowly scoped ALLOW rules for required traffic."
-      }
-    },
     {
       "id": "MG-AUTHZ-006-74f154518c4e",
       "controlId": "MG-AUTHZ-006",
@@ -590,6 +585,37 @@
       }
     },
     {
+      "id": "MG-ENV-001-1a5fbfb620ce",
+      "controlId": "MG-ENV-001",
+      "title": "Mesh namespaces must be classified to an environment",
+      "severity": "medium",
+      "evidenceType": "context",
+      "status": "open",
+      "confidence": "resolved",
+      "evidenceSources": [
+        "kubernetes-api"
+      ],
+      "resources": [
+        {
+          "kind": "Namespace",
+          "name": "omg-ambient-missing"
+        }
+      ],
+      "resolutionChain": [
+        {
+          "order": 1,
+          "kind": "Control",
+          "name": "MG-ENV-001",
+          "field": "expression",
+          "effect": "control MG-ENV-001 expression resolved to an open finding"
+        }
+      ],
+      "reasoning": "Namespace omg-ambient-missing is not classified to an environment.",
+      "remediation": {
+        "guidance": "Configure an environment source or add the organization-approved environment label to the namespace."
+      }
+    },
+    {
       "id": "MG-GW-005-a7bafb1836ac",
       "controlId": "MG-GW-005",
       "title": "Ambient waypoint authorization must have explicit ready enrollment",
@@ -645,6 +671,39 @@
       "remediation": {
         "guidance": "Set istio.io/use-waypoint to a waypoint whose scope covers the target and wait for its Gateway Programmed condition to become true."
       }
+    },
+    {
+      "id": "MG-OWN-001-f0cab938ac9d",
+      "controlId": "MG-OWN-001",
+      "title": "Mesh workloads must map to an application owner",
+      "severity": "medium",
+      "evidenceType": "context",
+      "status": "open",
+      "confidence": "resolved",
+      "dataPlaneMode": "ambient",
+      "evidenceSources": [
+        "kubernetes-api"
+      ],
+      "resources": [
+        {
+          "kind": "Deployment",
+          "namespace": "omg-ambient-missing",
+          "name": "ambient-missing"
+        }
+      ],
+      "resolutionChain": [
+        {
+          "order": 1,
+          "kind": "Control",
+          "name": "MG-OWN-001",
+          "field": "expression",
+          "effect": "control MG-OWN-001 expression resolved to an open finding"
+        }
+      ],
+      "reasoning": "Workload omg-ambient-missing/ambient-missing does not resolve to an application owner.",
+      "remediation": {
+        "guidance": "Add an organization-approved owner label or map the workload's application ID through the scan config or ownership import."
+      }
     }
   ],
   "scores": {
@@ -652,9 +711,9 @@
     "categories": [
       {
         "category": "authz",
-        "grade": "F",
-        "passRate": 0.5714285714285714,
-        "evaluated": 7
+        "grade": "D",
+        "passRate": 0.6,
+        "evaluated": 5
       },
       {
         "category": "exposure",
@@ -663,10 +722,16 @@
         "evaluated": 1
       },
       {
+        "category": "governance",
+        "grade": "F",
+        "passRate": 0,
+        "evaluated": 2
+      },
+      {
         "category": "mtls",
         "grade": "A",
         "passRate": 1,
-        "evaluated": 6
+        "evaluated": 5
       }
     ]
   }

@@ -1,0 +1,12 @@
+apiVersion: openmeshguard.io/v1alpha1
+kind: Exception
+metadata:
+  name: EXC-ACTIVE
+spec:
+  controlIds:
+    - MG-MTLS-001
+  owner: team-payments
+  approver: security@example.com
+  justification: Approved migration window from the enterprise exception system
+  ticket: https://tickets.example.com/SEC-100
+  expiresAt: 2099-01-01T00:00:00Z

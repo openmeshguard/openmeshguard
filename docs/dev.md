@@ -30,8 +30,8 @@ make kind-up e2e kind-down
 
 `kind-up` refuses to reuse an existing `openmeshguard-e2e` cluster. `e2e`
 always rebuilds the configured `BINARY`, passes its absolute path into the
-harness, resets the fixture namespaces, runs 17 small golden scans plus one
-all-namespaces ClusterRole scan, schema-validates all 18 reports, and
+harness, resets the fixture namespaces, runs 21 small golden scans plus one
+all-namespaces ClusterRole scan, schema-validates all 22 reports, and
 executes the RBAC/audit proofs. Kind writes its administrator credential only
 to protected `.e2e/admin.kubeconfig`; it never changes the user's default
 kubeconfig. `kind-down` deletes the disposable cluster and that credential.
@@ -79,7 +79,11 @@ exclusion through the same `cases.tsv`-driven golden path. Ambient fixtures
 prove namespace and Pod enrollment, ready ztunnel node coverage, ready,
 missing, and unavailable waypoint evidence, and a mixed ambient/sidecar
 namespace. Injection-disabled workloads now resolve conclusively outside both
-Istio data planes.
+Istio data planes. Governance fixtures prove organization-configured
+environment and application-ID labels, one imported application owner across
+multiple namespaces, explicit unclassified/unowned coverage, and active versus
+expired annotation-referenced exceptions without removing the original
+finding.
 
 ## RBAC identities and proof
 

@@ -42,6 +42,7 @@ func WriteScanJSON(w io.Writer, input ScanInput) error {
 	if err != nil {
 		return fmt.Errorf("evaluate built-in controls: %w", err)
 	}
+	evaluated.Context = defaultReportContext(input)
 	return WriteScanJSONWithEvaluation(w, input, packs, evaluated)
 }
 
@@ -83,11 +84,17 @@ func buildReport(input ScanInput, packs []engine.Pack, evaluated engine.Result) 
 				Prometheus: prometheus{
 					Enabled: false,
 				},
+				ContextFiles: contextFiles{
+					ScanConfig:      evaluated.Context.ScanConfig,
+					OwnershipImport: evaluated.Context.OwnershipImport,
+					Exceptions:      evaluated.Context.Exceptions,
+				},
 			},
+			EnvironmentInference: evaluated.Context.EnvironmentInference,
 		},
 		PermissionSummary: permissionSummary(input.PermissionSummary),
-		Inventory:         inventory(input.Inventory),
-		WorkloadPostures:  workloadPostures(input.WorkloadPostures),
+		Inventory:         inventory(input.Inventory, evaluated.Context.Classification),
+		WorkloadPostures:  workloadPostures(input.WorkloadPostures, evaluated.Context.Workloads),
 		Findings:          findings(evaluated.Findings),
 		Scores: scores{
 			Overall:    nil,
@@ -98,16 +105,32 @@ func buildReport(input ScanInput, packs []engine.Pack, evaluated engine.Result) 
 
 func defaultEngineInput(input ScanInput) engine.Input {
 	workloads := make([]engine.WorkloadInput, 0, len(input.WorkloadPostures))
+	namespaces := map[string]engine.NamespaceInput{}
 	for _, posture := range input.WorkloadPostures {
+		namespace := engine.NamespaceInput{
+			Name:             posture.Ref.Namespace,
+			Environment:      "unclassified",
+			EnvironmentKnown: true,
+			MeshEnrollment:   defaultMeshEnrollment(posture.Mode),
+		}
+		namespaces[namespace.Name] = namespace
 		workloads = append(workloads, engine.WorkloadInput{
-			Posture: posture,
-			Namespace: engine.NamespaceInput{
-				Name: posture.Ref.Namespace,
-			},
+			Posture:          posture,
+			Namespace:        namespace,
+			Environment:      "unclassified",
+			EnvironmentKnown: true,
+			OwnerKnown:       true,
+			AppIDKnown:       true,
 		})
 	}
+	namespaceInputs := make([]engine.NamespaceInput, 0, len(namespaces))
+	for _, namespace := range namespaces {
+		namespaceInputs = append(namespaceInputs, namespace)
+	}
 	return engine.Input{
-		Workloads: workloads,
+		Workloads:                workloads,
+		Namespaces:               namespaceInputs,
+		NamespaceTargetsComplete: true,
 		Inventory: map[string]any{
 			"counts":    input.Inventory.Counts,
 			"dataPlane": inventoryDataPlaneValue(input.Inventory),
@@ -118,6 +141,40 @@ func defaultEngineInput(input ScanInput) engine.Input {
 				"meshNetworks":          input.Inventory.MultiCluster.MeshNetworks,
 			},
 		},
+	}
+}
+
+func defaultReportContext(input ScanInput) engine.ReportContext {
+	seenNamespaces := map[string]struct{}{}
+	workloads := make([]engine.WorkloadContext, 0, len(input.WorkloadPostures))
+	for _, posture := range input.WorkloadPostures {
+		seenNamespaces[posture.Ref.Namespace] = struct{}{}
+		workloads = append(workloads, engine.WorkloadContext{
+			Ref:                   posture.Ref,
+			Environment:           "unclassified",
+			EnvironmentConfidence: "resolved",
+			EnvironmentKnown:      true,
+			OwnerKnown:            true,
+			AppIDKnown:            true,
+		})
+	}
+	return engine.ReportContext{
+		Classification: engine.ClassificationSummary{
+			NamespacesUnclassified: len(seenNamespaces),
+			ByEnvironment:          map[string]int{"unclassified": len(seenNamespaces)},
+		},
+		Workloads: workloads,
+	}
+}
+
+func defaultMeshEnrollment(mode resolver.DataPlaneMode) string {
+	switch mode {
+	case resolver.ModeNotApplicable:
+		return "not-enrolled"
+	case resolver.ModeSidecar, resolver.ModeAmbient, resolver.ModeMixed:
+		return "enrolled"
+	default:
+		return "unknown"
 	}
 }
 
@@ -144,14 +201,29 @@ func permissionSummary(permissions []collect.Permission) []permission {
 	return out
 }
 
-func workloadPostures(workloads []resolver.WorkloadResult) []resolver.WorkloadResult {
-	if workloads == nil {
-		return []resolver.WorkloadResult{}
+func workloadPostures(workloads []resolver.WorkloadResult, contexts []engine.WorkloadContext) []canonicalWorkloadPosture {
+	byRef := make(map[string]engine.WorkloadContext, len(contexts))
+	for _, workloadContext := range contexts {
+		byRef[workloadRefKey(workloadContext.Ref)] = workloadContext
 	}
-	return workloads
+	out := make([]canonicalWorkloadPosture, 0, len(workloads))
+	for _, workload := range workloads {
+		workloadContext := byRef[workloadRefKey(workload.Ref)]
+		out = append(out, canonicalWorkloadPosture{
+			Workload:              workload.Ref,
+			Environment:           optionalContextValue(workloadContext.Environment, workloadContext.EnvironmentKnown),
+			EnvironmentConfidence: optionalContextValue(workloadContext.EnvironmentConfidence, workloadContext.EnvironmentConfidence != ""),
+			Owner:                 optionalNonEmptyContextValue(workloadContext.Owner, workloadContext.OwnerKnown),
+			AppID:                 optionalNonEmptyContextValue(workloadContext.AppID, workloadContext.AppIDKnown),
+			DataPlaneMode:         workload.Mode,
+			MTLS:                  workload.MTLS,
+			Authorization:         workload.Authz,
+		})
+	}
+	return out
 }
 
-func inventory(input normalize.Inventory) inventorySummary {
+func inventory(input normalize.Inventory, context engine.ClassificationSummary) inventorySummary {
 	mode := string(input.DataPlaneMode)
 	if mode == string(resolver.ModeNotApplicable) || mode == "" {
 		mode = string(resolver.ModeUnknown)
@@ -172,6 +244,11 @@ func inventory(input normalize.Inventory) inventorySummary {
 			Evaluated:             false,
 			Signals:               input.MultiCluster.Signals,
 			MeshNetworks:          input.MultiCluster.MeshNetworks,
+		},
+		Classification: &classification{
+			NamespacesClassified:   context.NamespacesClassified,
+			NamespacesUnclassified: context.NamespacesUnclassified,
+			ByEnvironment:          nonNilStringIntMap(context.ByEnvironment),
 		},
 	}
 }
@@ -243,10 +320,51 @@ func findings(input []engine.Finding) []finding {
 			ResolutionChain: append([]resolver.Step(nil), item.ResolutionChain...),
 			Reasoning:       item.Reasoning,
 			Remediation:     findingRemediation,
+			Exception:       findingException(item.Exception),
 			UnknownReason:   item.UnknownReason,
 		})
 	}
 	return out
+}
+
+func findingException(input *engine.ExceptionEvidence) *exceptionEvidence {
+	if input == nil {
+		return nil
+	}
+	return &exceptionEvidence{
+		ID:        input.ID,
+		Expired:   input.Expired,
+		ExpiresAt: input.ExpiresAt.UTC().Format(time.RFC3339),
+		Approver:  input.Approver,
+		Ticket:    input.Ticket,
+	}
+}
+
+func workloadRefKey(ref resolver.WorkloadRef) string {
+	return ref.Cluster + "/" + ref.Namespace + "/" + ref.Kind + "/" + ref.Name
+}
+
+func optionalContextValue(value string, known bool) *string {
+	if !known {
+		return nil
+	}
+	copied := value
+	return &copied
+}
+
+func optionalNonEmptyContextValue(value string, known bool) *string {
+	if !known || value == "" {
+		return nil
+	}
+	copied := value
+	return &copied
+}
+
+func nonNilStringIntMap(input map[string]int) map[string]int {
+	if input == nil {
+		return map[string]int{}
+	}
+	return input
 }
 
 func scoreCategories(input []engine.CategoryScore) []scoreCategory {
@@ -264,15 +382,15 @@ func scoreCategories(input []engine.CategoryScore) []scoreCategory {
 }
 
 type report struct {
-	SchemaVersion     string                    `json:"schemaVersion"`
-	GeneratedAt       string                    `json:"generatedAt"`
-	Scanner           scanner                   `json:"scanner"`
-	Scan              scan                      `json:"scan"`
-	PermissionSummary []permission              `json:"permissionSummary"`
-	Inventory         inventorySummary          `json:"inventory"`
-	WorkloadPostures  []resolver.WorkloadResult `json:"workloadPostures"`
-	Findings          []finding                 `json:"findings"`
-	Scores            scores                    `json:"scores"`
+	SchemaVersion     string                     `json:"schemaVersion"`
+	GeneratedAt       string                     `json:"generatedAt"`
+	Scanner           scanner                    `json:"scanner"`
+	Scan              scan                       `json:"scan"`
+	PermissionSummary []permission               `json:"permissionSummary"`
+	Inventory         inventorySummary           `json:"inventory"`
+	WorkloadPostures  []canonicalWorkloadPosture `json:"workloadPostures"`
+	Findings          []finding                  `json:"findings"`
+	Scores            scores                     `json:"scores"`
 }
 
 type scanner struct {
@@ -288,9 +406,10 @@ type controlPack struct {
 }
 
 type scan struct {
-	ClusterContext string      `json:"clusterContext"`
-	Scope          scope       `json:"scope"`
-	DataSources    dataSources `json:"dataSources"`
+	ClusterContext       string      `json:"clusterContext"`
+	Scope                scope       `json:"scope"`
+	DataSources          dataSources `json:"dataSources"`
+	EnvironmentInference bool        `json:"environmentInference"`
 }
 
 type scope struct {
@@ -299,12 +418,19 @@ type scope struct {
 }
 
 type dataSources struct {
-	KubernetesAPI bool       `json:"kubernetesAPI"`
-	Prometheus    prometheus `json:"prometheus"`
+	KubernetesAPI bool         `json:"kubernetesAPI"`
+	Prometheus    prometheus   `json:"prometheus"`
+	ContextFiles  contextFiles `json:"contextFiles"`
 }
 
 type prometheus struct {
 	Enabled bool `json:"enabled"`
+}
+
+type contextFiles struct {
+	ScanConfig      bool `json:"scanConfig"`
+	OwnershipImport bool `json:"ownershipImport"`
+	Exceptions      bool `json:"exceptions"`
 }
 
 type permission struct {
@@ -318,9 +444,16 @@ type permission struct {
 }
 
 type inventorySummary struct {
-	Counts       map[string]int `json:"counts"`
-	DataPlane    dataPlane      `json:"dataPlane"`
-	MultiCluster multiCluster   `json:"multiCluster"`
+	Counts         map[string]int  `json:"counts"`
+	DataPlane      dataPlane       `json:"dataPlane"`
+	MultiCluster   multiCluster    `json:"multiCluster"`
+	Classification *classification `json:"classification,omitempty"`
+}
+
+type classification struct {
+	NamespacesClassified   int            `json:"namespacesClassified"`
+	NamespacesUnclassified int            `json:"namespacesUnclassified"`
+	ByEnvironment          map[string]int `json:"byEnvironment"`
 }
 
 type dataPlane struct {
@@ -343,20 +476,40 @@ type multiCluster struct {
 }
 
 type finding struct {
-	ID              string          `json:"id"`
-	ControlID       string          `json:"controlId"`
-	Title           string          `json:"title,omitempty"`
-	Severity        string          `json:"severity"`
-	EvidenceType    string          `json:"evidenceType"`
-	Status          string          `json:"status"`
-	Confidence      string          `json:"confidence"`
-	DataPlaneMode   string          `json:"dataPlaneMode,omitempty"`
-	EvidenceSources []string        `json:"evidenceSources,omitempty"`
-	Resources       []resourceRef   `json:"resources"`
-	ResolutionChain []resolver.Step `json:"resolutionChain,omitempty"`
-	Reasoning       string          `json:"reasoning"`
-	Remediation     *remediation    `json:"remediation,omitempty"`
-	UnknownReason   string          `json:"unknownReason,omitempty"`
+	ID              string             `json:"id"`
+	ControlID       string             `json:"controlId"`
+	Title           string             `json:"title,omitempty"`
+	Severity        string             `json:"severity"`
+	EvidenceType    string             `json:"evidenceType"`
+	Status          string             `json:"status"`
+	Confidence      string             `json:"confidence"`
+	DataPlaneMode   string             `json:"dataPlaneMode,omitempty"`
+	EvidenceSources []string           `json:"evidenceSources,omitempty"`
+	Resources       []resourceRef      `json:"resources"`
+	ResolutionChain []resolver.Step    `json:"resolutionChain,omitempty"`
+	Reasoning       string             `json:"reasoning"`
+	Remediation     *remediation       `json:"remediation,omitempty"`
+	Exception       *exceptionEvidence `json:"exception,omitempty"`
+	UnknownReason   string             `json:"unknownReason,omitempty"`
+}
+
+type exceptionEvidence struct {
+	ID        string `json:"id"`
+	Expired   bool   `json:"expired"`
+	ExpiresAt string `json:"expiresAt"`
+	Approver  string `json:"approver"`
+	Ticket    string `json:"ticket"`
+}
+
+type canonicalWorkloadPosture struct {
+	Workload              resolver.WorkloadRef   `json:"workload"`
+	Environment           *string                `json:"environment"`
+	EnvironmentConfidence *string                `json:"environmentConfidence"`
+	Owner                 *string                `json:"owner"`
+	AppID                 *string                `json:"appId"`
+	DataPlaneMode         resolver.DataPlaneMode `json:"dataPlaneMode"`
+	MTLS                  resolver.MTLSResult    `json:"mtls"`
+	Authorization         resolver.AuthzResult   `json:"authorization"`
 }
 
 type remediation struct {

@@ -18,6 +18,16 @@ assert_golden_case_bijection() {
 			basename "$report_guard_golden" .json
 		done | LC_ALL=C sort
 	)
+	report_guard_update=$(printenv UPDATE_GOLDEN 2>/dev/null || true)
+	if [ "$report_guard_update" = 1 ]; then
+		for report_guard_name in $report_guard_actual; do
+			if ! printf '%s\n' "$report_guard_declared" | grep -Fqx "$report_guard_name"; then
+				echo "golden update found undeclared golden $report_guard_name" >&2
+				return 1
+			fi
+		done
+		return 0
+	fi
 	if [ "$report_guard_declared" != "$report_guard_actual" ]; then
 		echo "fixture cases and golden files are not an exact bijection" >&2
 		echo "declared:" >&2

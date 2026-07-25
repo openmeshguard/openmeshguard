@@ -1,0 +1,12 @@
+apiVersion: openmeshguard.io/v1alpha1
+kind: Exception
+metadata:
+  name: EXC-EXPIRED
+spec:
+  controlIds:
+    - MG-MTLS-001
+  owner: team-payments
+  approver: security@example.com
+  justification: Historical migration window from the enterprise exception system
+  ticket: https://tickets.example.com/SEC-101
+  expiresAt: 2020-01-01T00:00:00Z

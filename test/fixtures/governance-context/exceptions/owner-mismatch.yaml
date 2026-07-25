@@ -1,0 +1,12 @@
+apiVersion: openmeshguard.io/v1alpha1
+kind: Exception
+metadata:
+  name: EXC-ACTIVE
+spec:
+  controlIds:
+    - MG-MTLS-001
+  owner: team-other
+  approver: security@example.com
+  justification: Exception approved for a different workload owner
+  ticket: https://tickets.example.com/SEC-102
+  expiresAt: 2099-01-01T00:00:00Z

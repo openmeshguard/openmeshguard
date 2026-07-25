@@ -9,12 +9,22 @@ trap 'rm -rf "$TEST_ROOT"' EXIT HUP INT TERM
 . "$TEST_SCRIPT_DIR/report-assertions.sh"
 
 fixtures="$TEST_SCRIPT_DIR/../fixtures/sidecar-basic"
+governance_fixtures="$TEST_SCRIPT_DIR/../fixtures/governance-context"
 strict_expected=$(awk -F '\t' '$1 == "strict" {print $5}' "$fixtures/cases.tsv")
 permissive_expected=$(awk -F '\t' '$1 == "permissive" {print $5}' "$fixtures/cases.tsv")
+active_exception_expected=$(awk -F '\t' '$1 == "governance-active-exception" {print $5}' "$governance_fixtures/cases.tsv")
+expired_exception_expected=$(awk -F '\t' '$1 == "governance-expired-exception" {print $5}' "$governance_fixtures/cases.tsv")
 
 assert_golden_case_bijection "$fixtures/cases.tsv" "$fixtures/golden" true
+assert_golden_case_bijection "$governance_fixtures/cases.tsv" "$governance_fixtures/golden"
 assert_report_update_guard strict "$fixtures/golden/strict.json" "$strict_expected"
 assert_report_update_guard permissive "$fixtures/golden/permissive.json" "$permissive_expected"
+assert_report_update_guard governance-active-exception \
+	"$governance_fixtures/golden/governance-active-exception.json" \
+	"$active_exception_expected"
+assert_report_update_guard governance-expired-exception \
+	"$governance_fixtures/golden/governance-expired-exception.json" \
+	"$expired_exception_expected"
 degraded="$fixtures/golden/namespace-role-degraded.json"
 degraded_expected=$(jq -r '
 	[.findings[] | "\(.controlId)=\(.status)"] | sort | join(",")
@@ -37,11 +47,35 @@ if assert_golden_case_bijection "$TEST_ROOT/bijection/cases.tsv" "$TEST_ROOT/bij
 	echo "golden bijection accepted a missing golden" >&2
 	exit 1
 fi
+(
+	export UPDATE_GOLDEN=1
+	assert_golden_case_bijection "$TEST_ROOT/bijection/cases.tsv" "$TEST_ROOT/bijection/golden" true
+)
 
-jq 'del(.findings[] | select(.controlId == "MG-MTLS-001"))' \
+jq 'del(.findings[] | select(.controlId == "MG-MTLS-002"))' \
 	"$fixtures/golden/permissive.json" >"$TEST_ROOT/missing-finding.json"
 if assert_report_update_guard permissive "$TEST_ROOT/missing-finding.json" "$permissive_expected" 2>/dev/null; then
 	echo "report guard accepted a missing expected finding" >&2
+	exit 1
+fi
+
+jq 'del(.findings[] | select(.controlId == "MG-MTLS-001"))' \
+	"$governance_fixtures/golden/governance-active-exception.json" \
+	>"$TEST_ROOT/missing-excepted-finding.json"
+if assert_report_update_guard governance-active-exception \
+	"$TEST_ROOT/missing-excepted-finding.json" "$active_exception_expected" 2>/dev/null
+then
+	echo "report guard accepted removal of an excepted finding" >&2
+	exit 1
+fi
+
+jq 'del(.findings[] | select(.controlId == "MG-MTLS-001"))' \
+	"$governance_fixtures/golden/governance-expired-exception.json" \
+	>"$TEST_ROOT/missing-restored-finding.json"
+if assert_report_update_guard governance-expired-exception \
+	"$TEST_ROOT/missing-restored-finding.json" "$expired_exception_expected" 2>/dev/null
+then
+	echo "report guard accepted removal of an expired-restored finding" >&2
 	exit 1
 fi
 

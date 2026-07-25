@@ -7,12 +7,17 @@
     "controlPacks": [
       {
         "name": "builtin-authz",
-        "version": "0.2.0",
+        "version": "0.3.0",
+        "source": "builtin"
+      },
+      {
+        "name": "builtin-context",
+        "version": "0.3.0",
         "source": "builtin"
       },
       {
         "name": "builtin-mtls",
-        "version": "0.2.0",
+        "version": "0.3.0",
         "source": "builtin"
       }
     ]
@@ -29,8 +34,14 @@
       "kubernetesAPI": true,
       "prometheus": {
         "enabled": false
+      },
+      "contextFiles": {
+        "scanConfig": false,
+        "ownershipImport": false,
+        "exceptions": false
       }
-    }
+    },
+    "environmentInference": false
   },
   "permissionSummary": [
     {
@@ -40,7 +51,26 @@
         "list"
       ],
       "granted": false,
-      "impact": "namespace labels and environment/data-plane inference may be unavailable; denied scope(s): cluster"
+      "impact": "namespace labels and environment/data-plane inference may be unavailable; denied scope(s): cluster",
+      "affectedControls": [
+        "MG-AUTHZ-001",
+        "MG-AUTHZ-002",
+        "MG-AUTHZ-003",
+        "MG-AUTHZ-004",
+        "MG-AUTHZ-005",
+        "MG-AUTHZ-006",
+        "MG-AUTHZ-007",
+        "MG-ENV-001",
+        "MG-GW-005",
+        "MG-MTLS-001",
+        "MG-MTLS-002",
+        "MG-MTLS-003",
+        "MG-MTLS-005",
+        "MG-MTLS-006",
+        "MG-MTLS-007",
+        "MG-OWN-001",
+        "MG-OWN-002"
+      ]
     },
     {
       "apiGroup": "",
@@ -68,13 +98,16 @@
         "MG-AUTHZ-005",
         "MG-AUTHZ-006",
         "MG-AUTHZ-007",
+        "MG-ENV-001",
         "MG-GW-005",
         "MG-MTLS-001",
         "MG-MTLS-002",
         "MG-MTLS-003",
         "MG-MTLS-005",
         "MG-MTLS-006",
-        "MG-MTLS-007"
+        "MG-MTLS-007",
+        "MG-OWN-001",
+        "MG-OWN-002"
       ]
     },
     {
@@ -120,7 +153,9 @@
         "MG-MTLS-003",
         "MG-MTLS-005",
         "MG-MTLS-006",
-        "MG-MTLS-007"
+        "MG-MTLS-007",
+        "MG-OWN-001",
+        "MG-OWN-002"
       ]
     },
     {
@@ -145,7 +180,9 @@
         "MG-MTLS-003",
         "MG-MTLS-005",
         "MG-MTLS-006",
-        "MG-MTLS-007"
+        "MG-MTLS-007",
+        "MG-OWN-001",
+        "MG-OWN-002"
       ]
     },
     {
@@ -170,7 +207,9 @@
         "MG-MTLS-003",
         "MG-MTLS-005",
         "MG-MTLS-006",
-        "MG-MTLS-007"
+        "MG-MTLS-007",
+        "MG-OWN-001",
+        "MG-OWN-002"
       ]
     },
     {
@@ -195,7 +234,9 @@
         "MG-MTLS-003",
         "MG-MTLS-005",
         "MG-MTLS-006",
-        "MG-MTLS-007"
+        "MG-MTLS-007",
+        "MG-OWN-001",
+        "MG-OWN-002"
       ]
     },
     {
@@ -331,6 +372,13 @@
     "multiCluster": {
       "participationDetected": false,
       "evaluated": false
+    },
+    "classification": {
+      "namespacesClassified": 0,
+      "namespacesUnclassified": 1,
+      "byEnvironment": {
+        "unavailable": 1
+      }
     }
   },
   "workloadPostures": [
@@ -340,6 +388,10 @@
         "name": "ambient-unavailable",
         "kind": "Deployment"
       },
+      "environment": null,
+      "environmentConfidence": "unavailable",
+      "owner": null,
+      "appId": null,
       "dataPlaneMode": "ambient",
       "mtls": {
         "effective": "strict",
@@ -416,122 +468,6 @@
     }
   ],
   "findings": [
-    {
-      "id": "MG-AUTHZ-001-27db97456536",
-      "controlId": "MG-AUTHZ-001",
-      "title": "Mesh-managed workloads must have resolved authorization coverage",
-      "severity": "high",
-      "evidenceType": "config",
-      "status": "unknown",
-      "confidence": "unavailable",
-      "dataPlaneMode": "ambient",
-      "evidenceSources": [
-        "kubernetes-api",
-        "istio-crd"
-      ],
-      "resources": [
-        {
-          "kind": "Deployment",
-          "namespace": "omg-ambient-unavailable",
-          "name": "ambient-unavailable"
-        }
-      ],
-      "resolutionChain": [
-        {
-          "order": 1,
-          "kind": "AuthorizationDefault",
-          "field": "implicitEnablement",
-          "effect": "establishes Istio's implicit allow when no applicable ALLOW policy exists"
-        },
-        {
-          "order": 2,
-          "kind": "AuthorizationPolicy",
-          "name": "authz-root-default-deny",
-          "namespace": "istio-system",
-          "field": "spec.selector",
-          "effect": "selector does not match the workload; excludes policy from authorization evaluation"
-        },
-        {
-          "order": 3,
-          "kind": "AuthorizationPolicy",
-          "name": "allow-api",
-          "namespace": "omg-ambient-unavailable",
-          "field": "spec.targetRefs[\"Service/api\"]",
-          "effect": "adds explicit rules to the additive ALLOW union"
-        },
-        {
-          "order": 4,
-          "kind": "Waypoint",
-          "name": "unavailable-waypoint",
-          "namespace": "omg-waypoint-evidence",
-          "field": "istio.io/use-waypoint",
-          "effect": "waypoint evidence is unavailable for waypoint-attached policy omg-ambient-unavailable/allow-api"
-        }
-      ],
-      "reasoning": "Control MG-AUTHZ-001 could not be evaluated for omg-ambient-unavailable/ambient-unavailable: authorization.effective unavailable: Gateway API waypoint evidence unavailable.",
-      "remediation": {
-        "guidance": "Apply an AuthorizationPolicy that selects this workload and inspect the resolution chain to confirm its effective scope."
-      },
-      "unknownReason": "authorization.effective unavailable: Gateway API waypoint evidence unavailable"
-    },
-    {
-      "id": "MG-AUTHZ-002-b0de48939aa7",
-      "controlId": "MG-AUTHZ-002",
-      "title": "Workloads should resolve to default deny with explicit allow",
-      "severity": "high",
-      "evidenceType": "config",
-      "status": "unknown",
-      "confidence": "unavailable",
-      "dataPlaneMode": "ambient",
-      "evidenceSources": [
-        "kubernetes-api",
-        "istio-crd"
-      ],
-      "resources": [
-        {
-          "kind": "Deployment",
-          "namespace": "omg-ambient-unavailable",
-          "name": "ambient-unavailable"
-        }
-      ],
-      "resolutionChain": [
-        {
-          "order": 1,
-          "kind": "AuthorizationDefault",
-          "field": "implicitEnablement",
-          "effect": "establishes Istio's implicit allow when no applicable ALLOW policy exists"
-        },
-        {
-          "order": 2,
-          "kind": "AuthorizationPolicy",
-          "name": "authz-root-default-deny",
-          "namespace": "istio-system",
-          "field": "spec.selector",
-          "effect": "selector does not match the workload; excludes policy from authorization evaluation"
-        },
-        {
-          "order": 3,
-          "kind": "AuthorizationPolicy",
-          "name": "allow-api",
-          "namespace": "omg-ambient-unavailable",
-          "field": "spec.targetRefs[\"Service/api\"]",
-          "effect": "adds explicit rules to the additive ALLOW union"
-        },
-        {
-          "order": 4,
-          "kind": "Waypoint",
-          "name": "unavailable-waypoint",
-          "namespace": "omg-waypoint-evidence",
-          "field": "istio.io/use-waypoint",
-          "effect": "waypoint evidence is unavailable for waypoint-attached policy omg-ambient-unavailable/allow-api"
-        }
-      ],
-      "reasoning": "Control MG-AUTHZ-002 could not be evaluated for omg-ambient-unavailable/ambient-unavailable: authorization.effective unavailable: Gateway API waypoint evidence unavailable.",
-      "remediation": {
-        "guidance": "Establish an empty ALLOW policy for default deny and add narrowly scoped ALLOW rules for required traffic."
-      },
-      "unknownReason": "authorization.effective unavailable: Gateway API waypoint evidence unavailable"
-    },
     {
       "id": "MG-AUTHZ-003-7a336ece954c",
       "controlId": "MG-AUTHZ-003",
@@ -823,6 +759,29 @@
       "unknownReason": "authorization.effective unavailable: Gateway API waypoint evidence unavailable"
     },
     {
+      "id": "MG-ENV-001-15ba2f853e77",
+      "controlId": "MG-ENV-001",
+      "title": "Mesh namespaces must be classified to an environment",
+      "severity": "medium",
+      "evidenceType": "context",
+      "status": "unknown",
+      "confidence": "unavailable",
+      "evidenceSources": [
+        "kubernetes-api"
+      ],
+      "resources": [
+        {
+          "kind": "Namespace",
+          "name": "omg-ambient-unavailable"
+        }
+      ],
+      "reasoning": "Control MG-ENV-001 could not be evaluated for omg-ambient-unavailable: environment unavailable: namespace label evidence unavailable.",
+      "remediation": {
+        "guidance": "Configure an environment source or add the organization-approved environment label to the namespace."
+      },
+      "unknownReason": "environment unavailable: namespace label evidence unavailable"
+    },
+    {
       "id": "MG-GW-005-8b7abacffb56",
       "controlId": "MG-GW-005",
       "title": "Ambient waypoint authorization must have explicit ready enrollment",
@@ -879,6 +838,31 @@
         "guidance": "Set istio.io/use-waypoint to a waypoint whose scope covers the target and wait for its Gateway Programmed condition to become true."
       },
       "unknownReason": "authorization.effective unavailable: Gateway API waypoint evidence unavailable; authorization.waypointUnenforced unavailable: Gateway API waypoint evidence unavailable"
+    },
+    {
+      "id": "MG-OWN-001-fde9cd8ab245",
+      "controlId": "MG-OWN-001",
+      "title": "Mesh workloads must map to an application owner",
+      "severity": "medium",
+      "evidenceType": "context",
+      "status": "unknown",
+      "confidence": "unavailable",
+      "dataPlaneMode": "ambient",
+      "evidenceSources": [
+        "kubernetes-api"
+      ],
+      "resources": [
+        {
+          "kind": "Deployment",
+          "namespace": "omg-ambient-unavailable",
+          "name": "ambient-unavailable"
+        }
+      ],
+      "reasoning": "Control MG-OWN-001 could not be evaluated for omg-ambient-unavailable/ambient-unavailable: owner unavailable: namespace label and annotation evidence unavailable.",
+      "remediation": {
+        "guidance": "Add an organization-approved owner label or map the workload's application ID through the scan config or ownership import."
+      },
+      "unknownReason": "owner unavailable: namespace label and annotation evidence unavailable"
     }
   ],
   "scores": {
@@ -888,7 +872,7 @@
         "category": "authz",
         "grade": "unknown",
         "passRate": null,
-        "unknown": 7
+        "unknown": 5
       },
       {
         "category": "exposure",
@@ -897,10 +881,16 @@
         "unknown": 1
       },
       {
+        "category": "governance",
+        "grade": "unknown",
+        "passRate": null,
+        "unknown": 2
+      },
+      {
         "category": "mtls",
         "grade": "A",
         "passRate": 1,
-        "evaluated": 6
+        "evaluated": 5
       }
     ]
   }

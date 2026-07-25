@@ -68,7 +68,9 @@ openmeshguard report --format html --output report.html
 openmeshguard export --format sarif --output openmeshguard.sarif
 ```
 
-First run requires **zero configuration files**. Ownership, environment classification, and exception records are optional inputs that unlock governance controls — see [docs/context](docs/) once available.
+First run requires **zero configuration files**. Ownership, environment
+classification, and exception records are optional inputs that unlock
+governance controls — see [governance context](docs/context.md).
 
 ### Example summary
 

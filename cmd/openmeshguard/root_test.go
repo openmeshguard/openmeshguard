@@ -8,11 +8,14 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/openmeshguard/openmeshguard/internal/collect"
+	governance "github.com/openmeshguard/openmeshguard/internal/context"
 	"github.com/openmeshguard/openmeshguard/internal/engine"
 	"github.com/openmeshguard/openmeshguard/internal/normalize"
 	"github.com/openmeshguard/openmeshguard/internal/resolver"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -104,6 +107,232 @@ func TestScanControlPackFlagIsRepeatable(t *testing.T) {
 	}
 }
 
+func TestScanGovernanceFlags(t *testing.T) {
+	cmd := newScanCommand(defaultVersionInfo())
+	for _, name := range []string{"scan-config", "ownership-import", "exceptions", "infer-environments"} {
+		if cmd.Flags().Lookup(name) == nil {
+			t.Fatalf("scan command missing %s flag", name)
+		}
+	}
+	if cmd.Flags().Lookup("infer-environments").DefValue != "false" {
+		t.Fatalf("infer-environments default = %q, want false", cmd.Flags().Lookup("infer-environments").DefValue)
+	}
+	if cmd.Flags().Lookup("exceptions").Value.Type() != "stringArray" {
+		t.Fatalf("exceptions flag type = %q, want stringArray", cmd.Flags().Lookup("exceptions").Value.Type())
+	}
+}
+
+func TestResolveContextPathsRejectsAmbiguousDeclarations(t *testing.T) {
+	config := governance.ScanConfig{Inputs: governance.ContextInputs{
+		OwnershipImport: "config-ownership.yaml",
+		Exceptions:      []string{"config-exceptions"},
+	}}
+	tests := []struct {
+		name string
+		opts scanOptions
+		want string
+	}{
+		{name: "ownership", opts: scanOptions{OwnershipImport: "cli-ownership.yaml"}, want: "both --ownership-import"},
+		{name: "exceptions", opts: scanOptions{Exceptions: []string{"cli-exceptions"}}, want: "both --exceptions"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, _, err := resolveContextPaths(tt.opts, config)
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("resolveContextPaths error = %v, want %q", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestEngineExceptionInputsAreAnnotationOnly(t *testing.T) {
+	now := time.Date(2026, 7, 24, 0, 0, 0, 0, time.UTC)
+	records := []governance.ExceptionRecord{{
+		Metadata: governance.Metadata{Name: "EXC-ACTIVE"},
+		Spec: governance.ExceptionSpec{
+			ControlIDs: []string{"MG-MTLS-001"}, Owner: "payments-team",
+			Approver: "security", Ticket: "https://tickets.example/active",
+		},
+		ExpiresAt: now.Add(time.Hour),
+	}, {
+		Metadata: governance.Metadata{Name: "EXC-EXPIRED"},
+		Spec: governance.ExceptionSpec{
+			ControlIDs: []string{"MG-MTLS-001"}, Owner: "payments-team",
+			Approver: "security", Ticket: "https://tickets.example/expired",
+		},
+		ExpiresAt: now.Add(-time.Hour),
+	}}
+	workloads := []governance.WorkloadContext{
+		{
+			Ref:         resolver.WorkloadRef{Kind: "Deployment", Namespace: "payments", Name: "api"},
+			Ownership:   governance.Ownership{Owner: "payments-team", OwnerKnown: true},
+			ExceptionID: "EXC-ACTIVE",
+		},
+		{
+			Ref:         resolver.WorkloadRef{Kind: "Deployment", Namespace: "payments", Name: "worker"},
+			Ownership:   governance.Ownership{Owner: "payments-team", OwnerKnown: true},
+			ExceptionID: "MISSING",
+		},
+	}
+	resources, exceptions, bindings := engineExceptionInputs(records, workloads, now)
+	if len(exceptions) != 2 || exceptions[0].Expired || !exceptions[1].Expired {
+		t.Fatalf("exception inputs = %#v", exceptions)
+	}
+	if len(bindings) != 2 {
+		t.Fatalf("bindings = %#v, want exact annotated workload bindings", bindings)
+	}
+	dangling := false
+	for _, resource := range resources {
+		if resource.Kind == "ExceptionReference" {
+			dangling = true
+		}
+	}
+	if !dangling {
+		t.Fatalf("resources = %#v, want dangling annotation validation target", resources)
+	}
+}
+
+func TestEngineExceptionInputsRejectOwnerReplayAndUnknownOwner(t *testing.T) {
+	now := time.Date(2026, 7, 24, 0, 0, 0, 0, time.UTC)
+	records := []governance.ExceptionRecord{{
+		Metadata: governance.Metadata{Name: "EXC-ACTIVE"},
+		Spec: governance.ExceptionSpec{
+			ControlIDs: []string{"MG-MTLS-001"}, Owner: "payments-team",
+			Approver: "security", Ticket: "https://tickets.example/active",
+		},
+		ExpiresAt: now.Add(time.Hour),
+	}}
+	workloads := []governance.WorkloadContext{
+		{
+			Ref:         resolver.WorkloadRef{Kind: "Deployment", Namespace: "other", Name: "api"},
+			Ownership:   governance.Ownership{Owner: "other-team", OwnerKnown: true},
+			ExceptionID: "EXC-ACTIVE",
+		},
+		{
+			Ref:         resolver.WorkloadRef{Kind: "Deployment", Namespace: "unknown", Name: "api"},
+			Ownership:   governance.Ownership{OwnerKnown: false, OwnerReason: "namespace metadata unavailable"},
+			ExceptionID: "EXC-ACTIVE",
+		},
+	}
+	resources, _, bindings := engineExceptionInputs(records, workloads, now)
+	if len(bindings) != 2 {
+		t.Fatalf("bindings = %#v, want both rejected bindings preserved for engine defense", bindings)
+	}
+	var mismatch, unknown bool
+	for _, resource := range resources {
+		if resource.Kind != "ExceptionReference" {
+			continue
+		}
+		switch resource.Namespace {
+		case "other":
+			errors, _ := resource.Fields["validationErrors"].([]any)
+			mismatch = len(errors) == 1 && strings.Contains(fmt.Sprint(errors[0]), "owner")
+		case "unknown":
+			availability := resource.Availability["validationErrors"]
+			unknown = !availability.Available && strings.Contains(availability.Reason, "unavailable")
+		}
+	}
+	if !mismatch || !unknown {
+		t.Fatalf("resources = %#v, want owner mismatch and unknown-owner reference targets", resources)
+	}
+}
+
+func TestValidateExceptionControlIDsUsesLoadedPacks(t *testing.T) {
+	records := []governance.ExceptionRecord{
+		{
+			Metadata: governance.Metadata{Name: "known"},
+			Spec:     governance.ExceptionSpec{ControlIDs: []string{"MG-MTLS-001"}},
+		},
+		{
+			Metadata: governance.Metadata{Name: "unknown"},
+			Spec:     governance.ExceptionSpec{ControlIDs: []string{"MG-MTLS-099"}},
+		},
+	}
+	got := validateExceptionControlIDs(records, []engine.Pack{{
+		Controls: []engine.Control{{ID: "MG-MTLS-001"}},
+	}})
+	if len(got[0].ValidationErrors) != 0 ||
+		len(got[1].ValidationErrors) != 1 ||
+		!strings.Contains(got[1].ValidationErrors[0], "unknown control") {
+		t.Fatalf("validated records = %#v", got)
+	}
+}
+
+func TestGovernanceWorkloadInputsUseOwningResourceMetadata(t *testing.T) {
+	controller := metav1.OwnerReference{Kind: "Deployment", Name: "api"}
+	replicaSet := metav1.OwnerReference{Kind: "ReplicaSet", Name: "api-abc"}
+	snapshot := collect.Snapshot{
+		Deployments: []appsv1.Deployment{{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "api", Namespace: "payments",
+				Labels:      map[string]string{"app-id": "controller-id"},
+				Annotations: map[string]string{"openmeshguard.io/exception": "EXC-42"},
+			},
+		}},
+		ReplicaSets: []appsv1.ReplicaSet{
+			{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "standalone", Namespace: "payments",
+					Annotations: map[string]string{"owner": "replicaset-team"},
+				},
+			},
+			{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "api-abc", Namespace: "payments",
+					OwnerReferences: []metav1.OwnerReference{controller},
+				},
+			},
+		},
+		Pods: []corev1.Pod{{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "api-1", Namespace: "payments",
+				Labels:          map[string]string{"app-id": "pod-id", "pod-only": "value"},
+				OwnerReferences: []metav1.OwnerReference{replicaSet},
+			},
+		}},
+	}
+	workloads := []resolver.WorkloadInput{
+		{
+			Ref:    resolver.WorkloadRef{Kind: "Deployment", Namespace: "payments", Name: "api"},
+			Labels: map[string]string{"app-id": "template-id", "template-only": "value"},
+		},
+		{
+			Ref: resolver.WorkloadRef{Kind: "ReplicaSet", Namespace: "payments", Name: "standalone"},
+		},
+		{
+			Ref:    resolver.WorkloadRef{Kind: "Pod", Namespace: "payments", Name: "api-1"},
+			Labels: map[string]string{"pod-only": "value"},
+		},
+	}
+	got := governanceWorkloadInputs(snapshot, workloads)
+	if got[0].Labels["app-id"] != "controller-id" ||
+		got[0].Labels["template-only"] != "value" ||
+		got[0].Annotations["openmeshguard.io/exception"] != "EXC-42" {
+		t.Fatalf("deployment metadata = %#v/%#v", got[0].Labels, got[0].Annotations)
+	}
+	if got[1].Annotations["owner"] != "replicaset-team" {
+		t.Fatalf("ReplicaSet annotations = %#v", got[1].Annotations)
+	}
+	if got[2].Labels["pod-only"] != "value" ||
+		got[2].Labels["app-id"] != "controller-id" ||
+		got[2].Annotations["openmeshguard.io/exception"] != "EXC-42" {
+		t.Fatalf("split Pod metadata = %#v/%#v", got[2].Labels, got[2].Annotations)
+	}
+}
+
+func TestContextEvidenceSourcesIncludeAnnotationOwnership(t *testing.T) {
+	sources := contextEvidenceSources(governance.WorkloadContext{
+		Classification: governance.Classification{Source: "scan-config"},
+		Ownership: governance.Ownership{
+			AppIDSource: "workload annotation platform.example.com/application-id",
+			OwnerSource: "namespace annotation platform.example.com/team",
+		},
+	})
+	if len(sources) != 2 || sources[0] != "scan-config" || sources[1] != "kubernetes-api" {
+		t.Fatalf("context evidence sources = %#v, want scan-config and kubernetes-api", sources)
+	}
+}
+
 func TestControlsValidateCommand(t *testing.T) {
 	validPath := "../../internal/engine/testdata/valid.yaml"
 	stdout, stderr, err := executeForTest(t, defaultVersionInfo(), "controls", "validate", validPath)
@@ -184,6 +413,8 @@ func TestNamespaceInputsAggregateMeshEnrollment(t *testing.T) {
 		{name: "positive observation wins regardless of workload order", workloads: []workloadObservation{{ambient: resolver.True, mode: resolver.ModeUnknown}, {ambient: resolver.False, mode: resolver.ModeUnknown}}, want: "enrolled"},
 		{name: "not in mesh observation refines unlabeled namespace", workloads: []workloadObservation{{mode: resolver.ModeNotApplicable}}, want: "not-enrolled"},
 		{name: "unobserved workload-only namespace stays unknown", workloads: []workloadObservation{{ambient: resolver.Unobserved, mode: resolver.ModeUnknown}}, want: "unknown"},
+		{name: "unknown dominates known non-mesh observation", workloads: []workloadObservation{{mode: resolver.ModeNotApplicable}, {ambient: resolver.Unobserved, mode: resolver.ModeUnknown}}, want: "unknown"},
+		{name: "unknown dominance is order independent", workloads: []workloadObservation{{ambient: resolver.Unobserved, mode: resolver.ModeUnknown}, {mode: resolver.ModeNotApplicable}}, want: "unknown"},
 	}
 
 	for _, tt := range tests {
@@ -347,9 +578,9 @@ controls:
 	want := [][]string{
 		{"ACME-INV-001", "MG-AUTHZ-001", "MG-AUTHZ-002", "MG-AUTHZ-003", "MG-AUTHZ-004", "MG-AUTHZ-005", "MG-AUTHZ-006", "MG-AUTHZ-007", "MG-GW-005", "MG-MTLS-002", "MG-MTLS-007"},
 		{"MG-AUTHZ-001", "MG-AUTHZ-002", "MG-AUTHZ-003", "MG-AUTHZ-004", "MG-AUTHZ-005", "MG-AUTHZ-006", "MG-AUTHZ-007", "MG-GW-005", "MG-MTLS-002", "MG-MTLS-007"},
-		{"ACME-ENV-001", "ACME-INV-001"},
+		{"ACME-ENV-001", "ACME-GOV-002", "ACME-INV-001", "MG-AUTHZ-001", "MG-AUTHZ-002", "MG-AUTHZ-003", "MG-AUTHZ-004", "MG-AUTHZ-005", "MG-AUTHZ-006", "MG-AUTHZ-007", "MG-ENV-001", "MG-GW-005", "MG-MTLS-001", "MG-MTLS-002", "MG-MTLS-003", "MG-MTLS-005", "MG-MTLS-006", "MG-MTLS-007", "MG-OWN-001", "MG-OWN-002"},
 		{"MG-MTLS-001", "MG-MTLS-002", "MG-MTLS-003", "MG-MTLS-005", "MG-MTLS-006", "MG-MTLS-007"},
-		{"ACME-ENV-001", "ACME-GOV-002", "ACME-INV-001", "MG-AUTHZ-001", "MG-AUTHZ-002", "MG-AUTHZ-003", "MG-AUTHZ-004", "MG-AUTHZ-005", "MG-AUTHZ-006", "MG-AUTHZ-007", "MG-GW-005", "MG-MTLS-001", "MG-MTLS-002", "MG-MTLS-003", "MG-MTLS-005", "MG-MTLS-006", "MG-MTLS-007"},
+		{"ACME-ENV-001", "ACME-GOV-002", "ACME-INV-001", "MG-AUTHZ-001", "MG-AUTHZ-002", "MG-AUTHZ-003", "MG-AUTHZ-004", "MG-AUTHZ-005", "MG-AUTHZ-006", "MG-AUTHZ-007", "MG-ENV-001", "MG-GW-005", "MG-MTLS-001", "MG-MTLS-002", "MG-MTLS-003", "MG-MTLS-005", "MG-MTLS-006", "MG-MTLS-007", "MG-OWN-001", "MG-OWN-002"},
 	}
 	for index := range want {
 		if strings.Join(got[index].AffectedControls, ",") != strings.Join(want[index], ",") {
