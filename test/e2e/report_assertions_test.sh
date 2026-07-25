@@ -47,6 +47,10 @@ if assert_golden_case_bijection "$TEST_ROOT/bijection/cases.tsv" "$TEST_ROOT/bij
 	echo "golden bijection accepted a missing golden" >&2
 	exit 1
 fi
+(
+	export UPDATE_GOLDEN=1
+	assert_golden_case_bijection "$TEST_ROOT/bijection/cases.tsv" "$TEST_ROOT/bijection/golden" true
+)
 
 jq 'del(.findings[] | select(.controlId == "MG-MTLS-002"))' \
 	"$fixtures/golden/permissive.json" >"$TEST_ROOT/missing-finding.json"

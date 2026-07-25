@@ -399,6 +399,9 @@ scan_fixture() {
 		governance-active-exception)
 			set -- "$@" --exceptions "$governance_fixtures/exceptions/active.yaml"
 			;;
+		governance-owner-mismatch)
+			set -- "$@" --exceptions "$governance_fixtures/exceptions/owner-mismatch.yaml"
+			;;
 		governance-expired-exception)
 			set -- "$@" --exceptions "$governance_fixtures/exceptions/expired.yaml"
 			;;
@@ -898,7 +901,26 @@ assert_json "active exception preserves and marks the original finding" "$result
 	  .severity == "critical" and
 	  .exception.id == "EXC-ACTIVE" and
 	  .exception.expired == false and
+	  .exception.expiresAt == "2099-01-01T00:00:00Z" and
+	  .exception.approver == "security@example.com" and
+	  .exception.ticket == "https://tickets.example.com/SEC-100" and
+	  (.evidenceSources | index("exception-record")) != null and
 	  (.resolutionChain | length) > 0
+	)
+'
+assert_json "cross-owner exception reuse leaves the original finding open" "$results/governance-owner-mismatch.json" '
+	([.findings[] | select(.controlId == "MG-MTLS-001")] | length) == 1 and
+	any(.findings[];
+	  .controlId == "MG-MTLS-001" and
+	  .status == "open" and
+	  .severity == "critical" and
+	  .exception == null
+	) and
+	any(.findings[];
+	  .controlId == "MG-EXC-001" and
+	  .status == "open" and
+	  .resources[0].kind == "ExceptionReference" and
+	  .resources[0].namespace == "omg-governance-active"
 	)
 '
 assert_json "expired exception restores the original finding and raises hygiene risk" "$results/governance-expired-exception.json" '
@@ -909,6 +931,10 @@ assert_json "expired exception restores the original finding and raises hygiene 
 	  .severity == "critical" and
 	  .exception.id == "EXC-EXPIRED" and
 	  .exception.expired == true and
+	  .exception.expiresAt == "2020-01-01T00:00:00Z" and
+	  .exception.approver == "security@example.com" and
+	  .exception.ticket == "https://tickets.example.com/SEC-101" and
+	  (.evidenceSources | index("exception-record")) != null and
 	  (.resolutionChain | length) > 0
 	) and
 	any(.findings[];
