@@ -1,0 +1,25 @@
+apiVersion: openmeshguard.io/v1alpha1
+kind: ScanConfig
+metadata:
+  name: e2e-governance
+  version: 0.1.0
+inputs:
+  ownershipImport: ownership.yaml
+classification:
+  sources:
+    - type: namespace-label
+      keys:
+        - platform.example.com/environment
+ownership:
+  labels:
+    appId:
+      - platform.example.com/application-id
+    owner:
+      - platform.example.com/team
+controls:
+  overrides:
+    - controlId: MG-MTLS-001
+      environments:
+        - production
+      severityByEnvironment:
+        production: critical

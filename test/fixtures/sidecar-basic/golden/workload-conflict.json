@@ -7,12 +7,17 @@
     "controlPacks": [
       {
         "name": "builtin-authz",
-        "version": "0.2.0",
+        "version": "0.3.0",
+        "source": "builtin"
+      },
+      {
+        "name": "builtin-context",
+        "version": "0.3.0",
         "source": "builtin"
       },
       {
         "name": "builtin-mtls",
-        "version": "0.2.0",
+        "version": "0.3.0",
         "source": "builtin"
       }
     ]
@@ -29,8 +34,14 @@
       "kubernetesAPI": true,
       "prometheus": {
         "enabled": false
+      },
+      "contextFiles": {
+        "scanConfig": false,
+        "ownershipImport": false,
+        "exceptions": false
       }
-    }
+    },
+    "environmentInference": false
   },
   "permissionSummary": [
     {
@@ -40,7 +51,26 @@
         "list"
       ],
       "granted": true,
-      "impact": "namespace labels and environment/data-plane inference may be unavailable"
+      "impact": "namespace labels and environment/data-plane inference may be unavailable",
+      "affectedControls": [
+        "MG-AUTHZ-001",
+        "MG-AUTHZ-002",
+        "MG-AUTHZ-003",
+        "MG-AUTHZ-004",
+        "MG-AUTHZ-005",
+        "MG-AUTHZ-006",
+        "MG-AUTHZ-007",
+        "MG-ENV-001",
+        "MG-GW-005",
+        "MG-MTLS-001",
+        "MG-MTLS-002",
+        "MG-MTLS-003",
+        "MG-MTLS-005",
+        "MG-MTLS-006",
+        "MG-MTLS-007",
+        "MG-OWN-001",
+        "MG-OWN-002"
+      ]
     },
     {
       "apiGroup": "",
@@ -68,13 +98,16 @@
         "MG-AUTHZ-005",
         "MG-AUTHZ-006",
         "MG-AUTHZ-007",
+        "MG-ENV-001",
         "MG-GW-005",
         "MG-MTLS-001",
         "MG-MTLS-002",
         "MG-MTLS-003",
         "MG-MTLS-005",
         "MG-MTLS-006",
-        "MG-MTLS-007"
+        "MG-MTLS-007",
+        "MG-OWN-001",
+        "MG-OWN-002"
       ]
     },
     {
@@ -120,7 +153,9 @@
         "MG-MTLS-003",
         "MG-MTLS-005",
         "MG-MTLS-006",
-        "MG-MTLS-007"
+        "MG-MTLS-007",
+        "MG-OWN-001",
+        "MG-OWN-002"
       ]
     },
     {
@@ -145,7 +180,9 @@
         "MG-MTLS-003",
         "MG-MTLS-005",
         "MG-MTLS-006",
-        "MG-MTLS-007"
+        "MG-MTLS-007",
+        "MG-OWN-001",
+        "MG-OWN-002"
       ]
     },
     {
@@ -170,7 +207,9 @@
         "MG-MTLS-003",
         "MG-MTLS-005",
         "MG-MTLS-006",
-        "MG-MTLS-007"
+        "MG-MTLS-007",
+        "MG-OWN-001",
+        "MG-OWN-002"
       ]
     },
     {
@@ -195,7 +234,9 @@
         "MG-MTLS-003",
         "MG-MTLS-005",
         "MG-MTLS-006",
-        "MG-MTLS-007"
+        "MG-MTLS-007",
+        "MG-OWN-001",
+        "MG-OWN-002"
       ]
     },
     {
@@ -331,6 +372,13 @@
     "multiCluster": {
       "participationDetected": false,
       "evaluated": false
+    },
+    "classification": {
+      "namespacesClassified": 0,
+      "namespacesUnclassified": 1,
+      "byEnvironment": {
+        "unclassified": 1
+      }
     }
   },
   "workloadPostures": [
@@ -340,6 +388,10 @@
         "name": "conflict-api",
         "kind": "Deployment"
       },
+      "environment": "unclassified",
+      "environmentConfidence": "resolved",
+      "owner": null,
+      "appId": null,
       "dataPlaneMode": "sidecar",
       "mtls": {
         "effective": "disabled",
@@ -404,88 +456,6 @@
     }
   ],
   "findings": [
-    {
-      "id": "MG-AUTHZ-001-a729ced2f70a",
-      "controlId": "MG-AUTHZ-001",
-      "title": "Mesh-managed workloads must have resolved authorization coverage",
-      "severity": "high",
-      "evidenceType": "config",
-      "status": "open",
-      "confidence": "resolved",
-      "dataPlaneMode": "sidecar",
-      "evidenceSources": [
-        "kubernetes-api",
-        "istio-crd"
-      ],
-      "resources": [
-        {
-          "kind": "Deployment",
-          "namespace": "omg-workload-conflict",
-          "name": "conflict-api"
-        }
-      ],
-      "resolutionChain": [
-        {
-          "order": 1,
-          "kind": "AuthorizationDefault",
-          "field": "implicitEnablement",
-          "effect": "establishes Istio's implicit allow when no applicable ALLOW policy exists"
-        },
-        {
-          "order": 2,
-          "kind": "AuthorizationPolicy",
-          "name": "authz-root-default-deny",
-          "namespace": "istio-system",
-          "field": "spec.selector",
-          "effect": "selector does not match the workload; excludes policy from authorization evaluation"
-        }
-      ],
-      "reasoning": "omg-workload-conflict/conflict-api has no resolved AuthorizationPolicy coverage.",
-      "remediation": {
-        "guidance": "Apply an AuthorizationPolicy that selects this workload and inspect the resolution chain to confirm its effective scope."
-      }
-    },
-    {
-      "id": "MG-AUTHZ-002-376bfda0309c",
-      "controlId": "MG-AUTHZ-002",
-      "title": "Workloads should resolve to default deny with explicit allow",
-      "severity": "high",
-      "evidenceType": "config",
-      "status": "open",
-      "confidence": "resolved",
-      "dataPlaneMode": "sidecar",
-      "evidenceSources": [
-        "kubernetes-api",
-        "istio-crd"
-      ],
-      "resources": [
-        {
-          "kind": "Deployment",
-          "namespace": "omg-workload-conflict",
-          "name": "conflict-api"
-        }
-      ],
-      "resolutionChain": [
-        {
-          "order": 1,
-          "kind": "AuthorizationDefault",
-          "field": "implicitEnablement",
-          "effect": "establishes Istio's implicit allow when no applicable ALLOW policy exists"
-        },
-        {
-          "order": 2,
-          "kind": "AuthorizationPolicy",
-          "name": "authz-root-default-deny",
-          "namespace": "istio-system",
-          "field": "spec.selector",
-          "effect": "selector does not match the workload; excludes policy from authorization evaluation"
-        }
-      ],
-      "reasoning": "Authorization for omg-workload-conflict/conflict-api resolves to no-policy, not default deny with explicit allow.",
-      "remediation": {
-        "guidance": "Establish an empty ALLOW policy for default deny and add narrowly scoped ALLOW rules for required traffic."
-      }
-    },
     {
       "id": "MG-AUTHZ-004-aa82d18c5ffb",
       "controlId": "MG-AUTHZ-004",
@@ -569,6 +539,37 @@
       }
     },
     {
+      "id": "MG-ENV-001-99458f9cdc9c",
+      "controlId": "MG-ENV-001",
+      "title": "Mesh namespaces must be classified to an environment",
+      "severity": "medium",
+      "evidenceType": "context",
+      "status": "open",
+      "confidence": "resolved",
+      "evidenceSources": [
+        "kubernetes-api"
+      ],
+      "resources": [
+        {
+          "kind": "Namespace",
+          "name": "omg-workload-conflict"
+        }
+      ],
+      "resolutionChain": [
+        {
+          "order": 1,
+          "kind": "Control",
+          "name": "MG-ENV-001",
+          "field": "expression",
+          "effect": "control MG-ENV-001 expression resolved to an open finding"
+        }
+      ],
+      "reasoning": "Namespace omg-workload-conflict is not classified to an environment.",
+      "remediation": {
+        "guidance": "Configure an environment source or add the organization-approved environment label to the namespace."
+      }
+    },
+    {
       "id": "MG-GW-005-08923d824210",
       "controlId": "MG-GW-005",
       "title": "Ambient waypoint authorization must have explicit ready enrollment",
@@ -607,64 +608,6 @@
       "reasoning": "Control MG-GW-005 does not apply to omg-workload-conflict/conflict-api.",
       "remediation": {
         "guidance": "Set istio.io/use-waypoint to a waypoint whose scope covers the target and wait for its Gateway Programmed condition to become true."
-      }
-    },
-    {
-      "id": "MG-MTLS-001-3e0aae6ab44d",
-      "controlId": "MG-MTLS-001",
-      "title": "Mesh-managed workloads must resolve to strict mTLS",
-      "severity": "high",
-      "evidenceType": "config",
-      "status": "open",
-      "confidence": "resolved",
-      "dataPlaneMode": "sidecar",
-      "evidenceSources": [
-        "kubernetes-api",
-        "istio-crd"
-      ],
-      "resources": [
-        {
-          "kind": "Deployment",
-          "namespace": "omg-workload-conflict",
-          "name": "conflict-api"
-        }
-      ],
-      "resolutionChain": [
-        {
-          "order": 1,
-          "kind": "MeshConfigDefault",
-          "field": "defaultPeerAuthenticationMode",
-          "effect": "defaults mesh mTLS mode to PERMISSIVE when no PeerAuthentication mode overrides it"
-        },
-        {
-          "order": 2,
-          "kind": "PeerAuthentication",
-          "name": "default",
-          "namespace": "istio-system",
-          "field": "spec.mtls.mode",
-          "effect": "sets mesh-wide mTLS mode to STRICT"
-        },
-        {
-          "order": 3,
-          "kind": "PeerAuthentication",
-          "name": "default",
-          "namespace": "omg-workload-conflict",
-          "field": "spec.mtls.mode",
-          "effect": "sets namespace mTLS mode to STRICT"
-        },
-        {
-          "order": 4,
-          "kind": "PeerAuthentication",
-          "name": "conflict-api",
-          "namespace": "omg-workload-conflict",
-          "field": "spec.mtls.mode",
-          "effect": "sets workload mTLS mode to DISABLE"
-        }
-      ],
-      "reasoning": "Effective mTLS for omg-workload-conflict/conflict-api resolves to disabled, not strict.",
-      "remediation": {
-        "guidance": "Apply or correct PeerAuthentication so the workload resolves to STRICT, then inspect the attached resolution chain.",
-        "suggestedYAML": "apiVersion: security.istio.io/v1\nkind: PeerAuthentication\nmetadata:\n  name: default\n  namespace: omg-workload-conflict\nspec:\n  mtls:\n    mode: STRICT"
       }
     },
     {
@@ -894,6 +837,39 @@
       "remediation": {
         "guidance": "Restore a Ready ztunnel DaemonSet pod on every node that schedules ambient workloads."
       }
+    },
+    {
+      "id": "MG-OWN-001-020f1b4f9a1c",
+      "controlId": "MG-OWN-001",
+      "title": "Mesh workloads must map to an application owner",
+      "severity": "medium",
+      "evidenceType": "context",
+      "status": "open",
+      "confidence": "resolved",
+      "dataPlaneMode": "sidecar",
+      "evidenceSources": [
+        "kubernetes-api"
+      ],
+      "resources": [
+        {
+          "kind": "Deployment",
+          "namespace": "omg-workload-conflict",
+          "name": "conflict-api"
+        }
+      ],
+      "resolutionChain": [
+        {
+          "order": 1,
+          "kind": "Control",
+          "name": "MG-OWN-001",
+          "field": "expression",
+          "effect": "control MG-OWN-001 expression resolved to an open finding"
+        }
+      ],
+      "reasoning": "Workload omg-workload-conflict/conflict-api does not resolve to an application owner.",
+      "remediation": {
+        "guidance": "Add an organization-approved owner label or map the workload's application ID through the scan config or ownership import."
+      }
     }
   ],
   "scores": {
@@ -901,9 +877,9 @@
     "categories": [
       {
         "category": "authz",
-        "grade": "F",
-        "passRate": 0.42857142857142855,
-        "evaluated": 7
+        "grade": "D",
+        "passRate": 0.6,
+        "evaluated": 5
       },
       {
         "category": "exposure",
@@ -911,10 +887,16 @@
         "passRate": null
       },
       {
+        "category": "governance",
+        "grade": "F",
+        "passRate": 0,
+        "evaluated": 2
+      },
+      {
         "category": "mtls",
         "grade": "F",
-        "passRate": 0.25,
-        "evaluated": 4
+        "passRate": 0.3333333333333333,
+        "evaluated": 3
       }
     ]
   }

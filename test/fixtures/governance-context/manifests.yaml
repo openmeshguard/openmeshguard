@@ -1,0 +1,218 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: omg-governance-classified
+  labels:
+    istio-injection: enabled
+    platform.example.com/environment: production
+---
+apiVersion: security.istio.io/v1
+kind: PeerAuthentication
+metadata:
+  name: default
+  namespace: omg-governance-classified
+spec:
+  mtls:
+    mode: STRICT
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: classified-api
+  namespace: omg-governance-classified
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: classified-api
+  template:
+    metadata:
+      labels:
+        app: classified-api
+        platform.example.com/application-id: payments-api
+    spec:
+      containers:
+        - name: app
+          image: registry.k8s.io/pause:3.10
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: classified-api
+  namespace: omg-governance-classified
+spec:
+  selector:
+    app: classified-api
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8080
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: omg-governance-unclassified
+  labels:
+    istio-injection: enabled
+---
+apiVersion: security.istio.io/v1
+kind: PeerAuthentication
+metadata:
+  name: default
+  namespace: omg-governance-unclassified
+spec:
+  mtls:
+    mode: STRICT
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: unclassified-api
+  namespace: omg-governance-unclassified
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: unclassified-api
+  template:
+    metadata:
+      labels:
+        app: unclassified-api
+        platform.example.com/application-id: unmapped-api
+    spec:
+      containers:
+        - name: app
+          image: registry.k8s.io/pause:3.10
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: unclassified-api
+  namespace: omg-governance-unclassified
+spec:
+  selector:
+    app: unclassified-api
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8080
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: omg-governance-active
+  labels:
+    istio-injection: enabled
+    platform.example.com/environment: production
+---
+apiVersion: security.istio.io/v1
+kind: PeerAuthentication
+metadata:
+  name: default
+  namespace: omg-governance-active
+spec:
+  mtls:
+    mode: PERMISSIVE
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: active-api
+  namespace: omg-governance-active
+  annotations:
+    openmeshguard.io/exception: EXC-ACTIVE
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: active-api
+  template:
+    metadata:
+      labels:
+        app: active-api
+        platform.example.com/application-id: payments-api
+    spec:
+      containers:
+        - name: app
+          image: registry.k8s.io/pause:3.10
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: active-api
+  namespace: omg-governance-active
+spec:
+  selector:
+    app: active-api
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8080
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: omg-governance-expired
+  labels:
+    istio-injection: enabled
+    platform.example.com/environment: production
+---
+apiVersion: security.istio.io/v1
+kind: PeerAuthentication
+metadata:
+  name: default
+  namespace: omg-governance-expired
+spec:
+  mtls:
+    mode: PERMISSIVE
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: expired-api
+  namespace: omg-governance-expired
+  annotations:
+    openmeshguard.io/exception: EXC-EXPIRED
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: expired-api
+  template:
+    metadata:
+      labels:
+        app: expired-api
+        platform.example.com/application-id: payments-api
+    spec:
+      containers:
+        - name: app
+          image: registry.k8s.io/pause:3.10
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: expired-api
+  namespace: omg-governance-expired
+spec:
+  selector:
+    app: expired-api
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8080

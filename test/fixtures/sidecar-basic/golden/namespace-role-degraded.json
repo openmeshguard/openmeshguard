@@ -7,12 +7,17 @@
     "controlPacks": [
       {
         "name": "builtin-authz",
-        "version": "0.2.0",
+        "version": "0.3.0",
+        "source": "builtin"
+      },
+      {
+        "name": "builtin-context",
+        "version": "0.3.0",
         "source": "builtin"
       },
       {
         "name": "builtin-mtls",
-        "version": "0.2.0",
+        "version": "0.3.0",
         "source": "builtin"
       }
     ]
@@ -29,8 +34,14 @@
       "kubernetesAPI": true,
       "prometheus": {
         "enabled": false
+      },
+      "contextFiles": {
+        "scanConfig": false,
+        "ownershipImport": false,
+        "exceptions": false
       }
-    }
+    },
+    "environmentInference": false
   },
   "permissionSummary": [
     {
@@ -40,7 +51,26 @@
         "list"
       ],
       "granted": false,
-      "impact": "namespace labels and environment/data-plane inference may be unavailable; denied scope(s): cluster"
+      "impact": "namespace labels and environment/data-plane inference may be unavailable; denied scope(s): cluster",
+      "affectedControls": [
+        "MG-AUTHZ-001",
+        "MG-AUTHZ-002",
+        "MG-AUTHZ-003",
+        "MG-AUTHZ-004",
+        "MG-AUTHZ-005",
+        "MG-AUTHZ-006",
+        "MG-AUTHZ-007",
+        "MG-ENV-001",
+        "MG-GW-005",
+        "MG-MTLS-001",
+        "MG-MTLS-002",
+        "MG-MTLS-003",
+        "MG-MTLS-005",
+        "MG-MTLS-006",
+        "MG-MTLS-007",
+        "MG-OWN-001",
+        "MG-OWN-002"
+      ]
     },
     {
       "apiGroup": "",
@@ -68,13 +98,16 @@
         "MG-AUTHZ-005",
         "MG-AUTHZ-006",
         "MG-AUTHZ-007",
+        "MG-ENV-001",
         "MG-GW-005",
         "MG-MTLS-001",
         "MG-MTLS-002",
         "MG-MTLS-003",
         "MG-MTLS-005",
         "MG-MTLS-006",
-        "MG-MTLS-007"
+        "MG-MTLS-007",
+        "MG-OWN-001",
+        "MG-OWN-002"
       ]
     },
     {
@@ -120,7 +153,9 @@
         "MG-MTLS-003",
         "MG-MTLS-005",
         "MG-MTLS-006",
-        "MG-MTLS-007"
+        "MG-MTLS-007",
+        "MG-OWN-001",
+        "MG-OWN-002"
       ]
     },
     {
@@ -145,7 +180,9 @@
         "MG-MTLS-003",
         "MG-MTLS-005",
         "MG-MTLS-006",
-        "MG-MTLS-007"
+        "MG-MTLS-007",
+        "MG-OWN-001",
+        "MG-OWN-002"
       ]
     },
     {
@@ -170,7 +207,9 @@
         "MG-MTLS-003",
         "MG-MTLS-005",
         "MG-MTLS-006",
-        "MG-MTLS-007"
+        "MG-MTLS-007",
+        "MG-OWN-001",
+        "MG-OWN-002"
       ]
     },
     {
@@ -195,7 +234,9 @@
         "MG-MTLS-003",
         "MG-MTLS-005",
         "MG-MTLS-006",
-        "MG-MTLS-007"
+        "MG-MTLS-007",
+        "MG-OWN-001",
+        "MG-OWN-002"
       ]
     },
     {
@@ -329,6 +370,13 @@
     "multiCluster": {
       "participationDetected": false,
       "evaluated": false
+    },
+    "classification": {
+      "namespacesClassified": 0,
+      "namespacesUnclassified": 1,
+      "byEnvironment": {
+        "unavailable": 1
+      }
     }
   },
   "workloadPostures": [
@@ -338,6 +386,10 @@
         "name": "strict-api",
         "kind": "Deployment"
       },
+      "environment": null,
+      "environmentConfidence": "unavailable",
+      "owner": null,
+      "appId": null,
       "dataPlaneMode": "sidecar",
       "mtls": {
         "effective": "unknown",
@@ -352,56 +404,6 @@
     }
   ],
   "findings": [
-    {
-      "id": "MG-AUTHZ-001-51dc710d23e1",
-      "controlId": "MG-AUTHZ-001",
-      "title": "Mesh-managed workloads must have resolved authorization coverage",
-      "severity": "high",
-      "evidenceType": "config",
-      "status": "unknown",
-      "confidence": "unavailable",
-      "dataPlaneMode": "sidecar",
-      "evidenceSources": [
-        "kubernetes-api"
-      ],
-      "resources": [
-        {
-          "kind": "Deployment",
-          "namespace": "omg-strict",
-          "name": "strict-api"
-        }
-      ],
-      "reasoning": "Control MG-AUTHZ-001 could not be evaluated for omg-strict/strict-api: authorization.effective unavailable: AuthorizationPolicy resources unavailable.",
-      "remediation": {
-        "guidance": "Apply an AuthorizationPolicy that selects this workload and inspect the resolution chain to confirm its effective scope."
-      },
-      "unknownReason": "authorization.effective unavailable: AuthorizationPolicy resources unavailable"
-    },
-    {
-      "id": "MG-AUTHZ-002-35c85047aa15",
-      "controlId": "MG-AUTHZ-002",
-      "title": "Workloads should resolve to default deny with explicit allow",
-      "severity": "high",
-      "evidenceType": "config",
-      "status": "unknown",
-      "confidence": "unavailable",
-      "dataPlaneMode": "sidecar",
-      "evidenceSources": [
-        "kubernetes-api"
-      ],
-      "resources": [
-        {
-          "kind": "Deployment",
-          "namespace": "omg-strict",
-          "name": "strict-api"
-        }
-      ],
-      "reasoning": "Control MG-AUTHZ-002 could not be evaluated for omg-strict/strict-api: authorization.effective unavailable: AuthorizationPolicy resources unavailable.",
-      "remediation": {
-        "guidance": "Establish an empty ALLOW policy for default deny and add narrowly scoped ALLOW rules for required traffic."
-      },
-      "unknownReason": "authorization.effective unavailable: AuthorizationPolicy resources unavailable"
-    },
     {
       "id": "MG-AUTHZ-003-a71fa38f6f1a",
       "controlId": "MG-AUTHZ-003",
@@ -528,6 +530,29 @@
       "unknownReason": "authorization.effective unavailable: AuthorizationPolicy resources unavailable"
     },
     {
+      "id": "MG-ENV-001-60023cf1a620",
+      "controlId": "MG-ENV-001",
+      "title": "Mesh namespaces must be classified to an environment",
+      "severity": "medium",
+      "evidenceType": "context",
+      "status": "unknown",
+      "confidence": "unavailable",
+      "evidenceSources": [
+        "kubernetes-api"
+      ],
+      "resources": [
+        {
+          "kind": "Namespace",
+          "name": "omg-strict"
+        }
+      ],
+      "reasoning": "Control MG-ENV-001 could not be evaluated for omg-strict: environment unavailable: namespace label evidence unavailable.",
+      "remediation": {
+        "guidance": "Configure an environment source or add the organization-approved environment label to the namespace."
+      },
+      "unknownReason": "environment unavailable: namespace label evidence unavailable"
+    },
+    {
       "id": "MG-GW-005-0c9ee646c9fe",
       "controlId": "MG-GW-005",
       "title": "Ambient waypoint authorization must have explicit ready enrollment",
@@ -559,31 +584,6 @@
       "remediation": {
         "guidance": "Set istio.io/use-waypoint to a waypoint whose scope covers the target and wait for its Gateway Programmed condition to become true."
       }
-    },
-    {
-      "id": "MG-MTLS-001-e80e3a041279",
-      "controlId": "MG-MTLS-001",
-      "title": "Mesh-managed workloads must resolve to strict mTLS",
-      "severity": "high",
-      "evidenceType": "config",
-      "status": "unknown",
-      "confidence": "unavailable",
-      "dataPlaneMode": "sidecar",
-      "evidenceSources": [
-        "kubernetes-api"
-      ],
-      "resources": [
-        {
-          "kind": "Deployment",
-          "namespace": "omg-strict",
-          "name": "strict-api"
-        }
-      ],
-      "reasoning": "Control MG-MTLS-001 could not be evaluated for omg-strict/strict-api: mtls.effective unavailable: PeerAuthentication resources unavailable.",
-      "remediation": {
-        "guidance": "Apply or correct PeerAuthentication so the workload resolves to STRICT, then inspect the attached resolution chain."
-      },
-      "unknownReason": "mtls.effective unavailable: PeerAuthentication resources unavailable"
     },
     {
       "id": "MG-MTLS-002-45e72b2025d5",
@@ -725,6 +725,31 @@
         "guidance": "Correct DestinationRule TLS mode or the server-side PeerAuthentication posture so client and server settings agree."
       },
       "unknownReason": "mtls.clientTLSContradiction unavailable: DestinationRule collection unavailable"
+    },
+    {
+      "id": "MG-OWN-001-97989606e288",
+      "controlId": "MG-OWN-001",
+      "title": "Mesh workloads must map to an application owner",
+      "severity": "medium",
+      "evidenceType": "context",
+      "status": "unknown",
+      "confidence": "unavailable",
+      "dataPlaneMode": "sidecar",
+      "evidenceSources": [
+        "kubernetes-api"
+      ],
+      "resources": [
+        {
+          "kind": "Deployment",
+          "namespace": "omg-strict",
+          "name": "strict-api"
+        }
+      ],
+      "reasoning": "Control MG-OWN-001 could not be evaluated for omg-strict/strict-api: owner unavailable: namespace label evidence unavailable.",
+      "remediation": {
+        "guidance": "Add an organization-approved owner label or map the workload's application ID through the scan config or ownership import."
+      },
+      "unknownReason": "owner unavailable: namespace label evidence unavailable"
     }
   ],
   "scores": {
@@ -734,7 +759,7 @@
         "category": "authz",
         "grade": "unknown",
         "passRate": null,
-        "unknown": 7
+        "unknown": 5
       },
       {
         "category": "exposure",
@@ -742,10 +767,16 @@
         "passRate": null
       },
       {
+        "category": "governance",
+        "grade": "unknown",
+        "passRate": null,
+        "unknown": 2
+      },
+      {
         "category": "mtls",
         "grade": "unknown",
         "passRate": null,
-        "unknown": 4
+        "unknown": 3
       }
     ]
   }

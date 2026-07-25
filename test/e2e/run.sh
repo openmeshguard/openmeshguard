@@ -41,6 +41,7 @@ basic_fixtures="$E2E_ROOT/test/fixtures/sidecar-basic"
 authz_fixtures="$E2E_ROOT/test/fixtures/sidecar-authz"
 ambient_fixtures="$E2E_ROOT/test/fixtures/ambient-basic"
 mixed_fixtures="$E2E_ROOT/test/fixtures/mixed-mode"
+governance_fixtures="$E2E_ROOT/test/fixtures/governance-context"
 cases="$E2E_STATE_DIR/all-cases.tsv"
 mkdir -p "$results"
 find "$results" -mindepth 1 -delete
@@ -48,6 +49,7 @@ awk -F '\t' 'BEGIN {OFS="\t"} NF > 0 {count=$6; if (count == "") count=1; scanne
 awk -F '\t' 'BEGIN {OFS="\t"} NF > 0 {count=$6; if (count == "") count=1; scanner=$7; if (scanner == "") scanner="cluster"; print "sidecar-authz", $1, $2, $3, $4, count, $5, scanner}' "$authz_fixtures/cases.tsv" >>"$cases"
 awk -F '\t' 'BEGIN {OFS="\t"} NF > 0 {count=$6; if (count == "") count=1; scanner=$7; if (scanner == "") scanner="cluster"; print "ambient-basic", $1, $2, $3, $4, count, $5, scanner}' "$ambient_fixtures/cases.tsv" >>"$cases"
 awk -F '\t' 'BEGIN {OFS="\t"} NF > 0 {count=$6; if (count == "") count=1; scanner=$7; if (scanner == "") scanner="cluster"; print "mixed-mode", $1, $2, $3, $4, count, $5, scanner}' "$mixed_fixtures/cases.tsv" >>"$cases"
+awk -F '\t' 'BEGIN {OFS="\t"} NF > 0 {count=$6; if (count == "") count=1; scanner=$7; if (scanner == "") scanner="cluster"; print "governance-context", $1, $2, $3, $4, count, $5, scanner}' "$governance_fixtures/cases.tsv" >>"$cases"
 kubeconfigs=$(mktemp -d "$E2E_STATE_DIR/kubeconfigs.XXXXXX")
 chmod 700 "$kubeconfigs"
 scanner_home="$kubeconfigs/scanner-home"
@@ -388,10 +390,21 @@ scan_fixture() {
 	name=$1
 	namespace=$2
 	kubeconfig=$3
+	group=$4
 	raw="$results/$name.raw.json"
-	run_scanner scan \
-		--kubeconfig "$kubeconfig" \
-		--namespace "$namespace" >"$raw"
+	set -- scan --kubeconfig "$kubeconfig" --namespace "$namespace"
+	if [ "$group" = governance-context ]; then
+		set -- "$@" --scan-config "$governance_fixtures/scan-config.yaml"
+		case "$name" in
+		governance-active-exception)
+			set -- "$@" --exceptions "$governance_fixtures/exceptions/active.yaml"
+			;;
+		governance-expired-exception)
+			set -- "$@" --exceptions "$governance_fixtures/exceptions/expired.yaml"
+			;;
+		esac
+	fi
+	run_scanner "$@" >"$raw"
 	normalize_report "$raw" "$results/$name.json"
 	validate_schema "$results/$name.json"
 }
@@ -415,6 +428,7 @@ assert_golden_case_bijection "$basic_fixtures/cases.tsv" "$basic_fixtures/golden
 assert_golden_case_bijection "$authz_fixtures/cases.tsv" "$authz_fixtures/golden"
 assert_golden_case_bijection "$ambient_fixtures/cases.tsv" "$ambient_fixtures/golden"
 assert_golden_case_bijection "$mixed_fixtures/cases.tsv" "$mixed_fixtures/golden"
+assert_golden_case_bijection "$governance_fixtures/cases.tsv" "$governance_fixtures/golden"
 
 echo "e2e: bootstrap distinct fixture-manager, scanner, and audit-probe identities"
 admin_kubectl apply -f "$E2E_ROOT/test/e2e/harness-bootstrap.yaml" >/dev/null
@@ -446,6 +460,7 @@ fixture_kubectl apply -f "$basic_fixtures/manifests.yaml" >/dev/null
 fixture_kubectl apply -f "$authz_fixtures/manifests.yaml" >/dev/null
 fixture_kubectl apply -f "$ambient_fixtures/manifests.yaml" >/dev/null
 fixture_kubectl apply -f "$mixed_fixtures/manifests.yaml" >/dev/null
+fixture_kubectl apply -f "$governance_fixtures/manifests.yaml" >/dev/null
 fixture_kubectl apply -f "$E2E_ROOT/deploy/rbac/cluster-role.yaml" >/dev/null
 fixture_kubectl apply -f "$E2E_ROOT/deploy/rbac/addons/nodes-cluster-role.yaml" >/dev/null
 fixture_kubectl -n omg-strict apply -f "$E2E_ROOT/deploy/rbac/namespace-role.yaml" >/dev/null
@@ -630,7 +645,7 @@ while IFS="$tab" read -r group name namespace deployment proxy expected_postures
 		exit 1
 		;;
 	esac
-	scan_fixture "$name" "$namespace" "$scanner_kubeconfig"
+	scan_fixture "$name" "$namespace" "$scanner_kubeconfig" "$group"
 done <"$cases"
 
 echo "e2e: exercise the published ClusterRole with an all-namespaces scan"
@@ -682,7 +697,7 @@ fi
 # Exclude the administrator token request and RBAC settle GET. Any privileged
 # request after this boundary is a namespace-scanner proof failure.
 docker exec "$E2E_CLUSTER_NAME-control-plane" sh -c ': > /var/log/kubernetes/audit.log'
-scan_fixture namespace-role-degraded omg-strict "$kubeconfigs/scanner-namespace.yaml"
+scan_fixture namespace-role-degraded omg-strict "$kubeconfigs/scanner-namespace.yaml" sidecar-basic
 capture_audit "$results/audit-namespace.jsonl"
 rm -f "$kubeconfigs/scanner-namespace.yaml"
 awk '1' "$results/audit-cluster.jsonl" "$results/audit-namespace.jsonl" >"$results/audit.jsonl"
@@ -699,10 +714,10 @@ while IFS="$tab" read -r group name namespace deployment proxy expected_postures
 done <"$cases"
 assert_json "namespace Role scan emits one workload posture and all built-in findings" "$results/namespace-role-degraded.json" '
 	(.workloadPostures | length) == 1 and
-	(.findings | length) == 14
+	(.findings | length) == 13
 '
 assert_report_update_guard namespace-role-degraded "$results/namespace-role-degraded.json" \
-	"MG-AUTHZ-001=unknown,MG-AUTHZ-002=unknown,MG-AUTHZ-003=unknown,MG-AUTHZ-004=unknown,MG-AUTHZ-005=unknown,MG-AUTHZ-006=unknown,MG-AUTHZ-007=unknown,MG-GW-005=not-applicable,MG-MTLS-001=unknown,MG-MTLS-002=unknown,MG-MTLS-003=unknown,MG-MTLS-005=not-applicable,MG-MTLS-006=not-applicable,MG-MTLS-007=unknown"
+	"MG-AUTHZ-003=unknown,MG-AUTHZ-004=unknown,MG-AUTHZ-005=unknown,MG-AUTHZ-006=unknown,MG-AUTHZ-007=unknown,MG-ENV-001=unknown,MG-GW-005=not-applicable,MG-MTLS-002=unknown,MG-MTLS-003=unknown,MG-MTLS-005=not-applicable,MG-MTLS-006=not-applicable,MG-MTLS-007=unknown,MG-OWN-001=unknown"
 
 assert_json "strict namespace resolves strict" "$results/strict.json" '
 	.workloadPostures | length == 1 and .[0].mtls.effective == "strict"
@@ -846,6 +861,62 @@ assert_json "mixed namespace preserves per-workload modes" "$results/mixed-mode.
 	  {"name": "mixed-ambient", "mode": "ambient"},
 	  {"name": "mixed-sidecar", "mode": "sidecar"}
 	]
+'
+assert_json "configured classification and one imported application owner span namespaces" "$results/governance-classified-owned.json" '
+	.scan.environmentInference == false and
+	.scan.dataSources.contextFiles == {"scanConfig": true, "ownershipImport": true, "exceptions": false} and
+	.inventory.classification == {
+	  "namespacesClassified": 1,
+	  "namespacesUnclassified": 0,
+	  "byEnvironment": {"production": 1}
+	} and
+	(.workloadPostures | length) == 1 and
+	.workloadPostures[0].environment == "production" and
+	.workloadPostures[0].environmentConfidence == "observed" and
+	.workloadPostures[0].appId == "payments-api" and
+	.workloadPostures[0].owner == "team-payments"
+'
+assert_json "unclassified and unowned remain first-class governance findings" "$results/governance-unclassified-unowned.json" '
+	.inventory.classification == {
+	  "namespacesClassified": 0,
+	  "namespacesUnclassified": 1,
+	  "byEnvironment": {"unclassified": 1}
+	} and
+	.workloadPostures[0].environment == "unclassified" and
+	.workloadPostures[0].environmentConfidence == "resolved" and
+	.workloadPostures[0].appId == "unmapped-api" and
+	.workloadPostures[0].owner == null and
+	any(.findings[]; .controlId == "MG-ENV-001" and .status == "open") and
+	any(.findings[]; .controlId == "MG-OWN-001" and .status == "open") and
+	all(.findings[]; .controlId != "MG-MTLS-001")
+'
+assert_json "active exception preserves and marks the original finding" "$results/governance-active-exception.json" '
+	([.findings[] | select(.controlId == "MG-MTLS-001")] | length) == 1 and
+	any(.findings[];
+	  .controlId == "MG-MTLS-001" and
+	  .status == "excepted" and
+	  .severity == "critical" and
+	  .exception.id == "EXC-ACTIVE" and
+	  .exception.expired == false and
+	  (.resolutionChain | length) > 0
+	)
+'
+assert_json "expired exception restores the original finding and raises hygiene risk" "$results/governance-expired-exception.json" '
+	([.findings[] | select(.controlId == "MG-MTLS-001")] | length) == 1 and
+	any(.findings[];
+	  .controlId == "MG-MTLS-001" and
+	  .status == "open" and
+	  .severity == "critical" and
+	  .exception.id == "EXC-EXPIRED" and
+	  .exception.expired == true and
+	  (.resolutionChain | length) > 0
+	) and
+	any(.findings[];
+	  .controlId == "MG-EXC-002" and
+	  .status == "open" and
+	  .resources[0].kind == "Exception" and
+	  .resources[0].name == "EXC-EXPIRED"
+	)
 '
 assert_json "namespace Role degrades denied root policy evidence" "$results/namespace-role-degraded.json" '
 	(.workloadPostures | length) > 0 and

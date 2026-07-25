@@ -1,0 +1,8 @@
+apiVersion: openmeshguard.io/v1alpha1
+kind: OwnershipImport
+metadata:
+  name: e2e-application-catalog
+  version: 0.1.0
+applications:
+  - appId: payments-api
+    owner: team-payments
