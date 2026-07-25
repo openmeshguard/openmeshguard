@@ -834,6 +834,11 @@
         "passRate": null
       },
       {
+        "category": "lifecycle",
+        "grade": "unknown",
+        "passRate": null
+      },
+      {
         "category": "mtls",
         "grade": "unknown",
         "passRate": null

@@ -900,7 +900,7 @@
     }
   ],
   "scores": {
-    "overall": 54.59183673469388,
+    "overall": 56.97278911564626,
     "categories": [
       {
         "category": "authz",
@@ -918,6 +918,11 @@
         "grade": "B",
         "passRate": 0.8333333333333334,
         "evaluated": 6
+      },
+      {
+        "category": "lifecycle",
+        "grade": "unknown",
+        "passRate": null
       },
       {
         "category": "mtls",

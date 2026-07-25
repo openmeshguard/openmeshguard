@@ -827,6 +827,11 @@
         "evaluated": 3
       },
       {
+        "category": "lifecycle",
+        "grade": "unknown",
+        "passRate": null
+      },
+      {
         "category": "mtls",
         "grade": "A",
         "passRate": 1,
