@@ -437,6 +437,12 @@ func validateExceptionRecord(record *ExceptionRecord) {
 		if !controlIDPattern.MatchString(controlID) {
 			record.ValidationErrors = append(record.ValidationErrors, fmt.Sprintf("spec.controlIds contains invalid ID %q", controlID))
 		}
+		if controlID == "MG-EXC-001" || controlID == "MG-EXC-002" {
+			record.ValidationErrors = append(
+				record.ValidationErrors,
+				fmt.Sprintf("spec.controlIds cannot except exception hygiene control %q", controlID),
+			)
+		}
 		if _, exists := seen[controlID]; exists {
 			record.ValidationErrors = append(record.ValidationErrors, fmt.Sprintf("spec.controlIds duplicates %q", controlID))
 		}

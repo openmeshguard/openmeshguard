@@ -149,6 +149,28 @@ spec:
 	}
 }
 
+func TestLoadExceptionsRejectsExceptionHygieneControlReferences(t *testing.T) {
+	path := writeTestFile(t, "invalid-exception.yaml", `apiVersion: openmeshguard.io/v1alpha1
+kind: Exception
+metadata: {name: EXC-42}
+spec:
+  controlIds: [MG-EXC-002]
+  owner: payments
+  approver: security@example.com
+  justification: Invalid recursive exception
+  ticket: https://tickets.example.com/SEC-42
+  expiresAt: 2026-09-01T00:00:00Z
+`)
+	records, err := LoadExceptions([]string{path})
+	if err != nil {
+		t.Fatalf("LoadExceptions returned error: %v", err)
+	}
+	if len(records) != 1 ||
+		!containsText(records[0].ValidationErrors, "cannot except exception hygiene control") {
+		t.Fatalf("exception validation errors = %#v, want hygiene-control rejection", records)
+	}
+}
+
 func writeTestFile(t *testing.T, name, contents string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), name)
