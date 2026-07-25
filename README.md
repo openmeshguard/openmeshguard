@@ -9,7 +9,9 @@ Adopting Istio is not the same as being protected by it. mTLS can be permissive 
 OpenMeshGuard is a read-only CLI scanner that tells you what your mesh security posture *actually is*:
 
 - **Resolved, not linted.** It computes per-workload *effective* posture using Istio's real evaluation semantics — layered PeerAuthentication (mesh/namespace/workload/port), DestinationRule TLS interplay, AuthorizationPolicy evaluation order (CUSTOM → DENY → ALLOW), Sidecar scoping, and the ambient L4/L7 split — instead of checking resources one YAML at a time.
-- **Verified, not assumed.** With optional Prometheus access, it corroborates declared posture against what actually happened on the wire: *"strict mTLS is declared for 71% of workloads — and no plaintext traffic was observed to 64% of them in the last 7 days. These 14 services did receive plaintext."*
+- **Verification is never implied.** The v0 report keeps declared and verified
+  posture separate and prominently marks runtime verification unavailable.
+  Prometheus collection and verified-posture controls arrive in M7.
 - **Honest about what it doesn't know.** Missing permissions, missing telemetry, and unclassified namespaces are reported as explicit unknowns — never silently passed or failed.
 - **Evidence you can hand to a security team.** Every finding carries its resolution chain: which resources, in which order, produced the conclusion.
 
@@ -72,9 +74,6 @@ The report is canonical JSON validating against [`docs/contracts/canonical-json-
 # Scan a cluster (read-only; see deploy/rbac for the exact permissions)
 openmeshguard scan --context my-cluster --all-namespaces > openmeshguard.json
 
-# Include runtime verification from Istio telemetry
-openmeshguard scan --context my-cluster --prometheus-url https://prometheus.example.com
-
 # Generate a local, server-less HTML report
 openmeshguard report --input openmeshguard.json --format html --output report.html
 
@@ -93,7 +92,7 @@ governance controls — see [governance context](docs/context.md).
 
 | Control area | Declared | Verified | Unknown |
 | --- | --- | --- | --- |
-| Strict mTLS (effective, per workload) | 71% | 64% — no plaintext in 7d | 7% — no telemetry |
+| Strict mTLS (effective, per workload) | 71% | Unavailable in v0 | Runtime telemetry not collected |
 | Explicit authorization coverage | 54% | — | — |
 | Default-deny posture | 22% of namespaces | — | — |
 | Public gateway wildcard hosts | 3 findings | — | — |
@@ -103,7 +102,7 @@ governance controls — see [governance context](docs/context.md).
 
 - Read-only access: `get`/`list` on core workload resources, Istio CRDs, and Gateway API resources. Published RBAC profiles (namespace-scoped Role, cluster-scoped ClusterRole, optional add-ons) ship with the project.
 - **Never required:** write verbs, Secrets access, `exec`/`attach`/`port-forward`, impersonation, `watch`, or cluster-admin.
-- Optional: a Prometheus endpoint with standard Istio proxy metrics, to enable verified-posture controls.
+- Planned for M7: a Prometheus endpoint with standard Istio proxy metrics for verified-posture controls. The v0 CLI does not accept a Prometheus flag.
 
 Every report includes a permission summary showing which evidence was available and which findings were affected by missing access.
 
@@ -113,16 +112,16 @@ OpenMeshGuard complements the tools you already run. It does not replace them.
 
 | You already use | Keep using it for | OpenMeshGuard adds |
 | --- | --- | --- |
-| `istioctl analyze` | Config validity checks | Effective per-workload posture, governance context, scoring, evidence, runtime verification |
+| `istioctl analyze` | Config validity checks | Effective per-workload posture, governance context, scoring, and evidence |
 | Kiali | Live mesh visualization and ops | Control-oriented posture, audit evidence, exception awareness |
 | Kyverno / OPA Gatekeeper | Blocking violations at admission | Resolution of Istio's layered policy semantics that per-resource rules can't see; posture over time |
-| Prometheus / Grafana | Metrics and dashboards | Posture conclusions and evidence packaging from that signal |
+| Prometheus / Grafana | Metrics and dashboards | M7 will add posture conclusions and evidence packaging from that signal |
 
 Non-goals: installing or managing Istio, traffic management, replacing mesh vendors or policy engines, claiming NIST/PCI/HIPAA compliance (it produces framework-*aligned* evidence only), or mutating your clusters.
 
 ## Controls
 
-Controls are **data, not code**: YAML metadata plus a CEL expression evaluated against the normalized mesh model and resolver outputs. The built-in library covers effective mTLS posture, authorization/zero-trust coverage, gateway and egress exposure, ownership and exception hygiene, and lifecycle/version risk — across both **sidecar and ambient** data planes, including ztunnel coverage and waypoint enforcement gaps.
+Controls are **data, not code**: YAML metadata plus a CEL expression evaluated against the normalized mesh model and resolver outputs. The current built-in library covers effective mTLS posture, authorization/zero-trust coverage, gateway exposure, ownership, and exception hygiene across both **sidecar and ambient** data planes, including ztunnel coverage and waypoint enforcement gaps. The published lifecycle score dimension remains explicitly `unknown` until lifecycle controls ship.
 
 You can ship your own control packs alongside the built-ins, and contributing a control upstream doesn't require writing Go.
 
@@ -134,8 +133,8 @@ You can ship your own control packs alongside the built-ins, and contributing a 
 ## Roadmap (abridged)
 
 1. Scanner core, effective posture resolver, CEL rule engine, canonical JSON
-2. HTML report, Prometheus-verified controls, SARIF/CI mode
-3. Governance context: classification, ownership, Git-native exceptions
+2. Governance context, HTML, SARIF, score, and CI mode
+3. Prometheus collection and runtime-verified controls
 4. Offline manifest scanning (`scan --local`) and source/drift traceability
 5. Multi-cluster correlation and distribution validation (OpenShift Service Mesh on ROSA first, then managed K8s with upstream Istio)
 

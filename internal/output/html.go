@@ -19,9 +19,18 @@ type summaryRow struct {
 	Unknown  summaryCell
 }
 
+type verificationSummary struct {
+	Corroborated      int
+	Contradicted      int
+	NoTrafficObserved int
+	Unknown           int
+	Unavailable       int
+}
+
 type htmlReportView struct {
 	Report              report
 	SummaryRows         []summaryRow
+	Verification        verificationSummary
 	OpenFindings        int
 	UnknownFindings     []finding
 	ExceptedFindings    int
@@ -42,8 +51,11 @@ func WriteHTML(writer io.Writer, reader io.Reader) error {
 		"percent":        formatPercent,
 		"score":          formatScore,
 		"statusClass":    statusClass,
+		"verifiedClass":  verifiedClass,
 		"resource":       formatResource,
 		"optionalString": optionalString,
+		"optionalBool":   optionalBool,
+		"add":            addInts,
 	}).Parse(htmlReportTemplate)
 	if err != nil {
 		return fmt.Errorf("parse HTML report template: %w", err)
@@ -75,10 +87,11 @@ func buildHTMLView(canonical report) htmlReportView {
 		view.Unclassified = canonical.Inventory.Classification.NamespacesUnclassified
 	}
 	for _, workload := range canonical.WorkloadPostures {
-		if workload.Verified == nil {
+		if workload.DataPlaneMode != "not-applicable" && workload.Verified == nil {
 			view.UnverifiedWorkloads++
 		}
 	}
+	view.Verification = summarizeVerification(canonical.WorkloadPostures)
 	view.SummaryRows = canonicalSummaryRows(canonical)
 	return view
 }
@@ -90,8 +103,6 @@ func canonicalSummaryRows(canonical report) []summaryRow {
 	authzCovered := 0
 	authzUnknown := 0
 	owned := 0
-	verified := 0
-	verifiedUnknown := 0
 	namespaceAuthz := map[string][]string{}
 
 	for _, workload := range canonical.WorkloadPostures {
@@ -108,9 +119,14 @@ func canonicalSummaryRows(canonical report) []summaryRow {
 		switch workload.Authorization.Effective {
 		case "unknown":
 			authzUnknown++
-		case "no-policy", "not-in-mesh":
-		default:
+		case "default-deny-explicit-allow", "allow-only", "deny-present":
 			authzCovered++
+		case "no-policy", "waypoint-policy-unenforced", "not-in-mesh":
+			// Known but not enforced authorization is not coverage.
+		default:
+			// The frozen schema rejects new values before projection. Keep a
+			// conservative fallback if this switch is extended incorrectly.
+			authzUnknown++
 		}
 		namespaceAuthz[workload.Workload.Namespace] = append(
 			namespaceAuthz[workload.Workload.Namespace],
@@ -118,13 +134,6 @@ func canonicalSummaryRows(canonical report) []summaryRow {
 		)
 		if workload.Owner != nil && *workload.Owner != "" {
 			owned++
-		}
-		if workload.Verified != nil {
-			if workload.Verified.Status == "unknown" {
-				verifiedUnknown++
-			} else {
-				verified++
-			}
 		}
 	}
 
@@ -157,10 +166,7 @@ func canonicalSummaryRows(canonical report) []summaryRow {
 		Tone:  "unknown",
 	}
 	if canonical.Scan.DataSources.Prometheus.Enabled {
-		verifiedCell = summaryCell{
-			Value: fmt.Sprintf("%d workload(s) verified; %d unknown", verified, verifiedUnknown),
-			Tone:  toneForUnknown(verifiedUnknown),
-		}
+		verifiedCell = verificationSummaryCell(summarizeVerification(canonical.WorkloadPostures))
 	}
 
 	return []summaryRow{
@@ -194,6 +200,55 @@ func canonicalSummaryRows(canonical report) []summaryRow {
 			Verified: summaryCell{Value: "— context metric", Tone: "muted"},
 			Unknown:  countCell(meshWorkloads-owned, "workload owner(s) unknown"),
 		},
+	}
+}
+
+func summarizeVerification(workloads []canonicalWorkloadPosture) verificationSummary {
+	var summary verificationSummary
+	for _, workload := range workloads {
+		if workload.DataPlaneMode == "not-applicable" {
+			continue
+		}
+		if workload.Verified == nil {
+			summary.Unavailable++
+			continue
+		}
+		switch workload.Verified.Status {
+		case "corroborated":
+			summary.Corroborated++
+		case "contradicted":
+			summary.Contradicted++
+		case "no-traffic-observed":
+			summary.NoTrafficObserved++
+		case "unknown":
+			summary.Unknown++
+		default:
+			// Complete canonical validation rejects this case. Treat it as
+			// unavailable if the schema and this projection ever drift.
+			summary.Unknown++
+		}
+	}
+	return summary
+}
+
+func verificationSummaryCell(summary verificationSummary) summaryCell {
+	tone := "known"
+	if summary.Contradicted > 0 {
+		tone = "risk"
+	} else if summary.NoTrafficObserved+summary.Unknown+summary.Unavailable > 0 {
+		tone = "unknown"
+	} else if summary.Corroborated == 0 {
+		tone = "muted"
+	}
+	return summaryCell{
+		Value: fmt.Sprintf(
+			"%d corroborated; %d contradicted; %d no traffic observed; %d unknown or unavailable",
+			summary.Corroborated,
+			summary.Contradicted,
+			summary.NoTrafficObserved,
+			summary.Unknown+summary.Unavailable,
+		),
+		Tone: tone,
 	}
 }
 
@@ -245,6 +300,19 @@ func statusClass(status string) string {
 	}
 }
 
+func verifiedClass(status string) string {
+	switch status {
+	case "corroborated":
+		return "known"
+	case "contradicted":
+		return "risk"
+	case "no-traffic-observed", "unknown":
+		return "unknown"
+	default:
+		return "muted"
+	}
+}
+
 func formatResource(value resourceRef) string {
 	parts := make([]string, 0, 3)
 	if value.Namespace != "" {
@@ -261,6 +329,17 @@ func optionalString(value *string) string {
 	return *value
 }
 
+func optionalBool(value *bool) string {
+	if value == nil {
+		return "unknown"
+	}
+	return fmt.Sprintf("%t", *value)
+}
+
+func addInts(left, right int) int {
+	return left + right
+}
+
 const htmlReportTemplate = `<!doctype html>
 <html lang="en">
 <head>
@@ -269,35 +348,35 @@ const htmlReportTemplate = `<!doctype html>
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:">
   <title>OpenMeshGuard — {{.Report.Scan.ClusterContext}}</title>
   <style>
-    :root { color-scheme: dark; --ink:#f3f7f6; --muted:#9eb0ac; --panel:#12201d; --line:#28413b; --risk:#ff6b5f; --unknown:#f3bd59; --ok:#5dd6a4; --blue:#64b5f6; --violet:#aa8cff; }
+    :root { --ink:#131c2b; --body:#334155; --muted:#64748b; --page:#f8fafc; --panel:#ffffff; --sunken:#f1f5f9; --line:#e5eaf1; --line-strong:#cbd5e1; --brand:#3560d1; --risk:#b91c1c; --risk-bg:#fef2f2; --risk-line:#fecaca; --unknown:#b45309; --unknown-bg:#fffbeb; --unknown-line:#fde68a; --ok:#047857; --ok-bg:#ecfdf5; --ok-line:#a7f3d0; --violet:#1d4ed8; }
     * { box-sizing: border-box; }
-    body { margin:0; background:#09110f; color:var(--ink); font:15px/1.55 ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
+    body { margin:0; background:var(--page); color:var(--body); font:14px/1.5 "IBM Plex Sans",-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif; }
     main { width:min(1180px,calc(100% - 32px)); margin:0 auto; padding:40px 0 72px; }
-    h1,h2,h3,p { margin-top:0; } h1 { font-size:clamp(2rem,5vw,4.5rem); line-height:.95; letter-spacing:-.05em; max-width:800px; }
-    h2 { margin-top:48px; font-size:1.45rem; letter-spacing:-.02em; } h3 { font-size:1rem; }
-    .eyebrow { color:var(--ok); font-weight:800; letter-spacing:.13em; text-transform:uppercase; font-size:.76rem; }
-    .lede { color:var(--muted); max-width:760px; font-size:1.05rem; }
+    h1,h2,h3,p { margin-top:0; } h1 { color:var(--ink); font-size:30px; font-weight:600; line-height:1.2; letter-spacing:-.01em; max-width:800px; }
+    h2 { color:var(--ink); margin-top:48px; font-size:20px; font-weight:600; letter-spacing:-.01em; } h3 { color:var(--ink); font-size:16px; font-weight:600; }
+    .eyebrow { color:var(--brand); font-weight:600; letter-spacing:.06em; text-transform:uppercase; font-size:11px; }
+    .lede { color:var(--muted); max-width:760px; font-size:15px; }
     .grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; margin:28px 0; }
-    .card,.panel { background:linear-gradient(145deg,#14241f,#0f1b18); border:1px solid var(--line); border-radius:14px; padding:18px; }
-    .card strong { display:block; font-size:2rem; line-height:1; margin:.45rem 0; }
+    .card,.panel { background:var(--panel); border:1px solid var(--line); border-radius:8px; box-shadow:0 1px 2px rgba(11,18,32,.06); padding:18px; }
+    .card strong { color:var(--ink); display:block; font:600 30px/1.2 "IBM Plex Mono",ui-monospace,"SFMono-Regular",Menlo,monospace; margin:.45rem 0; }
     .card span,.meta,.muted { color:var(--muted); }
-    .unknown-card { border-color:#8e6b2c; box-shadow:inset 0 3px 0 var(--unknown); }
-    .risk-card { border-color:#773a34; box-shadow:inset 0 3px 0 var(--risk); }
+    .unknown-card { background:var(--unknown-bg); border-color:var(--unknown-line); }
+    .risk-card { background:var(--risk-bg); border-color:var(--risk-line); }
     table { width:100%; border-collapse:collapse; background:var(--panel); border:1px solid var(--line); }
     th,td { padding:12px 14px; text-align:left; border-bottom:1px solid var(--line); vertical-align:top; }
     th { color:var(--muted); font-size:.78rem; text-transform:uppercase; letter-spacing:.08em; }
     tr:last-child td { border-bottom:0; } .unknown { color:var(--unknown); } .risk { color:var(--risk); } .known,.declared { color:var(--ok); } .excepted { color:var(--violet); }
-    .pill { display:inline-flex; border:1px solid currentColor; border-radius:999px; padding:2px 8px; font-size:.72rem; font-weight:800; text-transform:uppercase; letter-spacing:.06em; }
-    .grade { font-size:1.45rem; font-weight:900; }
-    details { background:var(--panel); border:1px solid var(--line); border-radius:12px; margin:10px 0; overflow:hidden; }
+    .pill { display:inline-flex; border:1px solid currentColor; border-radius:999px; padding:2px 8px; font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:.06em; }
+    .grade { color:var(--ink); font:600 20px/1.2 "IBM Plex Mono",ui-monospace,"SFMono-Regular",Menlo,monospace; }
+    details { background:var(--panel); border:1px solid var(--line); border-radius:8px; margin:10px 0; overflow:hidden; }
     summary { cursor:pointer; list-style:none; padding:14px 16px; display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+    summary:focus-visible { outline:3px solid rgba(53,96,209,.25); outline-offset:2px; }
     summary::-webkit-details-marker { display:none; } summary::before { content:"+"; color:var(--ok); font-weight:900; }
     details[open] summary::before { content:"−"; } .detail-body { border-top:1px solid var(--line); padding:16px; }
     .chain { margin:12px 0 0; padding:0; list-style:none; counter-reset:chain; }
     .chain li { position:relative; margin-left:14px; padding:0 0 16px 24px; border-left:1px solid var(--line); }
-    .chain li::before { counter-increment:chain; content:counter(chain); position:absolute; left:-13px; width:24px; height:24px; border-radius:50%; background:#1d332d; color:var(--ok); display:grid; place-items:center; font-size:.72rem; font-weight:900; }
-    code,pre { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; } pre { white-space:pre-wrap; overflow-wrap:anywhere; background:#08100e; border:1px solid var(--line); padding:12px; border-radius:8px; }
-    .bar { height:7px; background:#08100e; border-radius:999px; overflow:hidden; margin-top:8px; } .bar > span { display:block; height:100%; background:linear-gradient(90deg,var(--blue),var(--ok)); }
+    .chain li::before { counter-increment:chain; content:counter(chain); position:absolute; left:-13px; width:24px; height:24px; border-radius:50%; background:var(--ok-bg); border:1px solid var(--ok-line); color:var(--ok); display:grid; place-items:center; font-size:11px; font-weight:700; }
+    code,pre,.machine { font-family:"IBM Plex Mono",ui-monospace,"SFMono-Regular",Menlo,monospace; } pre { white-space:pre-wrap; overflow-wrap:anywhere; background:var(--sunken); border:1px solid var(--line); padding:12px; border-radius:6px; }
     footer { margin-top:48px; padding-top:18px; border-top:1px solid var(--line); color:var(--muted); }
     @media (max-width:800px) { .grid { grid-template-columns:repeat(2,minmax(0,1fr)); } .wide { overflow-x:auto; } }
     @media (max-width:520px) { main { width:min(100% - 20px,1180px); padding-top:24px; } .grid { grid-template-columns:1fr; } th,td { padding:10px; } }
@@ -325,6 +404,28 @@ const htmlReportTemplate = `<!doctype html>
     <div class="wide"><table>
       <thead><tr><th>Control area</th><th>Declared</th><th>Verified</th><th>Unknown</th></tr></thead>
       <tbody>{{range .SummaryRows}}<tr><td><strong>{{.Area}}</strong></td><td class="{{.Declared.Tone}}">{{.Declared.Value}}</td><td class="{{.Verified.Tone}}">{{.Verified.Value}}</td><td class="{{.Unknown.Tone}}">{{.Unknown.Value}}</td></tr>{{end}}</tbody>
+    </table></div>
+  </section>
+
+  <section id="runtime-verification">
+    <h2>Runtime verification</h2>
+    <p class="muted">Canonical telemetry states remain distinct. No traffic observed and unavailable evidence are not corroboration.</p>
+    <div class="grid">
+      <article class="card"><span>Corroborated</span><strong class="known">{{.Verification.Corroborated}}</strong></article>
+      <article class="card risk-card"><span>Contradicted</span><strong class="risk">{{.Verification.Contradicted}}</strong></article>
+      <article class="card unknown-card"><span>No traffic observed</span><strong class="unknown">{{.Verification.NoTrafficObserved}}</strong></article>
+      <article class="card unknown-card"><span>Unknown or unavailable</span><strong class="unknown">{{add .Verification.Unknown .Verification.Unavailable}}</strong></article>
+    </div>
+    <div class="wide"><table>
+      <thead><tr><th>Workload</th><th>Status</th><th>Window</th><th>mTLS traffic share</th><th>Plaintext observed</th><th>Plaintext sources</th></tr></thead>
+      <tbody>{{range .Report.WorkloadPostures}}<tr>
+        <td class="machine">{{.Workload.Namespace}} / {{.Workload.Kind}} / {{.Workload.Name}}</td>
+        {{with .Verified}}
+        <td><span class="pill {{verifiedClass .Status}}">{{.Status}}</span></td><td class="machine">{{.Window}}</td><td class="machine">{{percent .MTLSTrafficShare}}</td><td class="machine">{{optionalBool .PlaintextObserved}}</td><td class="machine">{{join .PlaintextSources ", "}}</td>
+        {{else}}
+        <td><span class="pill unknown">unavailable</span></td><td class="unknown">unknown</td><td class="unknown">unknown</td><td class="unknown">unknown</td><td class="unknown">unknown</td>
+        {{end}}
+      </tr>{{else}}<tr><td colspan="6" class="unknown">No workload posture is present in the canonical report.</td></tr>{{end}}</tbody>
     </table></div>
   </section>
 

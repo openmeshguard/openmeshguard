@@ -29,7 +29,10 @@ The first screen contains:
 With no context files, unclassified namespaces and unresolved owners remain
 visible. With no Prometheus input, the Verified column says runtime
 verification is unavailable; it does not disappear and it is not treated as a
-pass. The generated HTML is one server-less file with inline CSS, no scripts,
+pass. When M7 supplies runtime posture, the report preserves the canonical
+`corroborated`, `contradicted`, `no-traffic-observed`, and `unknown` states and
+their window, traffic share, plaintext, and source evidence without blending
+them. The generated HTML is one server-less file with inline CSS, no scripts,
 no external assets, and a content-security policy that disables network
 loading.
 
@@ -99,12 +102,20 @@ are control-pack data:
 | `lifecycle` | 5 | lifecycle baseline |
 
 Unknown categories have no pass rate and are excluded from the weighted
-denominator; unknown state remains separately reported. Namespace scores use
-the weights for their resolved environment, then non-null namespace scores
-roll up to the cluster score. An open critical finding caps the affected
-namespace score at 59. Excepted, unknown, and not-applicable findings do not
-apply the cap; an expired exception is already represented canonically as an
-open finding and therefore remains active risk.
+denominator; unknown state remains separately reported. A published weighted
+dimension with no current controls, such as lifecycle in v0, remains an
+explicit unknown category instead of disappearing. Namespace scores use the
+weights for their resolved environment. The cluster score uses global
+canonical category aggregates so cluster-scoped controls such as exception
+hygiene cannot disappear behind namespace rollups. An open critical finding
+caps the affected namespace score and the cluster score at 59. Excepted,
+unknown, and not-applicable findings do not apply the cap; an expired exception
+is already represented canonically as an open finding and therefore remains
+active risk.
+
+`score --namespace` prints the canonical namespace score followed by clearly
+labeled cluster category grades because the frozen schema does not contain
+per-namespace category grades. The command never derives those missing fields.
 
 Weights and the critical cap can be overridden through the existing
 scan-config parameter mechanism. Supply the complete weight map:
@@ -149,4 +160,7 @@ Severity order is `critical > high > medium > low > info`, and the boundary is
 inclusive. Only canonical `status: open` findings participate in severity
 thresholds. Unknown findings never affect exit status unless
 `--fail-on-unknown` is explicitly set. Excepted and not-applicable findings do
-not fail CI.
+not fail CI. Before any projection or threshold decision, the complete input
+is validated against the embedded build-time copy of the frozen canonical
+schema. A parity test requires that copy to remain byte-equivalent after JSON
+compaction to `docs/contracts/canonical-json-schema.json`.
