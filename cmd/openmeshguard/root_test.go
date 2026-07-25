@@ -8,8 +8,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/openmeshguard/openmeshguard/internal/collect"
+	governance "github.com/openmeshguard/openmeshguard/internal/context"
 	"github.com/openmeshguard/openmeshguard/internal/engine"
 	"github.com/openmeshguard/openmeshguard/internal/normalize"
 	"github.com/openmeshguard/openmeshguard/internal/resolver"
@@ -101,6 +103,81 @@ func TestScanControlPackFlagIsRepeatable(t *testing.T) {
 	opts := scanOptions{AllNamespaces: true, RootNamespace: collect.DefaultRootNamespace, ControlPacks: []string{"  "}}
 	if err := opts.normalizeAndValidate(); err == nil || !strings.Contains(err.Error(), "control pack path must not be empty") {
 		t.Fatalf("empty control pack validation error = %v, want control pack path error", err)
+	}
+}
+
+func TestScanGovernanceFlags(t *testing.T) {
+	cmd := newScanCommand(defaultVersionInfo())
+	for _, name := range []string{"scan-config", "ownership-import", "exceptions", "infer-environments"} {
+		if cmd.Flags().Lookup(name) == nil {
+			t.Fatalf("scan command missing %s flag", name)
+		}
+	}
+	if cmd.Flags().Lookup("infer-environments").DefValue != "false" {
+		t.Fatalf("infer-environments default = %q, want false", cmd.Flags().Lookup("infer-environments").DefValue)
+	}
+	if cmd.Flags().Lookup("exceptions").Value.Type() != "stringArray" {
+		t.Fatalf("exceptions flag type = %q, want stringArray", cmd.Flags().Lookup("exceptions").Value.Type())
+	}
+}
+
+func TestResolveContextPathsRejectsAmbiguousDeclarations(t *testing.T) {
+	config := governance.ScanConfig{Inputs: governance.ContextInputs{
+		OwnershipImport: "config-ownership.yaml",
+		Exceptions:      []string{"config-exceptions"},
+	}}
+	tests := []struct {
+		name string
+		opts scanOptions
+		want string
+	}{
+		{name: "ownership", opts: scanOptions{OwnershipImport: "cli-ownership.yaml"}, want: "both --ownership-import"},
+		{name: "exceptions", opts: scanOptions{Exceptions: []string{"cli-exceptions"}}, want: "both --exceptions"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, _, err := resolveContextPaths(tt.opts, config)
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("resolveContextPaths error = %v, want %q", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestEngineExceptionInputsAreAnnotationOnly(t *testing.T) {
+	now := time.Date(2026, 7, 24, 0, 0, 0, 0, time.UTC)
+	records := []governance.ExceptionRecord{{
+		Metadata: governance.Metadata{Name: "EXC-ACTIVE"},
+		Spec: governance.ExceptionSpec{
+			ControlIDs: []string{"MG-MTLS-001"}, Approver: "security", Ticket: "https://tickets.example/active",
+		},
+		ExpiresAt: now.Add(time.Hour),
+	}, {
+		Metadata: governance.Metadata{Name: "EXC-EXPIRED"},
+		Spec: governance.ExceptionSpec{
+			ControlIDs: []string{"MG-MTLS-001"}, Approver: "security", Ticket: "https://tickets.example/expired",
+		},
+		ExpiresAt: now.Add(-time.Hour),
+	}}
+	workloads := []governance.WorkloadContext{
+		{Ref: resolver.WorkloadRef{Kind: "Deployment", Namespace: "payments", Name: "api"}, ExceptionID: "EXC-ACTIVE"},
+		{Ref: resolver.WorkloadRef{Kind: "Deployment", Namespace: "payments", Name: "worker"}, ExceptionID: "MISSING"},
+	}
+	resources, exceptions, bindings := engineExceptionInputs(records, workloads, now)
+	if len(exceptions) != 2 || exceptions[0].Expired || !exceptions[1].Expired {
+		t.Fatalf("exception inputs = %#v", exceptions)
+	}
+	if len(bindings) != 2 {
+		t.Fatalf("bindings = %#v, want exact annotated workload bindings", bindings)
+	}
+	dangling := false
+	for _, resource := range resources {
+		if resource.Kind == "ExceptionReference" {
+			dangling = true
+		}
+	}
+	if !dangling {
+		t.Fatalf("resources = %#v, want dangling annotation validation target", resources)
 	}
 }
 
@@ -347,9 +424,9 @@ controls:
 	want := [][]string{
 		{"ACME-INV-001", "MG-AUTHZ-001", "MG-AUTHZ-002", "MG-AUTHZ-003", "MG-AUTHZ-004", "MG-AUTHZ-005", "MG-AUTHZ-006", "MG-AUTHZ-007", "MG-GW-005", "MG-MTLS-002", "MG-MTLS-007"},
 		{"MG-AUTHZ-001", "MG-AUTHZ-002", "MG-AUTHZ-003", "MG-AUTHZ-004", "MG-AUTHZ-005", "MG-AUTHZ-006", "MG-AUTHZ-007", "MG-GW-005", "MG-MTLS-002", "MG-MTLS-007"},
-		{"ACME-ENV-001", "ACME-INV-001"},
+		{"ACME-ENV-001", "ACME-GOV-002", "ACME-INV-001", "MG-AUTHZ-001", "MG-AUTHZ-002", "MG-AUTHZ-003", "MG-AUTHZ-004", "MG-AUTHZ-005", "MG-AUTHZ-006", "MG-AUTHZ-007", "MG-ENV-001", "MG-GW-005", "MG-MTLS-001", "MG-MTLS-002", "MG-MTLS-003", "MG-MTLS-005", "MG-MTLS-006", "MG-MTLS-007", "MG-OWN-001", "MG-OWN-002"},
 		{"MG-MTLS-001", "MG-MTLS-002", "MG-MTLS-003", "MG-MTLS-005", "MG-MTLS-006", "MG-MTLS-007"},
-		{"ACME-ENV-001", "ACME-GOV-002", "ACME-INV-001", "MG-AUTHZ-001", "MG-AUTHZ-002", "MG-AUTHZ-003", "MG-AUTHZ-004", "MG-AUTHZ-005", "MG-AUTHZ-006", "MG-AUTHZ-007", "MG-GW-005", "MG-MTLS-001", "MG-MTLS-002", "MG-MTLS-003", "MG-MTLS-005", "MG-MTLS-006", "MG-MTLS-007"},
+		{"ACME-ENV-001", "ACME-GOV-002", "ACME-INV-001", "MG-AUTHZ-001", "MG-AUTHZ-002", "MG-AUTHZ-003", "MG-AUTHZ-004", "MG-AUTHZ-005", "MG-AUTHZ-006", "MG-AUTHZ-007", "MG-ENV-001", "MG-GW-005", "MG-MTLS-001", "MG-MTLS-002", "MG-MTLS-003", "MG-MTLS-005", "MG-MTLS-006", "MG-MTLS-007", "MG-OWN-001", "MG-OWN-002"},
 	}
 	for index := range want {
 		if strings.Join(got[index].AffectedControls, ",") != strings.Join(want[index], ",") {

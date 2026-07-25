@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/openmeshguard/openmeshguard/internal/engine"
 	"github.com/openmeshguard/openmeshguard/internal/normalize"
@@ -50,7 +51,7 @@ func TestEngineFindingsReplaceProvisionalPathEndToEnd(t *testing.T) {
 				Posture:   workloadPosture(resolver.ModeNotApplicable, resolver.MTLSNotInMesh, nil),
 				Namespace: engine.NamespaceInput{Name: "payments"},
 			},
-			wantCount: 14,
+			wantCount: 16,
 			wantStatuses: map[string]string{
 				"MG-AUTHZ-001": "not-applicable",
 				"MG-AUTHZ-002": "not-applicable",
@@ -66,6 +67,8 @@ func TestEngineFindingsReplaceProvisionalPathEndToEnd(t *testing.T) {
 				"MG-MTLS-006":  "not-applicable",
 				"MG-MTLS-007":  "not-applicable",
 				"MG-GW-005":    "not-applicable",
+				"MG-OWN-001":   "not-applicable",
+				"MG-OWN-002":   "not-applicable",
 			},
 		},
 		{
@@ -88,7 +91,18 @@ func TestEngineFindingsReplaceProvisionalPathEndToEnd(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			evaluated, err := engine.Evaluate(packs, engine.Input{Workloads: []engine.WorkloadInput{tt.workload}})
+			tt.workload.Namespace.Environment = "production"
+			tt.workload.Namespace.EnvironmentKnown = true
+			tt.workload.Environment = "production"
+			tt.workload.EnvironmentKnown = true
+			tt.workload.Owner = "payments-team"
+			tt.workload.OwnerKnown = true
+			tt.workload.AppID = "payments"
+			tt.workload.AppIDKnown = true
+			evaluated, err := engine.Evaluate(packs, engine.Input{
+				Workloads:                []engine.WorkloadInput{tt.workload},
+				NamespaceTargetsComplete: true,
+			})
 			if err != nil {
 				t.Fatalf("evaluate controls: %v", err)
 			}
@@ -140,14 +154,17 @@ func TestDefaultOutputMakesUnwiredEvidenceUnknown(t *testing.T) {
 		statuses[finding.ControlID] = finding.Status
 		unknownReasons[finding.ControlID] = finding.UnknownReason
 	}
-	if statuses["MG-MTLS-001"] != "open" {
-		t.Fatalf("MG-MTLS-001 status = %q, want open", statuses["MG-MTLS-001"])
+	if _, exists := statuses["MG-MTLS-001"]; exists {
+		t.Fatalf("MG-MTLS-001 status = %q, want production control filtered for unclassified workload", statuses["MG-MTLS-001"])
 	}
 	if statuses["MG-MTLS-002"] != "unknown" || unknownReasons["MG-MTLS-002"] == "" {
 		t.Fatalf("MG-MTLS-002 status/reason = %q/%q, want unknown with reason", statuses["MG-MTLS-002"], unknownReasons["MG-MTLS-002"])
 	}
 	if _, exists := statuses["MG-MTLS-003"]; exists {
 		t.Fatalf("MG-MTLS-003 status = %q, want no finding for known non-disabled posture", statuses["MG-MTLS-003"])
+	}
+	if statuses["MG-ENV-001"] != "open" || statuses["MG-OWN-001"] != "open" {
+		t.Fatalf("governance statuses = env %q owner %q, want explicit unclassified and unowned findings", statuses["MG-ENV-001"], statuses["MG-OWN-001"])
 	}
 }
 
@@ -179,6 +196,57 @@ func TestInventoryZtunnelNodesTotalPreservesUnknown(t *testing.T) {
 		if !strings.Contains(got, fragment) {
 			t.Fatalf("data plane inventory = %s, want fragment %s", got, fragment)
 		}
+	}
+}
+
+func TestBuildReportProjectsGovernanceAndExceptionEvidence(t *testing.T) {
+	posture := workloadPosture(resolver.ModeSidecar, resolver.MTLSPermissive, nil)
+	expiresAt := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
+	report := buildReport(
+		ScanInput{WorkloadPostures: []resolver.WorkloadResult{posture}},
+		nil,
+		engine.Result{
+			Context: engine.ReportContext{
+				EnvironmentInference: true,
+				ScanConfig:           true,
+				OwnershipImport:      true,
+				Exceptions:           true,
+				Classification: engine.ClassificationSummary{
+					NamespacesClassified: 1,
+					ByEnvironment:        map[string]int{"production": 1},
+				},
+				Workloads: []engine.WorkloadContext{{
+					Ref: posture.Ref, Environment: "production", EnvironmentConfidence: "observed", EnvironmentKnown: true,
+					Owner: "payments-team", OwnerKnown: true, AppID: "payments", AppIDKnown: true,
+				}},
+			},
+			Findings: []engine.Finding{{
+				ID: "MG-MTLS-001-test", ControlID: "MG-MTLS-001", Severity: "high", EvidenceType: "config",
+				Status: "excepted", Confidence: "resolved", Resources: []engine.ResourceRef{{Kind: "Deployment", Namespace: "payments", Name: "api"}},
+				Reasoning: "mTLS is permissive",
+				Exception: &engine.ExceptionEvidence{
+					ID: "EXC-42", ExpiresAt: expiresAt, Approver: "security@example.com", Ticket: "https://tickets.example.com/42",
+				},
+			}},
+		},
+	)
+	if !report.Scan.EnvironmentInference || !report.Scan.DataSources.ContextFiles.ScanConfig ||
+		!report.Scan.DataSources.ContextFiles.OwnershipImport || !report.Scan.DataSources.ContextFiles.Exceptions {
+		t.Fatalf("scan context disclosure = %#v", report.Scan)
+	}
+	if report.Inventory.Classification == nil || report.Inventory.Classification.NamespacesClassified != 1 {
+		t.Fatalf("classification inventory = %#v", report.Inventory.Classification)
+	}
+	workload := report.WorkloadPostures[0]
+	if workload.Environment == nil || *workload.Environment != "production" ||
+		workload.EnvironmentConfidence == nil || *workload.EnvironmentConfidence != "observed" ||
+		workload.Owner == nil || *workload.Owner != "payments-team" ||
+		workload.AppID == nil || *workload.AppID != "payments" {
+		t.Fatalf("workload governance = %#v", workload)
+	}
+	if report.Findings[0].Status != "excepted" || report.Findings[0].Exception == nil ||
+		report.Findings[0].Exception.ID != "EXC-42" || report.Findings[0].Exception.Expired {
+		t.Fatalf("exception evidence = %#v", report.Findings[0])
 	}
 }
 

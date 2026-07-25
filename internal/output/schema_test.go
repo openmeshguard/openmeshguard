@@ -126,8 +126,7 @@ func TestGeneratedScanOutputMatchesSchema(t *testing.T) {
 		}},
 	}
 
-	var output bytes.Buffer
-	err := WriteScanJSON(&output, ScanInput{
+	scanInput := ScanInput{
 		GeneratedAt:     time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
 		ScannerVersion:  "dev",
 		ResolverVersion: resolved.Version(),
@@ -162,7 +161,42 @@ func TestGeneratedScanOutputMatchesSchema(t *testing.T) {
 			},
 			Authz: resolved.ResolveAuthz(resolver.WorkloadInput{}),
 		}},
-	})
+	}
+	packs, err := engine.LoadBuiltins()
+	if err != nil {
+		t.Fatalf("load built-ins: %v", err)
+	}
+	evaluationInput := defaultEngineInput(scanInput)
+	for index := range evaluationInput.Workloads {
+		evaluationInput.Workloads[index].Environment = "production"
+		evaluationInput.Workloads[index].EnvironmentKnown = true
+		evaluationInput.Workloads[index].Namespace.Environment = "production"
+		evaluationInput.Workloads[index].Namespace.EnvironmentKnown = true
+		evaluationInput.Workloads[index].Owner = "payments-team"
+		evaluationInput.Workloads[index].OwnerKnown = true
+		evaluationInput.Workloads[index].AppID = "payments"
+		evaluationInput.Workloads[index].AppIDKnown = true
+	}
+	for index := range evaluationInput.Namespaces {
+		evaluationInput.Namespaces[index].Environment = "production"
+		evaluationInput.Namespaces[index].EnvironmentKnown = true
+	}
+	evaluated, err := engine.Evaluate(packs, evaluationInput)
+	if err != nil {
+		t.Fatalf("evaluate controls: %v", err)
+	}
+	evaluated.Context = engine.ReportContext{
+		Classification: engine.ClassificationSummary{
+			NamespacesClassified: 2,
+			ByEnvironment:        map[string]int{"production": 2},
+		},
+		Workloads: []engine.WorkloadContext{
+			{Ref: scanInput.WorkloadPostures[0].Ref, Environment: "production", EnvironmentConfidence: "user-supplied", EnvironmentKnown: true, Owner: "payments-team", OwnerKnown: true, AppID: "payments", AppIDKnown: true},
+			{Ref: scanInput.WorkloadPostures[1].Ref, Environment: "production", EnvironmentConfidence: "user-supplied", EnvironmentKnown: true, Owner: "payments-team", OwnerKnown: true, AppID: "payments", AppIDKnown: true},
+		},
+	}
+	var output bytes.Buffer
+	err = WriteScanJSONWithEvaluation(&output, scanInput, packs, evaluated)
 	if err != nil {
 		t.Fatalf("write generated scan output: %v", err)
 	}
@@ -208,8 +242,8 @@ func TestGeneratedScanOutputMatchesSchema(t *testing.T) {
 	if !seenSuggestedYAML {
 		t.Fatal("generated findings missing rendered suggestedYAML remediation")
 	}
-	if len(generated.Scores.Categories) != 3 {
-		t.Fatalf("score categories = %#v, want authorization, exposure, and mTLS categories", generated.Scores.Categories)
+	if len(generated.Scores.Categories) != 4 {
+		t.Fatalf("score categories = %#v, want authorization, exposure, governance, and mTLS categories", generated.Scores.Categories)
 	}
 	authzCategory := generated.Scores.Categories[0]
 	if authzCategory.Category != "authz" || authzCategory.Grade != "unknown" || authzCategory.PassRate != nil || authzCategory.Unknown != 7 {
@@ -219,7 +253,11 @@ func TestGeneratedScanOutputMatchesSchema(t *testing.T) {
 	if exposureCategory.Category != "exposure" || exposureCategory.Grade != "unknown" || exposureCategory.PassRate != nil {
 		t.Fatalf("generated exposure category = %#v, want no applicable evaluations", exposureCategory)
 	}
-	mtlsCategory := generated.Scores.Categories[2]
+	governanceCategory := generated.Scores.Categories[2]
+	if governanceCategory.Category != "governance" || governanceCategory.Grade != "A" || governanceCategory.PassRate == nil || *governanceCategory.PassRate != 1 {
+		t.Fatalf("generated governance category = %#v, want complete governance metadata", governanceCategory)
+	}
+	mtlsCategory := generated.Scores.Categories[3]
 	if mtlsCategory.Category != "mtls" || mtlsCategory.Grade != "F" || mtlsCategory.PassRate == nil || *mtlsCategory.PassRate != 0.5 {
 		t.Fatalf("generated mTLS category = %#v, want F grade at 50%% pass rate", mtlsCategory)
 	}

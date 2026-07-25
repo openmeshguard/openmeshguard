@@ -6,8 +6,10 @@ import (
 	"io"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/openmeshguard/openmeshguard/internal/collect"
+	governance "github.com/openmeshguard/openmeshguard/internal/context"
 	"github.com/openmeshguard/openmeshguard/internal/engine"
 	"github.com/openmeshguard/openmeshguard/internal/normalize"
 	"github.com/openmeshguard/openmeshguard/internal/output"
@@ -21,12 +23,16 @@ import (
 )
 
 type scanOptions struct {
-	Kubeconfig    string
-	Context       string
-	AllNamespaces bool
-	Namespaces    []string
-	RootNamespace string
-	ControlPacks  []string
+	Kubeconfig        string
+	Context           string
+	AllNamespaces     bool
+	Namespaces        []string
+	RootNamespace     string
+	ControlPacks      []string
+	ScanConfig        string
+	OwnershipImport   string
+	Exceptions        []string
+	InferEnvironments bool
 }
 
 func newScanCommand(info versionInfo) *cobra.Command {
@@ -47,6 +53,10 @@ func newScanCommand(info versionInfo) *cobra.Command {
 	cmd.Flags().StringArrayVar(&opts.Namespaces, "namespace", nil, "namespace to scan; may be repeated")
 	cmd.Flags().StringVar(&opts.RootNamespace, "root-namespace", collect.DefaultRootNamespace, "Istio mesh root namespace")
 	cmd.Flags().StringArrayVar(&opts.ControlPacks, "control-pack", nil, "user control pack path; may be repeated")
+	cmd.Flags().StringVar(&opts.ScanConfig, "scan-config", "", "governance scan config path")
+	cmd.Flags().StringVar(&opts.OwnershipImport, "ownership-import", "", "ownership import YAML or CSV path")
+	cmd.Flags().StringArrayVar(&opts.Exceptions, "exceptions", nil, "exception record file or directory; may be repeated")
+	cmd.Flags().BoolVar(&opts.InferEnvironments, "infer-environments", false, "infer production from namespace names and disclose inferred confidence")
 	return cmd
 }
 
@@ -84,13 +94,54 @@ func (o *scanOptions) normalizeAndValidate() error {
 		controlPacks = append(controlPacks, path)
 	}
 	o.ControlPacks = controlPacks
+	o.ScanConfig = strings.TrimSpace(o.ScanConfig)
+	o.OwnershipImport = strings.TrimSpace(o.OwnershipImport)
+	exceptions := make([]string, 0, len(o.Exceptions))
+	for _, path := range o.Exceptions {
+		path = strings.TrimSpace(path)
+		if path == "" {
+			return fmt.Errorf("exception path must not be empty")
+		}
+		exceptions = append(exceptions, path)
+	}
+	o.Exceptions = exceptions
 	return nil
 }
 
 func runScan(ctx context.Context, info versionInfo, opts scanOptions, stdout io.Writer) error {
+	scanConfig, err := governance.LoadScanConfig(opts.ScanConfig)
+	if err != nil {
+		return fmt.Errorf("load scan config: %w", err)
+	}
+	ownershipPath, exceptionPaths, err := resolveContextPaths(opts, scanConfig)
+	if err != nil {
+		return err
+	}
+	ownershipImport, err := governance.LoadOwnershipImport(ownershipPath)
+	if err != nil {
+		return fmt.Errorf("load ownership import: %w", err)
+	}
+	exceptionRecords, err := governance.LoadExceptions(exceptionPaths)
+	if err != nil {
+		return fmt.Errorf("load exceptions: %w", err)
+	}
+
 	packs, err := engine.LoadPacks(opts.ControlPacks)
 	if err != nil {
 		return fmt.Errorf("load control packs: %w", err)
+	}
+	controlOverrides, err := engineControlOverrides(scanConfig.Controls.Overrides, packs)
+	if err != nil {
+		return fmt.Errorf("load scan config: %w", err)
+	}
+	if opts.ScanConfig != "" {
+		packs = append(packs, engine.Pack{
+			APIVersion: engine.APIVersion,
+			Kind:       engine.Kind,
+			Metadata:   engine.Metadata{Name: "scan-config:" + scanConfig.Metadata.Name, Version: scanConfig.Metadata.Version},
+			File:       scanConfig.File,
+			Source:     engine.SourceUser,
+		})
 	}
 	if err := validateScanControlScopes(packs); err != nil {
 		return err
@@ -125,12 +176,27 @@ func runScan(ctx context.Context, info versionInfo, opts scanOptions, stdout io.
 	normalized := normalize.Build(snapshot)
 	resolved := resolver.New()
 	engineNamespaces := namespaceInputs(snapshot, normalized.Workloads, opts.Namespaces)
+	contextResult := governance.Resolve(governance.ResolveInput{
+		ClusterContext:    clusterContext,
+		InferEnvironments: opts.InferEnvironments,
+		Config:            scanConfig,
+		OwnershipImport:   ownershipImport,
+		Namespaces:        governanceNamespaceInputs(engineNamespaces),
+		Workloads:         governanceWorkloadInputs(snapshot, normalized.Workloads),
+	})
+	for index := range engineNamespaces {
+		applyNamespaceContext(&engineNamespaces[index], contextResult.Namespaces[engineNamespaces[index].Name])
+	}
 	namespacesByName := make(map[string]engine.NamespaceInput, len(engineNamespaces))
 	for _, namespace := range engineNamespaces {
 		namespacesByName[namespace.Name] = namespace
 	}
 	workloadPostures := make([]resolver.WorkloadResult, 0, len(normalized.Workloads))
 	engineWorkloads := make([]engine.WorkloadInput, 0, len(normalized.Workloads))
+	workloadContexts := make(map[string]governance.WorkloadContext, len(contextResult.Workloads))
+	for _, workloadContext := range contextResult.Workloads {
+		workloadContexts[workloadContextKey(workloadContext.Ref)] = workloadContext
+	}
 	for _, workload := range normalized.Workloads {
 		posture := resolver.WorkloadResult{
 			Ref:   workload.Ref,
@@ -143,12 +209,21 @@ func runScan(ctx context.Context, info versionInfo, opts scanOptions, stdout io.
 		if namespaceName == "" {
 			namespaceName = workload.Ref.Namespace
 		}
-		engineWorkloads = append(engineWorkloads, engine.WorkloadInput{Posture: posture, Namespace: namespacesByName[namespaceName]})
+		engineWorkload := engine.WorkloadInput{Posture: posture, Namespace: namespacesByName[namespaceName]}
+		applyWorkloadContext(&engineWorkload, workloadContexts[workloadContextKey(workload.Ref)])
+		engineWorkloads = append(engineWorkloads, engineWorkload)
 	}
+	evaluationTime := time.Now().UTC()
+	exceptionResources, exceptionInputs, exceptionBindings := engineExceptionInputs(
+		exceptionRecords,
+		contextResult.Workloads,
+		evaluationTime,
+	)
 	evaluated, err := engine.Evaluate(packs, engine.Input{
 		Workloads:                engineWorkloads,
 		Namespaces:               meshNamespaceInputs(engineNamespaces),
 		NamespaceTargetsComplete: true,
+		Resources:                exceptionResources,
 		InventoryAvailability:    inventoryAvailability(snapshot),
 		Inventory: map[string]any{
 			"counts":    normalized.Inventory.Counts,
@@ -160,12 +235,28 @@ func runScan(ctx context.Context, info versionInfo, opts scanOptions, stdout io.
 				"meshNetworks":          normalized.Inventory.MultiCluster.MeshNetworks,
 			},
 		},
+		Params:            scanConfig.Controls.Parameters.Defaults,
+		EnvironmentParams: scanConfig.Controls.Parameters.Environments,
+		ControlOverrides:  controlOverrides,
 	})
 	if err != nil {
 		return fmt.Errorf("evaluate controls: %w", err)
 	}
+	evaluated = engine.ApplyExceptions(evaluated, exceptionInputs, exceptionBindings)
+	classified, unclassified, byEnvironment := governance.ClassificationCounts(contextResult.Namespaces)
+	evaluated.Context = reportContext(
+		contextResult,
+		classified,
+		unclassified,
+		byEnvironment,
+		opts.InferEnvironments,
+		opts.ScanConfig != "",
+		ownershipPath != "",
+		len(exceptionPaths) > 0,
+	)
 
 	return output.WriteScanJSONWithEvaluation(stdout, output.ScanInput{
+		GeneratedAt:       evaluationTime,
 		ScannerVersion:    info.Version,
 		ResolverVersion:   resolved.Version(),
 		ClusterContext:    clusterContext,
@@ -179,12 +270,329 @@ func runScan(ctx context.Context, info versionInfo, opts scanOptions, stdout io.
 func validateScanControlScopes(packs []engine.Pack) error {
 	for _, pack := range packs {
 		for _, control := range pack.Controls {
-			if control.Scope == "resource" {
+			if control.Scope == "resource" && !contextResourceControl(control) {
 				return fmt.Errorf("%s: control %s: resource scope is unavailable in scan until normalized resource collection is implemented", pack.File, control.ID)
 			}
 		}
 	}
 	return nil
+}
+
+func contextResourceControl(control engine.Control) bool {
+	if len(control.Match.APIGroups) != 1 || control.Match.APIGroups[0] != "openmeshguard.io" {
+		return false
+	}
+	for _, kind := range control.Match.Kinds {
+		if kind != governance.ExceptionKind && kind != "ExceptionReference" {
+			return false
+		}
+	}
+	return len(control.Match.Kinds) > 0
+}
+
+func resolveContextPaths(opts scanOptions, config governance.ScanConfig) (string, []string, error) {
+	ownershipPath := opts.OwnershipImport
+	if ownershipPath != "" && config.Inputs.OwnershipImport != "" {
+		return "", nil, fmt.Errorf("ownership import is set by both --ownership-import and scan config inputs.ownershipImport")
+	}
+	if ownershipPath == "" {
+		ownershipPath = config.Inputs.OwnershipImport
+	}
+	exceptionPaths := append([]string(nil), opts.Exceptions...)
+	if len(exceptionPaths) > 0 && len(config.Inputs.Exceptions) > 0 {
+		return "", nil, fmt.Errorf("exceptions are set by both --exceptions and scan config inputs.exceptions")
+	}
+	if len(exceptionPaths) == 0 {
+		exceptionPaths = append(exceptionPaths, config.Inputs.Exceptions...)
+	}
+	return ownershipPath, exceptionPaths, nil
+}
+
+func engineControlOverrides(overrides []governance.ControlOverride, packs []engine.Pack) (map[string]engine.ControlOverride, error) {
+	known := map[string]struct{}{}
+	for _, pack := range packs {
+		for _, control := range pack.Controls {
+			known[control.ID] = struct{}{}
+		}
+	}
+	out := make(map[string]engine.ControlOverride, len(overrides))
+	for _, override := range overrides {
+		if _, exists := known[override.ControlID]; !exists {
+			return nil, fmt.Errorf("controls.overrides references unknown control %s", override.ControlID)
+		}
+		var environments *[]string
+		if override.Environments != nil {
+			copied := append([]string(nil), (*override.Environments)...)
+			environments = &copied
+		}
+		severities := make(map[string]string, len(override.SeverityByEnvironment))
+		for environment, severity := range override.SeverityByEnvironment {
+			severities[environment] = severity
+		}
+		out[override.ControlID] = engine.ControlOverride{
+			Environments:          environments,
+			SeverityByEnvironment: severities,
+		}
+	}
+	return out, nil
+}
+
+func governanceNamespaceInputs(namespaces []engine.NamespaceInput) []governance.NamespaceInput {
+	out := make([]governance.NamespaceInput, 0, len(namespaces))
+	for _, namespace := range namespaces {
+		out = append(out, governance.NamespaceInput{
+			Name:        namespace.Name,
+			Labels:      namespace.Labels,
+			LabelsKnown: namespaceLabelsKnown(namespace),
+		})
+	}
+	return out
+}
+
+func governanceWorkloadInputs(snapshot collect.Snapshot, workloads []resolver.WorkloadInput) []governance.WorkloadInput {
+	labelsKnown := namespacesKnownForContext(snapshot)
+	out := make([]governance.WorkloadInput, 0, len(workloads))
+	for _, workload := range workloads {
+		namespace := workload.Namespace.Name
+		if namespace == "" {
+			namespace = workload.Ref.Namespace
+		}
+		out = append(out, governance.WorkloadInput{
+			Ref:         workload.Ref,
+			Labels:      workload.Labels,
+			Annotations: workloadAnnotations(snapshot, workload.Ref),
+			Namespace: governance.NamespaceInput{
+				Name:        namespace,
+				Labels:      workload.Namespace.Labels,
+				LabelsKnown: labelsKnown,
+			},
+		})
+	}
+	return out
+}
+
+func namespacesKnownForContext(snapshot collect.Snapshot) bool {
+	for _, permission := range snapshot.PermissionSummary {
+		if permission.APIGroup == "" && permission.Resource == "namespaces" && !permission.Granted {
+			return false
+		}
+	}
+	return true
+}
+
+func namespaceLabelsKnown(namespace engine.NamespaceInput) bool {
+	availability, exists := namespace.Availability["labels"]
+	return !exists || availability.Available
+}
+
+func workloadAnnotations(snapshot collect.Snapshot, ref resolver.WorkloadRef) map[string]string {
+	switch ref.Kind {
+	case "Deployment":
+		for _, resource := range snapshot.Deployments {
+			if resource.Namespace == ref.Namespace && resource.Name == ref.Name {
+				return copyStringValues(resource.Annotations)
+			}
+		}
+	case "StatefulSet":
+		for _, resource := range snapshot.StatefulSets {
+			if resource.Namespace == ref.Namespace && resource.Name == ref.Name {
+				return copyStringValues(resource.Annotations)
+			}
+		}
+	case "DaemonSet":
+		for _, resource := range snapshot.DaemonSets {
+			if resource.Namespace == ref.Namespace && resource.Name == ref.Name {
+				return copyStringValues(resource.Annotations)
+			}
+		}
+	case "Pod":
+		for _, resource := range snapshot.Pods {
+			if resource.Namespace == ref.Namespace && resource.Name == ref.Name {
+				return copyStringValues(resource.Annotations)
+			}
+		}
+	}
+	return nil
+}
+
+func copyStringValues(values map[string]string) map[string]string {
+	if values == nil {
+		return nil
+	}
+	out := make(map[string]string, len(values))
+	for key, value := range values {
+		out[key] = value
+	}
+	return out
+}
+
+func applyNamespaceContext(namespace *engine.NamespaceInput, classification governance.Classification) {
+	namespace.Environment = classification.Environment
+	namespace.EnvironmentConfidence = classification.Confidence
+	namespace.EnvironmentKnown = classification.Known
+	if classification.Source != "" {
+		namespace.EvidenceSources = append(namespace.EvidenceSources, classification.Source)
+	}
+	if !classification.Known {
+		if namespace.Availability == nil {
+			namespace.Availability = map[string]engine.Availability{}
+		}
+		namespace.Availability["environment"] = engine.Availability{Reason: classification.Reason}
+	}
+}
+
+func applyWorkloadContext(workload *engine.WorkloadInput, resolved governance.WorkloadContext) {
+	workload.Environment = resolved.Classification.Environment
+	workload.EnvironmentConfidence = resolved.Classification.Confidence
+	workload.EnvironmentKnown = resolved.Classification.Known
+	workload.Owner = resolved.Ownership.Owner
+	workload.OwnerKnown = resolved.Ownership.OwnerKnown
+	workload.AppID = resolved.Ownership.AppID
+	workload.AppIDKnown = resolved.Ownership.AppIDKnown
+	workload.EvidenceSources = contextEvidenceSources(resolved)
+	if workload.Availability == nil {
+		workload.Availability = map[string]engine.Availability{}
+	}
+	if !workload.EnvironmentKnown {
+		workload.Availability["environment"] = engine.Availability{Reason: resolved.Classification.Reason}
+	}
+	if !workload.OwnerKnown {
+		workload.Availability["owner"] = engine.Availability{Reason: resolved.Ownership.OwnerReason}
+	}
+	if !workload.AppIDKnown {
+		workload.Availability["appId"] = engine.Availability{Reason: resolved.Ownership.AppIDReason}
+	}
+}
+
+func contextEvidenceSources(resolved governance.WorkloadContext) []string {
+	values := []string{resolved.Classification.Source}
+	for _, source := range []string{resolved.Ownership.AppIDSource, resolved.Ownership.OwnerSource} {
+		switch {
+		case source == "scan-config":
+			values = append(values, "scan-config")
+		case source == "ownership-import":
+			values = append(values, "ownership-import")
+		case strings.Contains(source, "label"):
+			values = append(values, "kubernetes-api")
+		}
+	}
+	seen := map[string]struct{}{}
+	var out []string
+	for _, value := range values {
+		if value == "" {
+			continue
+		}
+		if _, exists := seen[value]; exists {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	return out
+}
+
+func engineExceptionInputs(
+	records []governance.ExceptionRecord,
+	workloads []governance.WorkloadContext,
+	now time.Time,
+) ([]engine.ResourceInput, []engine.ExceptionInput, []engine.ExceptionBinding) {
+	byID := make(map[string]governance.ExceptionRecord, len(records))
+	resources := make([]engine.ResourceInput, 0, len(records))
+	exceptions := make([]engine.ExceptionInput, 0, len(records))
+	for _, record := range records {
+		byID[record.Metadata.Name] = record
+		expired := len(record.ValidationErrors) == 0 && !record.ExpiresAt.After(now)
+		validationErrors := make([]any, 0, len(record.ValidationErrors))
+		for _, validationError := range record.ValidationErrors {
+			validationErrors = append(validationErrors, validationError)
+		}
+		valid := len(validationErrors) == 0
+		resources = append(resources, engine.ResourceInput{
+			APIVersion: governance.APIVersion,
+			Kind:       governance.ExceptionKind,
+			Name:       record.Metadata.Name,
+			Fields: map[string]any{
+				"validationErrors": validationErrors,
+				"valid":            valid,
+				"expired":          expired,
+			},
+			EvidenceSources: []string{"exception-record"},
+		})
+		exceptions = append(exceptions, engine.ExceptionInput{
+			ID:         record.Metadata.Name,
+			ControlIDs: append([]string(nil), record.Spec.ControlIDs...),
+			Valid:      valid,
+			Expired:    expired,
+			ExpiresAt:  record.ExpiresAt,
+			Approver:   record.Spec.Approver,
+			Ticket:     record.Spec.Ticket,
+		})
+	}
+
+	bindings := make([]engine.ExceptionBinding, 0, len(workloads))
+	for _, workload := range workloads {
+		if workload.ExceptionID == "" {
+			continue
+		}
+		resource := engine.ResourceRef{
+			Kind:      workload.Ref.Kind,
+			Namespace: workload.Ref.Namespace,
+			Name:      workload.Ref.Name,
+		}
+		bindings = append(bindings, engine.ExceptionBinding{Resource: resource, ExceptionID: workload.ExceptionID})
+		if _, exists := byID[workload.ExceptionID]; exists {
+			continue
+		}
+		name := workload.ExceptionID + "@" + workload.Ref.Kind + "/" + workload.Ref.Namespace + "/" + workload.Ref.Name
+		resources = append(resources, engine.ResourceInput{
+			APIVersion: governance.APIVersion,
+			Kind:       "ExceptionReference",
+			Namespace:  workload.Ref.Namespace,
+			Name:       name,
+			Fields: map[string]any{
+				"validationErrors": []any{"annotation references an exception record that was not loaded"},
+			},
+			EvidenceSources: []string{"kubernetes-api"},
+		})
+	}
+	return resources, exceptions, bindings
+}
+
+func reportContext(
+	resolved governance.Result,
+	classified, unclassified int,
+	byEnvironment map[string]int,
+	inference, scanConfig, ownershipImport, exceptions bool,
+) engine.ReportContext {
+	workloads := make([]engine.WorkloadContext, 0, len(resolved.Workloads))
+	for _, workload := range resolved.Workloads {
+		workloads = append(workloads, engine.WorkloadContext{
+			Ref:                   workload.Ref,
+			Environment:           workload.Classification.Environment,
+			EnvironmentConfidence: workload.Classification.Confidence,
+			EnvironmentKnown:      workload.Classification.Known,
+			Owner:                 workload.Ownership.Owner,
+			OwnerKnown:            workload.Ownership.OwnerKnown,
+			AppID:                 workload.Ownership.AppID,
+			AppIDKnown:            workload.Ownership.AppIDKnown,
+		})
+	}
+	return engine.ReportContext{
+		EnvironmentInference: inference,
+		ScanConfig:           scanConfig,
+		OwnershipImport:      ownershipImport,
+		Exceptions:           exceptions,
+		Classification: engine.ClassificationSummary{
+			NamespacesClassified:   classified,
+			NamespacesUnclassified: unclassified,
+			ByEnvironment:          byEnvironment,
+		},
+		Workloads: workloads,
+	}
+}
+
+func workloadContextKey(ref resolver.WorkloadRef) string {
+	return strings.Join([]string{ref.Cluster, ref.Namespace, ref.Kind, ref.Name}, "/")
 }
 
 func namespaceInputs(snapshot collect.Snapshot, workloads []resolver.WorkloadInput, requested []string) []engine.NamespaceInput {
@@ -334,8 +742,15 @@ func permissionEvidenceImpact(permission collect.Permission) ([]string, []string
 	key := permission.APIGroup + "/" + permission.Resource
 	switch key {
 	case "/namespaces":
-		paths = append(paths, "namespace.labels", "namespace.meshEnrollment")
-		return paths, []string{"namespace"}
+		paths = append(paths,
+			"namespace.labels",
+			"namespace.environment",
+			"namespace.meshEnrollment",
+			"workload.environment",
+			"workload.owner",
+			"workload.appId",
+		)
+		return paths, []string{"namespace", "workload"}
 	case "/pods":
 		paths = append(paths, "workload.dataPlaneMode", "workload.mtls", "workload.authorization")
 		return paths, []string{"workload", "namespace"}
