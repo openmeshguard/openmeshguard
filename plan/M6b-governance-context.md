@@ -9,17 +9,17 @@ Governance inputs land as first-class, unknown-first context: environment classi
 SPEC.md §9 (classification + ownership precedence), §10 (exceptions), §15 (context controls). Canonical schema `workloadPostures[].environment`/`environmentConfidence`/`owner`, `findings[].status` (`excepted`), `findings[].exception`, and `inventory.classification` are authoritative. Builds on M6a (ambient) being merged.
 
 ## Deliverables
-- [ ] Classification per SPEC §9 precedence: scan-config mapping → `openmeshguard.io/environment` label → fallback labels → `--infer-environments` heuristics → unclassified. Heuristics are OFF by default, produce `inferred` confidence, and are disclosed in the report. Unclassified is explicit, never a default. MG-ENV-001.
-- [ ] Ownership per SPEC §9 precedence: labels/annotations → scan-config → import file. MG-OWN-001/002.
-- [ ] Exception records + annotation matching per SPEC §10: a matched finding becomes `status: excepted` and is **never removed** from output; an expired exception restores the original severity and raises MG-EXC-002; MG-EXC-001 validates exception record fields. Exceptions are engine-applied after evaluation — controls never reference them.
-- [ ] Environment-scoped control evaluation activates: production-only controls (e.g. MG-MTLS-001) evaluate only classified-production workloads; unclassified is covered by MG-ENV-001, not by silent pass.
-- [ ] scan-config file format for classification/ownership/exception inputs. If this needs a new frozen-contract surface, STOP and propose it for human approval before writing.
-- [ ] Context controls ship as YAML/CEL data; e2e fixtures exercise classified/unclassified, owned/unowned, and active/expired-exception cases with goldens; RBAC proofs + determinism re-run.
+- [x] Classification per SPEC §9 precedence: scan-config mapping → `openmeshguard.io/environment` label → fallback labels → `--infer-environments` heuristics → unclassified. Heuristics are OFF by default, produce `inferred` confidence, and are disclosed in the report. Unclassified is explicit, never a default. MG-ENV-001.
+- [x] Ownership per SPEC §9 precedence: labels/annotations → scan-config → import file. MG-OWN-001/002.
+- [x] Exception records + annotation matching per SPEC §10: a matched finding becomes `status: excepted` and is **never removed** from output; an expired exception restores the original severity and raises MG-EXC-002; MG-EXC-001 validates exception record fields. Exceptions are engine-applied after evaluation — controls never reference them.
+- [x] Environment-scoped control evaluation activates: production-only controls (e.g. MG-MTLS-001) evaluate only classified-production workloads; unclassified is covered by MG-ENV-001, not by silent pass.
+- [x] scan-config file format for classification/ownership/exception inputs. If this needs a new frozen-contract surface, STOP and propose it for human approval before writing.
+- [x] Context controls ship as YAML/CEL data; e2e fixtures exercise classified/unclassified, owned/unowned, and active/expired-exception cases with goldens; RBAC proofs + determinism re-run.
 
 ## Definition of Done
-- Classification, ownership, and exception state all carry explicit unknowns; no path silently passes, fails, or drops a finding.
-- An excepted finding is present-but-marked in output; an expired exception is visibly restored with MG-EXC-002; proven by fixture goldens.
-- `--infer-environments` stays opt-in and its confidence is disclosed. `make build test lint schema-test` + e2e green.
+- [x] Classification, ownership, and exception state all carry explicit unknowns; no path silently passes, fails, or drops a finding.
+- [x] An excepted finding is present-but-marked in output; an expired exception is visibly restored with MG-EXC-002; proven by fixture goldens.
+- [x] `--infer-environments` stays opt-in and its confidence is disclosed. `make build test lint schema-test` + e2e green.
 
 ## Human review gate
 **Exception matching** — a mis-scoped exception silently suppresses a real finding, so the matching rules and the never-removed / expired-restored behavior are the highest-stakes semantics in this milestone. Review the exception fixture goldens deliberately.
@@ -63,3 +63,134 @@ Ambient (M6a), HTML/SARIF/score/exit-codes (M6c), Prometheus (M7).
   reason names both namespace label and annotation evidence after the review
   fix that degrades application-ID and owner fields independently. Their
   control/status sets do not change.
+
+### Decisions
+
+- The human-approved user-facing formats are documented in [governance
+  context](../docs/context.md). Classification uses an ordered source list:
+  exact namespace mapping, configured namespace labels, namespace-name regular
+  expressions, a whole-cluster environment, and cluster-context mappings are
+  available building blocks. Configured sources replace defaults; the default
+  label order is `openmeshguard.io/environment`, `environment`, then `env`.
+  An unavailable higher-precedence source stops as unknown. Complete unmatched
+  evidence becomes explicit `unclassified`; opt-in inference runs last and
+  reports `inferred` confidence.
+- Ownership applies configurable application-ID and owner keys to workload
+  labels, workload annotations, namespace labels, and namespace annotations in
+  that order. Config mappings then ownership imports resolve
+  application-ID-to-owner. One imported application ID therefore spans any
+  number of namespaces without namespace mappings. Configured key lists replace
+  the documented defaults.
+- Exception scope is deliberately annotation-only:
+  `openmeshguard.io/exception: <id>` on the exact workload resource references
+  one record. Records contain control IDs, owner, approver, justification,
+  HTTPS ticket, and RFC3339 expiration; they contain no scope selector, status,
+  revocation, or workflow state. Those broader capabilities remain in
+  Deferred.
+- Exceptions are applied only after CEL evaluation and only to an underlying
+  `open` finding. Active exceptions mutate that finding to `excepted` without
+  changing severity, reasoning, resources, or its chain. Expired exceptions
+  attach evidence but leave the finding `open` at the already-evaluated
+  severity and independently raise MG-EXC-002. Unknown, not-applicable, and
+  MG-EXC-001/002 findings cannot be excepted.
+- Scan-config control data uses the M3 engine hooks: pack parameters merge
+  below scan defaults and environment parameters; an override replaces a
+  control's environment list and can set severity by environment. Invalid
+  severities, duplicate overrides, and unknown control IDs fail loading.
+  Scan-config provenance is emitted as user pack
+  `scan-config:<metadata.name>` at the configured version.
+- MG-ENV-001, MG-OWN-001/002, and MG-EXC-001/002 are YAML/CEL data with
+  pass/fail/unknown/not-applicable tables. Built-in mTLS/authz/context pack
+  metadata is `0.3.0`; resolver provenance remains
+  `mtls/v5,authz/v8`.
+
+### Review findings
+
+1. **Fixed — exceptions could replace unknown/not-applicable state.** The
+   post-evaluation matcher originally changed any matching finding to
+   `excepted`. It now accepts only `open`; table regressions prove unknown and
+   not-applicable findings remain unchanged and unannotated.
+2. **Fixed — exception hygiene controls were accepted in records.** The engine
+   already refused to except MG-EXC-001/002, but such a record still passed
+   validation. Record validation now raises MG-EXC-001 for either control while
+   the engine skip remains defense in depth.
+3. **Fixed — annotation ownership lost evidence provenance.** Annotation-based
+   ownership resolved correctly but its evidence projection only recognized
+   label source names. Both workload and namespace annotations now contribute
+   `kubernetes-api`, with a regression covering scan-config classification plus
+   annotation ownership.
+4. **Fixed — ownership fields degraded together.** Missing namespace metadata
+   made both application ID and owner unknown even when one existed directly
+   on the workload. The fields now resolve independently; unavailable
+   higher-precedence owner evidence still blocks config/import fallback.
+5. **Fixed — golden mutation proof targeted a retired finding.** Once
+   MG-MTLS-001 became production-scoped, the old mutation deleted nothing from
+   the unclassified permissive golden. It now deletes MG-MTLS-002, and separate
+   mutations prove the guard rejects removal of both the active-excepted and
+   expired-restored MG-MTLS-001 findings.
+6. **Disposed as fixture isolation — an expired record affected every
+   governance scan that loaded it.** This is correct exception-hygiene
+   behavior, not an engine defect. The classified/owned and
+   unclassified/unowned cases no longer load exception files; only the active
+   and expired cases do, keeping each golden's purpose explicit.
+7. **Structured autoreview unavailable; no workaround used.** The prescribed
+   branch review command first failed because the sandbox made the Codex state
+   database read-only. Its escalated retry was rejected because it would
+   export the branch bundle to an external review service without separate
+   authorization. A local read-only adversarial review found and fixed items
+   1–5; the final local diff has no remaining actionable finding.
+
+### Flags raised
+
+- The canonical report fields were implemented against the unchanged
+  [canonical JSON schema](../docs/contracts/canonical-json-schema.json), and
+  exception application follows the unchanged [control-format
+  boundary](../docs/contracts/control-format.md) that controls never reference
+  exceptions. No file in `docs/contracts/` changed.
+- No exported type in `internal/resolver` or `internal/output` changed.
+  `git diff origin/main...HEAD -- docs/contracts internal/resolver deploy/rbac`
+  is empty, satisfying the frozen-contract and RBAC approval gates in
+  [AGENTS.md](../AGENTS.md).
+- No Kubernetes resource or action was added. Governance derives from already
+  collected Namespace/workload metadata and local files. The published RBAC
+  remains unchanged, and the live audit remains list-only, Secret-free, and
+  watch-free.
+- The actual existing-golden control delta exactly matches the pre-regeneration
+  forecast: only MG-MTLS-001 and MG-AUTHZ-001/002 were removed, and every mesh
+  namespace losing them gained MG-ENV-001. The known outside-mesh fixture lost
+  only their not-applicable instances and retains explicit not-applicable
+  ownership coverage. No production finding disappeared from a mesh target
+  without environment coverage.
+- Removing an exception record is the M6b revocation mechanism, with Git
+  preserving history. Explicit status/revocation fields, selectors, broader
+  scopes, multi-record resolution, and enterprise-system integrations remain
+  deferred rather than implied.
+
+### Verification
+
+- Final `make build test lint schema-test` is green. The complete Go and shell
+  test suite passed; lint reported `0 issues`; schema tests validated generated,
+  fixture, and external reports against the unchanged canonical schema.
+- Table-driven tests cover ordered classification sources and confidence,
+  opt-in inference, whole-cluster classification, configurable workload and
+  namespace label/annotation ownership, config-before-import precedence,
+  independent unknown fields, strict file loading, environment parameters and
+  overrides, every context-control outcome, and exception never-removal,
+  expiry, invalidity, wrong-control, hygiene-control, unknown, and
+  not-applicable cases.
+- The final guarded `UPDATE_GOLDEN=1 make e2e` completed in 70 seconds. It
+  schema-validated all 21 golden reports plus the all-namespaces report, passed
+  semantic guards before copying, and recorded 436 approved list calls and no
+  other scanner calls. Active and expired exception goldens retain exactly one
+  MG-MTLS-001 finding at configured `critical` severity; the active status is
+  `excepted`, while expired is `open` with exception evidence plus
+  MG-EXC-002.
+- Two consecutive final non-update `make e2e` runs matched all goldens, passed
+  the ClusterRole, namespace Role, and waypoint-limited proofs, and completed
+  in 69 and 74 seconds. Both recorded the same 436 approved events: 396
+  cluster-scanner lists, 20 waypoint-limited lists, and 20 namespace-scanner
+  lists, plus the separate denied audit-probe write positive control. No
+  scanner credential survived cleanup.
+- `make kind-up` completed in 94 seconds with Kind v0.31.0, digest-pinned
+  Kubernetes 1.35.0, Istio 1.30.2 ambient, and Gateway API v1.5.1.
+  `git diff --check` and the frozen-contract/RBAC diff checks are clean.
