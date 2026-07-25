@@ -27,7 +27,11 @@ Prebuilt release binaries will ship with the first tagged release. To build from
 
 ## Try it today
 
-The scanner currently resolves **effective mTLS posture** end to end and evaluates the built-in mTLS control pack. Point it at any cluster where your kubeconfig has read access (or apply the least-privilege profiles in [`deploy/rbac/`](deploy/rbac/)):
+The scanner resolves **effective mTLS and authorization posture** end to end
+for sidecar, ambient, and mixed meshes, then evaluates the built-in security
+and governance control packs. Point it at any cluster where your kubeconfig
+has read access (or apply the least-privilege profiles in
+[`deploy/rbac/`](deploy/rbac/)):
 
 ```bash
 # Scan one namespace (repeatable flag), or --all-namespaces
@@ -39,8 +43,18 @@ jq '.workloadPostures[] | {workload, dataPlaneMode, mtls: .mtls.effective}' repo
 # Findings from the built-in control pack, each with its resolution chain
 jq '.findings[] | {controlId, status, severity, reasoning}' report.json
 
-# Category grades and pass rates
+# Numeric score, category grades, and namespace rollups
 jq '.scores' report.json
+
+# Self-contained human report and SARIF compatibility export
+openmeshguard report --input report.json --format html --output report.html
+openmeshguard export --input report.json --format sarif --output openmeshguard.sarif
+
+# CI threshold: writes canonical JSON, exits 1 for open high/critical findings
+openmeshguard scan \
+  --context my-cluster \
+  --namespace payments \
+  --fail-on high > ci-report.json
 ```
 
 What to expect in the output:
@@ -48,24 +62,27 @@ What to expect in the output:
 - **`workloadPostures`** — per-workload effective mTLS (`strict` / `permissive` / `disabled` / `mixed-by-port` / `unknown`) resolved through Istio's real precedence (mesh → namespace → workload → port), each with the ordered `chain` of resources that produced it.
 - **`findings`** — engine-evaluated controls (e.g. `MG-MTLS-001` when a workload resolves to permissive), with severity, evidence sources, and remediation. Evidence the scanner cannot obtain yields findings with status `unknown` and an explicit `unknownReason` — never a silent pass.
 - **`permissionSummary`** — exactly which access the scanner had, and what degraded without it.
-- **`scores`** — per-category pass rates and letter grades.
+- **`scores`** — numeric weighted cluster/namespace scores plus per-category pass rates and letter grades.
 
-The report is canonical JSON validating against [`docs/contracts/canonical-json-schema.json`](docs/contracts/canonical-json-schema.json). Authorization posture, HTML/SARIF reports, and runtime verification land in upcoming milestones (see [`plan/`](plan/)) — the commands below preview that surface.
+The report is canonical JSON validating against [`docs/contracts/canonical-json-schema.json`](docs/contracts/canonical-json-schema.json). HTML, SARIF, score display, and CI thresholds are projections of that JSON. See [consumable outputs and the CI contract](docs/outputs.md).
 
 ## Quickstart (full surface — in progress)
 
 ```bash
 # Scan a cluster (read-only; see deploy/rbac for the exact permissions)
-openmeshguard scan --context my-cluster --all-namespaces
+openmeshguard scan --context my-cluster --all-namespaces > openmeshguard.json
 
 # Include runtime verification from Istio telemetry
 openmeshguard scan --context my-cluster --prometheus-url https://prometheus.example.com
 
 # Generate a local, server-less HTML report
-openmeshguard report --format html --output report.html
+openmeshguard report --input openmeshguard.json --format html --output report.html
 
 # Export for CI / code scanning
-openmeshguard export --format sarif --output openmeshguard.sarif
+openmeshguard export --input openmeshguard.json --format sarif --output openmeshguard.sarif
+
+# Print the canonical weighted score and category grades
+openmeshguard score --input openmeshguard.json
 ```
 
 First run requires **zero configuration files**. Ownership, environment
