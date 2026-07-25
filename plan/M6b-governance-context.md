@@ -59,3 +59,7 @@ Ambient (M6a), HTML/SARIF/score/exit-codes (M6c), Prometheus (M7).
 - Built-in pack provenance changes from `builtin-mtls`/`builtin-authz` 0.2.0 to
   0.3.0 and adds `builtin-context` 0.3.0. Resolver provenance remains
   `mtls/v5,authz/v8`.
+- The limited-permission ambient and namespace-Role goldens' ownership unknown
+  reason names both namespace label and annotation evidence after the review
+  fix that degrades application-ID and owner fields independently. Their
+  control/status sets do not change.

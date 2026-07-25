@@ -858,11 +858,11 @@
           "name": "ambient-unavailable"
         }
       ],
-      "reasoning": "Control MG-OWN-001 could not be evaluated for omg-ambient-unavailable/ambient-unavailable: owner unavailable: namespace label evidence unavailable.",
+      "reasoning": "Control MG-OWN-001 could not be evaluated for omg-ambient-unavailable/ambient-unavailable: owner unavailable: namespace label and annotation evidence unavailable.",
       "remediation": {
         "guidance": "Add an organization-approved owner label or map the workload's application ID through the scan config or ownership import."
       },
-      "unknownReason": "owner unavailable: namespace label evidence unavailable"
+      "unknownReason": "owner unavailable: namespace label and annotation evidence unavailable"
     }
   ],
   "scores": {
