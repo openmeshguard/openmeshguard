@@ -181,7 +181,7 @@ func runScan(ctx context.Context, info versionInfo, opts scanOptions, stdout io.
 		InferEnvironments: opts.InferEnvironments,
 		Config:            scanConfig,
 		OwnershipImport:   ownershipImport,
-		Namespaces:        governanceNamespaceInputs(engineNamespaces),
+		Namespaces:        governanceNamespaceInputs(snapshot, engineNamespaces),
 		Workloads:         governanceWorkloadInputs(snapshot, normalized.Workloads),
 	})
 	for index := range engineNamespaces {
@@ -337,12 +337,13 @@ func engineControlOverrides(overrides []governance.ControlOverride, packs []engi
 	return out, nil
 }
 
-func governanceNamespaceInputs(namespaces []engine.NamespaceInput) []governance.NamespaceInput {
+func governanceNamespaceInputs(snapshot collect.Snapshot, namespaces []engine.NamespaceInput) []governance.NamespaceInput {
 	out := make([]governance.NamespaceInput, 0, len(namespaces))
 	for _, namespace := range namespaces {
 		out = append(out, governance.NamespaceInput{
 			Name:        namespace.Name,
 			Labels:      namespace.Labels,
+			Annotations: namespaceAnnotations(snapshot, namespace.Name),
 			LabelsKnown: namespaceLabelsKnown(namespace),
 		})
 	}
@@ -364,6 +365,7 @@ func governanceWorkloadInputs(snapshot collect.Snapshot, workloads []resolver.Wo
 			Namespace: governance.NamespaceInput{
 				Name:        namespace,
 				Labels:      workload.Namespace.Labels,
+				Annotations: namespaceAnnotations(snapshot, namespace),
 				LabelsKnown: labelsKnown,
 			},
 		})
@@ -410,6 +412,15 @@ func workloadAnnotations(snapshot collect.Snapshot, ref resolver.WorkloadRef) ma
 			if resource.Namespace == ref.Namespace && resource.Name == ref.Name {
 				return copyStringValues(resource.Annotations)
 			}
+		}
+	}
+	return nil
+}
+
+func namespaceAnnotations(snapshot collect.Snapshot, name string) map[string]string {
+	for _, namespace := range snapshot.Namespaces {
+		if namespace.Name == name {
+			return copyStringValues(namespace.Annotations)
 		}
 	}
 	return nil

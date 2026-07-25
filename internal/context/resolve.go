@@ -34,6 +34,7 @@ var (
 type NamespaceInput struct {
 	Name        string
 	Labels      map[string]string
+	Annotations map[string]string
 	LabelsKnown bool
 }
 
@@ -169,7 +170,12 @@ func resolveOwnership(
 	appIDKeys, ownerKeys []string,
 	configOwners, importOwners map[string]string,
 ) Ownership {
-	appID, appIDSource := firstLabelValue(workload.Labels, appIDKeys, "workload label")
+	appID, appIDSource := firstMetadataValue(
+		workload.Labels,
+		workload.Annotations,
+		appIDKeys,
+		"workload",
+	)
 	if appID == "" {
 		if !workload.Namespace.LabelsKnown {
 			return Ownership{
@@ -177,9 +183,19 @@ func resolveOwnership(
 				OwnerReason: "namespace label evidence unavailable",
 			}
 		}
-		appID, appIDSource = firstLabelValue(workload.Namespace.Labels, appIDKeys, "namespace label")
+		appID, appIDSource = firstMetadataValue(
+			workload.Namespace.Labels,
+			workload.Namespace.Annotations,
+			appIDKeys,
+			"namespace",
+		)
 	}
-	owner, ownerSource := firstLabelValue(workload.Labels, ownerKeys, "workload label")
+	owner, ownerSource := firstMetadataValue(
+		workload.Labels,
+		workload.Annotations,
+		ownerKeys,
+		"workload",
+	)
 	if owner == "" {
 		if !workload.Namespace.LabelsKnown {
 			return Ownership{
@@ -189,7 +205,12 @@ func resolveOwnership(
 				OwnerReason: "namespace label evidence unavailable",
 			}
 		}
-		owner, ownerSource = firstLabelValue(workload.Namespace.Labels, ownerKeys, "namespace label")
+		owner, ownerSource = firstMetadataValue(
+			workload.Namespace.Labels,
+			workload.Namespace.Annotations,
+			ownerKeys,
+			"namespace",
+		)
 	}
 
 	ownership := Ownership{
@@ -212,10 +233,15 @@ func resolveOwnership(
 	return ownership
 }
 
-func firstLabelValue(labels map[string]string, keys []string, source string) (string, string) {
+func firstMetadataValue(labels, annotations map[string]string, keys []string, scope string) (string, string) {
 	for _, key := range keys {
 		if value := strings.TrimSpace(labels[key]); value != "" {
-			return value, fmt.Sprintf("%s %s", source, key)
+			return value, fmt.Sprintf("%s label %s", scope, key)
+		}
+	}
+	for _, key := range keys {
+		if value := strings.TrimSpace(annotations[key]); value != "" {
+			return value, fmt.Sprintf("%s annotation %s", scope, key)
 		}
 	}
 	return "", ""

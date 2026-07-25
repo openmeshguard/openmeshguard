@@ -74,6 +74,7 @@ func TestOwnershipUsesConfiguredIdentityThenConfigAndImport(t *testing.T) {
 			{Ref: workloadRef("payments-prod", "api"), Labels: map[string]string{}, Namespace: NamespaceInput{Name: "payments-prod", LabelsKnown: true, Labels: map[string]string{"platform.example.com/application-id": "payments"}}},
 			{Ref: workloadRef("checkout-stage", "api"), Labels: map[string]string{}, Namespace: NamespaceInput{Name: "checkout-stage", LabelsKnown: true, Labels: map[string]string{"platform.example.com/application-id": "checkout"}}},
 			{Ref: workloadRef("payments-prod", "worker"), Labels: map[string]string{"platform.example.com/team": "workload-team"}, Namespace: NamespaceInput{Name: "payments-prod", LabelsKnown: true, Labels: map[string]string{"platform.example.com/application-id": "payments"}}},
+			{Ref: workloadRef("payments-prod", "annotated"), Annotations: map[string]string{"platform.example.com/application-id": "payments", "platform.example.com/team": "annotation-team"}, Namespace: NamespaceInput{Name: "payments-prod", LabelsKnown: true}},
 		},
 	}
 	got := Resolve(input)
@@ -89,6 +90,11 @@ func TestOwnershipUsesConfiguredIdentityThenConfigAndImport(t *testing.T) {
 	}
 	if byKey["payments-prod/worker"].Owner != "workload-team" {
 		t.Fatalf("workload owner did not win: %#v", byKey["payments-prod/worker"])
+	}
+	if byKey["payments-prod/annotated"].AppID != "payments" ||
+		byKey["payments-prod/annotated"].Owner != "annotation-team" ||
+		byKey["payments-prod/annotated"].AppIDSource != "workload annotation platform.example.com/application-id" {
+		t.Fatalf("workload annotations did not resolve ownership: %#v", byKey["payments-prod/annotated"])
 	}
 }
 
