@@ -123,12 +123,16 @@ func TestReportScoresWeightsKnownCategoriesAndAppliesCriticalCap(t *testing.T) {
 func TestReportScoresIncludesClusterScopedControlsInOverall(t *testing.T) {
 	globalRate := 0.5
 	namespaceRate := 1.0
+	clusterRate := 0.0
 	weights := map[string]float64{
 		"authz": 0, "exposure": 0, "governance": 100, "lifecycle": 0, "mtls": 0,
 	}
 	scored := reportScores(engine.Result{
 		Scores: []engine.CategoryScore{{
 			Category: "governance", Grade: "F", PassRate: &globalRate, Evaluated: 2,
+		}},
+		ClusterScores: []engine.CategoryScore{{
+			Category: "governance", Grade: "F", PassRate: &clusterRate, Evaluated: 1,
 		}},
 		NamespaceScores: []engine.NamespaceScore{{
 			Namespace: "payments",
@@ -146,6 +150,83 @@ func TestReportScoresIncludesClusterScopedControlsInOverall(t *testing.T) {
 	}
 	if scored.Namespaces[0].Score == nil || *scored.Namespaces[0].Score != 100 {
 		t.Fatalf("namespace score = %#v, want unaffected namespace score 100", scored.Namespaces[0])
+	}
+}
+
+func TestReportScoresWeightsClusterComponentByEvaluableDimensions(t *testing.T) {
+	passing := 1.0
+	failing := 0.0
+	weights := map[string]float64{
+		"authz": 0, "exposure": 0, "governance": 20, "lifecycle": 0, "mtls": 80,
+	}
+	scored := reportScores(engine.Result{
+		ClusterScores: []engine.CategoryScore{{
+			Category: "governance", Grade: "F", PassRate: &failing, Evaluated: 1,
+		}},
+		NamespaceScores: []engine.NamespaceScore{{
+			Namespace: "payments",
+			Categories: []engine.CategoryScore{
+				{Category: "governance", Grade: "A", PassRate: &passing, Evaluated: 1},
+				{Category: "mtls", Grade: "A", PassRate: &passing, Evaluated: 1},
+			},
+			ScoreWeights: weights,
+			CriticalCap:  59,
+		}},
+		ScoreWeights: weights,
+		CriticalCap:  59,
+	})
+	want := float64(100*100+0*20) / 120
+	if scored.Overall == nil || *scored.Overall != want {
+		t.Fatalf("overall = %v, want weighted namespace/cluster rollup %v", scored.Overall, want)
+	}
+}
+
+func TestReportScoresRollsUpEnvironmentWeightsAndCriticalCap(t *testing.T) {
+	mtlsRate := float64(2) / 3
+	authzRate := 1.0
+	globalWeights := map[string]float64{
+		"authz": 25, "exposure": 25, "governance": 20, "lifecycle": 5, "mtls": 25,
+	}
+	productionWeights := map[string]float64{
+		"authz": 0, "exposure": 0, "governance": 0, "lifecycle": 0, "mtls": 100,
+	}
+	input := engine.Result{
+		Scores: []engine.CategoryScore{
+			{Category: "authz", Grade: "A", PassRate: &authzRate, Evaluated: 1},
+			{Category: "mtls", Grade: "D", PassRate: &mtlsRate, Evaluated: 3},
+		},
+		NamespaceScores: []engine.NamespaceScore{{
+			Namespace:   "payments",
+			Environment: "production",
+			Categories: []engine.CategoryScore{
+				{Category: "authz", Grade: "A", PassRate: &authzRate, Evaluated: 1},
+				{Category: "mtls", Grade: "D", PassRate: &mtlsRate, Evaluated: 3},
+			},
+			ScoreWeights: productionWeights,
+			CriticalCap:  49,
+		}},
+		ScoreWeights: globalWeights,
+		CriticalCap:  59,
+	}
+
+	uncapped := reportScores(input)
+	if uncapped.Overall == nil || *uncapped.Overall != mtlsRate*100 {
+		t.Fatalf("overall = %v, want production-weighted namespace rollup %v", uncapped.Overall, mtlsRate*100)
+	}
+	if uncapped.Namespaces[0].Score == nil || *uncapped.Namespaces[0].Score != mtlsRate*100 {
+		t.Fatalf("namespace score = %#v, want %v", uncapped.Namespaces[0], mtlsRate*100)
+	}
+
+	input.Findings = []engine.Finding{{
+		ID: "critical", Severity: "critical", Status: "open",
+		Resources: []engine.ResourceRef{{Kind: "Deployment", Namespace: "payments", Name: "api"}},
+	}}
+	capped := reportScores(input)
+	if capped.Overall == nil || *capped.Overall != 49 {
+		t.Fatalf("critical overall = %v, want environment cap 49", capped.Overall)
+	}
+	if !capped.Namespaces[0].Capped || capped.Namespaces[0].Score == nil || *capped.Namespaces[0].Score != 49 {
+		t.Fatalf("critical namespace = %#v, want capped score 49", capped.Namespaces[0])
 	}
 }
 

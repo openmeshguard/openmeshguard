@@ -361,3 +361,20 @@ func TestEmbeddedCanonicalSchemaMatchesFrozenContract(t *testing.T) {
 		t.Fatal("embedded runtime schema drifted from docs/contracts/canonical-json-schema.json")
 	}
 }
+
+func TestCanonicalSchemaRejectsNegativeCounters(t *testing.T) {
+	schema := compileSchemaForTest(t)
+	valid := thresholdReportJSON(t, []finding{thresholdFinding("open", "high")})
+	for _, tt := range negativeCanonicalCounterMutations() {
+		t.Run(tt.name, func(t *testing.T) {
+			data := mutateCanonicalDocument(t, valid, tt.mutate)
+			document, err := jsonschema.UnmarshalJSON(bytes.NewReader(data))
+			if err != nil {
+				t.Fatalf("decode mutated canonical report: %v", err)
+			}
+			if err := schema.Validate(document); err == nil {
+				t.Fatal("canonical schema accepted a negative counter")
+			}
+		})
+	}
+}

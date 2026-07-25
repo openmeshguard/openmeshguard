@@ -212,6 +212,7 @@ type NamespaceScore struct {
 type Result struct {
 	Findings        []Finding
 	Scores          []CategoryScore
+	ClusterScores   []CategoryScore
 	NamespaceScores []NamespaceScore
 	ScoreWeights    map[string]float64
 	CriticalCap     float64

@@ -906,7 +906,7 @@
     }
   ],
   "scores": {
-    "overall": 56.02040816326531,
+    "overall": 57,
     "categories": [
       {
         "category": "authz",

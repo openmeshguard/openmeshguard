@@ -30,10 +30,11 @@ make kind-up e2e kind-down
 
 `kind-up` refuses to reuse an existing `openmeshguard-e2e` cluster. `e2e`
 always rebuilds the configured `BINARY`, passes its absolute path into the
-harness, resets the fixture namespaces, runs 21 small golden scans plus one
-all-namespaces ClusterRole scan, schema-validates all 22 reports, and
-executes the RBAC/audit proofs. Kind writes its administrator credential only
-to protected `.e2e/admin.kubeconfig`; it never changes the user's default
+harness, resets the fixture namespaces, runs 21 fixture-case scans, one
+namespace-RBAC degradation scan, and one all-namespaces ClusterRole scan,
+schema-validates all 23 reports, and executes the RBAC/audit proofs. The first
+22 reports have checked-in goldens. Kind writes its administrator credential
+only to protected `.e2e/admin.kubeconfig`; it never changes the user's default
 kubeconfig. `kind-down` deletes the disposable cluster and that credential.
 
 A failed local E2E run intentionally leaves the cluster available for
@@ -196,3 +197,67 @@ No token-bearing kubeconfig directory remained after any run. The ready ambient
 golden records ztunnel coverage `1/1` and authorization `allow-only`; the same
 L7 policy with no ready waypoint records `waypoint-policy-unenforced`; the
 limited-evidence scan records Gateway evidence `unknown`.
+
+## Recorded M6c proof
+
+Recorded locally on 2026-07-25 (America/Chicago) after the adversarial review
+remediations:
+
+| Target | Duration | Result |
+|---|---:|---|
+| `make kind-up` | 37s | clean disposable cluster; pinned Kind, Kubernetes, Istio ambient profile, and Gateway API bundle verified |
+| `UPDATE_GOLDEN=1 make e2e` | 64s | guarded update wrote 22 reviewed score-only goldens; all 23 canonical reports schema-valid; HTML, SARIF, score, RBAC, and audit proofs green |
+| first clean `make e2e` | 75s | all 22 goldens matched; zero-config projections and all RBAC/audit proofs green |
+| second clean `make e2e` | 72s | identical golden matches and exactly 456 approved scanner calls |
+
+The zero-config release proof runs the scanner shape equivalent of:
+
+```bash
+bin/openmeshguard scan --all-namespaces > openmeshguard.json
+bin/openmeshguard report --input openmeshguard.json --output openmeshguard.html
+bin/openmeshguard export --input openmeshguard.json --output openmeshguard.sarif
+bin/openmeshguard score --input openmeshguard.json
+```
+
+The acceptance identity supplies only its kubeconfig; it supplies no scan
+config, ownership import, exception file, or Prometheus input. The recorded
+canonical report had all three context-file flags false, Prometheus disabled,
+27 unclassified namespaces, 33 workloads with verified posture absent, and an
+explicit lifecycle category with `grade: unknown` and `passRate: null`. Its
+HTML contained the Declared / Verified / Unknown, runtime-verification,
+workload-posture resolution-chain, unknowns, category-grade, classification,
+evidence, and findings sections.
+Its SARIF contained all 272 canonical findings with exact ID parity. The score
+output was non-empty and continued to disclose unknown findings separately.
+
+Both clean runs recorded exactly 456 scanner events: 416 cluster-scanner
+lists, 20 waypoint-limited scanner lists, and 20 namespace-scanner lists.
+There were no scanner verbs other than `list`, no Secret or subresource
+requests, and no privileged identity activity after the proof boundaries. No
+collector, RBAC profile, resolver type, resolver version, or resolver behavior
+changed in M6c. With explicit human approval during review remediation, the
+only frozen canonical-contract change adds `minimum: 0` to every integer
+counter; the embedded runtime copy remains byte-equivalent after JSON
+compaction.
+
+The remediation of Codex review thread
+`019f99c6-9a5f-7433-bb65-6460dfe24b31` was re-proved on the same pinned
+disposable cluster. A guarded 70-second E2E update changed only three reviewed
+governance `scores.overall` values. Two subsequent clean runs each completed
+in 70 seconds, matched all 22 goldens, schema-validated all 23 reports, and
+recorded the same 456 approved list calls. After normalizing only
+`generatedAt`, both runs produced identical hashes:
+
+| Projection | SHA-256 |
+|---|---|
+| canonical JSON | `17c2e20552615ce8df72dda3ff12529ae76439bdc3bbbd79b4e03dec77f905cc` |
+| static HTML | `eb3d4fa49691e8fc1f5c821d1d9b5267d817e3d275c6e5b3224276aebe57bedc` |
+| SARIF | `c9476ae82e5cf0460c1bdc5d316756deb27791d7311879af0a6ea8298f4d627f` |
+| score text | `df9d6f330d6d986c37bdc5f536276cf33dcd991679b0b4a9e441a307bedb0e3e` |
+
+After the approved counter-schema correction, the exact combined build, test,
+lint, and schema gate passed again. A further clean `make e2e` completed in 73
+seconds without regenerating any golden, schema-validated all 23 reports, and
+recorded the same 456 approved `list` calls. The four normalized projection
+hashes above remained unchanged, and live SARIF retained exact 272/272
+canonical finding ID parity.

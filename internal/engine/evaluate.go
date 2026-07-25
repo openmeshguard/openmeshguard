@@ -105,8 +105,10 @@ func Evaluate(packs []Pack, input Input) (Result, error) {
 		CriticalCap:  criticalCap,
 	}
 	categories := map[string]*categoryAccumulator{}
+	clusterCategories := map[string]*categoryAccumulator{}
 	for category := range scoreWeights {
 		categories[category] = &categoryAccumulator{}
+		clusterCategories[category] = &categoryAccumulator{}
 	}
 	namespaceCategories := map[string]map[string]*categoryAccumulator{}
 	namespaceEnvironments := map[string]string{}
@@ -166,6 +168,21 @@ func Evaluate(packs []Pack, input Input) (Result, error) {
 					case statusNotApplicable:
 						// Binding contract: not-applicable is excluded from pass rates.
 					}
+				} else {
+					if _, ok := clusterCategories[control.Category]; !ok {
+						clusterCategories[control.Category] = &categoryAccumulator{}
+					}
+					clusterCategory := clusterCategories[control.Category]
+					switch outcome {
+					case "pass":
+						clusterCategory.pass++
+					case statusOpen:
+						clusterCategory.fail++
+					case statusUnknown:
+						clusterCategory.unknown++
+					case statusNotApplicable:
+						// Binding contract: not-applicable is excluded from pass rates.
+					}
 				}
 				if finding != nil {
 					result.Findings = append(result.Findings, *finding)
@@ -181,6 +198,7 @@ func Evaluate(packs []Pack, input Input) (Result, error) {
 		return result.Findings[i].ID < result.Findings[j].ID
 	})
 	result.Scores = buildScores(categories)
+	result.ClusterScores = buildScores(clusterCategories)
 	result.NamespaceScores, err = buildNamespaceScores(
 		namespaceCategories,
 		namespaceEnvironments,

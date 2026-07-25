@@ -202,8 +202,11 @@ func sarifResultFor(canonical report, item finding, ruleIndex int) sarifResult {
 	level := sarifLevel(item.Severity)
 	switch item.Status {
 	case "unknown":
+		// SARIF 2.1.0 section 3.27.10 requires level "none" whenever
+		// kind is not "fail". Preserve the canonical severity separately in
+		// properties without misrepresenting unknown evidence as a failure.
 		kind = "review"
-		level = "warning"
+		level = "none"
 	case "not-applicable":
 		kind = "notApplicable"
 		level = "none"

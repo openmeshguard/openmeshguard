@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/openmeshguard/openmeshguard/internal/resolver"
 	nethtml "golang.org/x/net/html"
 )
 
@@ -63,6 +64,7 @@ func TestWriteHTMLGoldenHasKeySectionsAndHonestUnknowns(t *testing.T) {
 		"overview",
 		"declared-verified-unknown",
 		"runtime-verification",
+		"workload-postures",
 		"unknowns",
 		"category-grades",
 		"classification-coverage",
@@ -100,25 +102,48 @@ func TestWriteHTMLGoldenHasKeySectionsAndHonestUnknowns(t *testing.T) {
 	}
 }
 
-func TestWriteHTMLDoesNotCallUnenforcedWaypointPolicyCovered(t *testing.T) {
+func TestWriteHTMLDoesNotCallKnownUncoveredAuthorizationStatesCovered(t *testing.T) {
 	golden := readOutputFixture(t, filepath.Join(
 		"..",
 		"..",
 		"test",
 		"fixtures",
-		"ambient-basic",
+		"sidecar-basic",
 		"golden",
-		"ambient-missing.json",
+		"strict.json",
 	))
-	var rendered bytes.Buffer
-	if err := WriteHTML(&rendered, bytes.NewReader(golden)); err != nil {
-		t.Fatalf("write HTML: %v", err)
+	var canonical report
+	if err := json.Unmarshal(golden, &canonical); err != nil {
+		t.Fatalf("decode golden: %v", err)
 	}
-	if !strings.Contains(rendered.String(), "0% — 0/1 workload(s) covered") {
-		t.Fatalf("unenforced waypoint policy was not projected as uncovered:\n%s", rendered.String())
+	tests := []resolver.AuthzEffective{
+		resolver.AuthzNoPolicy,
+		resolver.AuthzWaypointUnenforced,
+		resolver.AuthzNotInMesh,
 	}
-	if strings.Contains(rendered.String(), "100% — 1/1 workload(s) covered") {
-		t.Fatal("unenforced waypoint policy was misrepresented as authorization coverage")
+	for _, posture := range tests {
+		t.Run(string(posture), func(t *testing.T) {
+			mutated := canonical
+			mutated.WorkloadPostures = append(
+				[]canonicalWorkloadPosture(nil),
+				canonical.WorkloadPostures...,
+			)
+			mutated.WorkloadPostures[0].Authorization.Effective = posture
+			data, err := json.Marshal(mutated)
+			if err != nil {
+				t.Fatalf("encode canonical report: %v", err)
+			}
+			var rendered bytes.Buffer
+			if err := WriteHTML(&rendered, bytes.NewReader(data)); err != nil {
+				t.Fatalf("write HTML: %v", err)
+			}
+			if !strings.Contains(rendered.String(), "0% — 0/1 workload(s) covered") {
+				t.Fatalf("%s was not projected as uncovered:\n%s", posture, rendered.String())
+			}
+			if strings.Contains(rendered.String(), "100% — 1/1 workload(s) covered") {
+				t.Fatalf("%s was misrepresented as authorization coverage", posture)
+			}
+		})
 	}
 }
 
@@ -183,6 +208,95 @@ func TestWriteHTMLProjectsEveryVerifiedStatusWithoutBlending(t *testing.T) {
 	}
 	if strings.Contains(rendered.String(), "4 workload(s) verified") {
 		t.Fatal("non-corroborated runtime states were blended into verified")
+	}
+}
+
+func TestWriteHTMLDoesNotHideCanonicalContradictionWhenPrometheusDisabled(t *testing.T) {
+	golden := readOutputFixture(t, filepath.Join(
+		"..",
+		"..",
+		"test",
+		"fixtures",
+		"sidecar-basic",
+		"golden",
+		"strict.json",
+	))
+	var canonical report
+	if err := json.Unmarshal(golden, &canonical); err != nil {
+		t.Fatalf("decode golden: %v", err)
+	}
+	canonical.Scan.DataSources.Prometheus.Enabled = false
+	plaintext := true
+	canonical.WorkloadPostures[0].Verified = &verifiedPosture{
+		Status:            "contradicted",
+		Window:            "168h",
+		MTLSTrafficShare:  floatPointer(0.5),
+		PlaintextObserved: &plaintext,
+		PlaintextSources:  []string{"payments/client"},
+	}
+	data, err := json.Marshal(canonical)
+	if err != nil {
+		t.Fatalf("encode canonical report: %v", err)
+	}
+
+	var rendered bytes.Buffer
+	if err := WriteHTML(&rendered, bytes.NewReader(data)); err != nil {
+		t.Fatalf("write HTML: %v", err)
+	}
+	if !strings.Contains(
+		rendered.String(),
+		"0 corroborated; 1 contradicted; 0 no traffic observed; 0 unknown or unavailable",
+	) {
+		t.Fatalf("headline hid canonical contradiction:\n%s", rendered.String())
+	}
+	if strings.Contains(rendered.String(), "runtime verification unavailable for 1 workload(s)") {
+		t.Fatal("headline replaced canonical contradiction with unavailable telemetry")
+	}
+}
+
+func TestWriteHTMLProjectsWorkloadPostureResolutionChains(t *testing.T) {
+	golden := readOutputFixture(t, filepath.Join(
+		"..",
+		"..",
+		"test",
+		"fixtures",
+		"sidecar-basic",
+		"golden",
+		"strict.json",
+	))
+	var canonical report
+	if err := json.Unmarshal(golden, &canonical); err != nil {
+		t.Fatalf("decode golden: %v", err)
+	}
+	canonical.WorkloadPostures[0].MTLS.Chain = []resolver.Step{{
+		Order:  1,
+		Kind:   "PeerAuthentication",
+		Name:   "unique-mtls-chain",
+		Effect: "UNIQUE-MTLS-CHAIN-EVIDENCE",
+	}}
+	canonical.WorkloadPostures[0].Authorization.Chain = []resolver.Step{{
+		Order:  1,
+		Kind:   "AuthorizationPolicy",
+		Name:   "unique-authz-chain",
+		Effect: "UNIQUE-AUTHZ-CHAIN-EVIDENCE",
+	}}
+	data, err := json.Marshal(canonical)
+	if err != nil {
+		t.Fatalf("encode canonical report: %v", err)
+	}
+
+	var rendered bytes.Buffer
+	if err := WriteHTML(&rendered, bytes.NewReader(data)); err != nil {
+		t.Fatalf("write HTML: %v", err)
+	}
+	for _, want := range []string{
+		"Declared workload posture &amp; resolution chains",
+		"UNIQUE-MTLS-CHAIN-EVIDENCE",
+		"UNIQUE-AUTHZ-CHAIN-EVIDENCE",
+	} {
+		if !strings.Contains(rendered.String(), want) {
+			t.Errorf("workload posture projection missing %q", want)
+		}
 	}
 }
 

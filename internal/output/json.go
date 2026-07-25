@@ -381,8 +381,12 @@ func scoreCategories(input []engine.CategoryScore) []scoreCategory {
 func reportScores(evaluated engine.Result) scores {
 	categories := scoreCategories(evaluated.Scores)
 	namespaces := make([]namespaceScore, 0, len(evaluated.NamespaceScores))
+	rollupScores := make([]weightedRollup, 0, len(evaluated.NamespaceScores)+1)
 	for _, namespace := range evaluated.NamespaceScores {
-		score := weightedScore(scoreCategories(namespace.Categories), namespace.ScoreWeights)
+		score, rollupWeight := weightedScoreAndWeight(
+			scoreCategories(namespace.Categories),
+			namespace.ScoreWeights,
+		)
 		hasCritical := hasOpenCriticalFinding(evaluated.Findings, namespace.Namespace)
 		capped := false
 		if hasCritical {
@@ -394,18 +398,35 @@ func reportScores(evaluated engine.Result) scores {
 			Score:       score,
 			Capped:      capped,
 		})
+		if score != nil {
+			rollupScores = append(rollupScores, weightedRollup{
+				Score:  score,
+				Weight: rollupWeight,
+			})
+		}
 	}
-	// Cluster scoring uses the canonical global category aggregates so
-	// cluster-scoped controls (notably exception hygiene) cannot disappear
-	// behind namespace rollups.
-	overall := weightedScore(categories, evaluated.ScoreWeights)
-	if hasOpenCriticalFinding(evaluated.Findings, "") {
-		overall, _ = capScore(overall, evaluated.CriticalCap)
+
+	clusterScore, clusterWeight := weightedScoreAndWeight(
+		scoreCategories(evaluated.ClusterScores),
+		evaluated.ScoreWeights,
+	)
+	if hasOpenCriticalClusterFinding(evaluated.Findings) {
+		clusterScore, _ = capScore(clusterScore, evaluated.CriticalCap)
 	}
+	if clusterScore != nil {
+		rollupScores = append(rollupScores, weightedRollup{
+			Score:  clusterScore,
+			Weight: clusterWeight,
+		})
+	}
+	overall := rollupScore(rollupScores)
 	return scores{Overall: overall, Categories: categories, Namespaces: namespaces}
 }
 
-func weightedScore(categories []scoreCategory, weights map[string]float64) *float64 {
+func weightedScoreAndWeight(
+	categories []scoreCategory,
+	weights map[string]float64,
+) (*float64, float64) {
 	var weighted, totalWeight float64
 	for _, category := range categories {
 		weight, exists := weights[category.Category]
@@ -416,9 +437,30 @@ func weightedScore(categories []scoreCategory, weights map[string]float64) *floa
 		totalWeight += weight
 	}
 	if totalWeight == 0 {
-		return nil
+		return nil, 0
 	}
 	score := weighted / totalWeight * 100
+	return &score, totalWeight
+}
+
+type weightedRollup struct {
+	Score  *float64
+	Weight float64
+}
+
+func rollupScore(values []weightedRollup) *float64 {
+	if len(values) == 0 {
+		return nil
+	}
+	var weighted, totalWeight float64
+	for _, value := range values {
+		weighted += *value.Score * value.Weight
+		totalWeight += value.Weight
+	}
+	if totalWeight == 0 {
+		return nil
+	}
+	score := weighted / totalWeight
 	return &score
 }
 
@@ -442,6 +484,25 @@ func hasOpenCriticalFinding(findings []engine.Finding, namespace string) bool {
 			if resource.Namespace == namespace || (resource.Kind == "Namespace" && resource.Name == namespace) {
 				return true
 			}
+		}
+	}
+	return false
+}
+
+func hasOpenCriticalClusterFinding(findings []engine.Finding) bool {
+	for _, finding := range findings {
+		if finding.Status != "open" || finding.Severity != "critical" {
+			continue
+		}
+		clusterScoped := len(finding.Resources) > 0
+		for _, resource := range finding.Resources {
+			if resource.Namespace != "" || resource.Kind == "Namespace" {
+				clusterScoped = false
+				break
+			}
+		}
+		if clusterScoped {
+			return true
 		}
 	}
 	return false

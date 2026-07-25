@@ -165,8 +165,13 @@ func canonicalSummaryRows(canonical report) []summaryRow {
 		Value: fmt.Sprintf("Unknown — runtime verification unavailable for %d workload(s)", meshWorkloads),
 		Tone:  "unknown",
 	}
-	if canonical.Scan.DataSources.Prometheus.Enabled {
-		verifiedCell = verificationSummaryCell(summarizeVerification(canonical.WorkloadPostures))
+	verification := summarizeVerification(canonical.WorkloadPostures)
+	explicitVerification := verification.Corroborated +
+		verification.Contradicted +
+		verification.NoTrafficObserved +
+		verification.Unknown
+	if canonical.Scan.DataSources.Prometheus.Enabled || explicitVerification > 0 {
+		verifiedCell = verificationSummaryCell(verification)
 	}
 
 	return []summaryRow{
@@ -427,6 +432,28 @@ const htmlReportTemplate = `<!doctype html>
         {{end}}
       </tr>{{else}}<tr><td colspan="6" class="unknown">No workload posture is present in the canonical report.</td></tr>{{end}}</tbody>
     </table></div>
+  </section>
+
+  <section id="workload-postures">
+    <h2>Declared workload posture &amp; resolution chains</h2>
+    <p class="muted">Effective mTLS and authorization conclusions are shown with the complete ordered canonical chains that produced them.</p>
+    {{range .Report.WorkloadPostures}}
+    <details>
+      <summary>
+        <strong class="machine">{{.Workload.Namespace}} / {{.Workload.Kind}} / {{.Workload.Name}}</strong>
+        <span class="pill">mTLS {{.MTLS.Effective}}</span>
+        <span class="pill">authorization {{.Authorization.Effective}}</span>
+        <span class="pill">{{.DataPlaneMode}}</span>
+      </summary>
+      <div class="detail-body">
+        <p><strong>Environment:</strong> {{optionalString .Environment}} · <strong>Owner:</strong> {{optionalString .Owner}}</p>
+        <h3>mTLS resolution chain</h3>
+        {{if .MTLS.Chain}}<ol class="chain">{{range .MTLS.Chain}}<li><strong>{{.Kind}}{{if .Name}} / {{.Name}}{{end}}</strong>{{if .Namespace}} in {{.Namespace}}{{end}}{{if .Field}} · <code>{{.Field}}</code>{{end}}<br><span class="muted">{{.Effect}}</span></li>{{end}}</ol>{{else}}<p class="unknown">No mTLS resolution chain is present in canonical JSON.</p>{{end}}
+        <h3>Authorization resolution chain</h3>
+        {{if .Authorization.Chain}}<ol class="chain">{{range .Authorization.Chain}}<li><strong>{{.Kind}}{{if .Name}} / {{.Name}}{{end}}</strong>{{if .Namespace}} in {{.Namespace}}{{end}}{{if .Field}} · <code>{{.Field}}</code>{{end}}<br><span class="muted">{{.Effect}}</span></li>{{end}}</ol>{{else}}<p class="unknown">No authorization resolution chain is present in canonical JSON.</p>{{end}}
+      </div>
+    </details>
+    {{else}}<div class="panel unknown-card"><strong>No workload posture is present in the canonical report.</strong></div>{{end}}
   </section>
 
   <section id="unknowns">

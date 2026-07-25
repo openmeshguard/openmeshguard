@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"sync"
+	"unicode/utf8"
 
 	"github.com/santhosh-tekuri/jsonschema/v6"
 )
@@ -24,6 +25,7 @@ var compileCanonicalSchema = sync.OnceValues(func() (*jsonschema.Schema, error) 
 		return nil, fmt.Errorf("decode embedded canonical schema: %w", err)
 	}
 	compiler := jsonschema.NewCompiler()
+	compiler.AssertFormat()
 	if err := compiler.AddResource(canonicalSchemaResource, document); err != nil {
 		return nil, fmt.Errorf("register embedded canonical schema: %w", err)
 	}
@@ -41,6 +43,9 @@ func readCanonicalReport(reader io.Reader) (report, error) {
 	}
 	if len(data) > maxCanonicalReportBytes {
 		return report{}, fmt.Errorf("read canonical report: input exceeds %d bytes", maxCanonicalReportBytes)
+	}
+	if !utf8.Valid(data) {
+		return report{}, fmt.Errorf("decode canonical report: input is not valid UTF-8")
 	}
 
 	var topLevel map[string]json.RawMessage

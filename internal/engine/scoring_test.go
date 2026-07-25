@@ -74,6 +74,31 @@ func TestWeightedCategoryWithoutControlsRemainsExplicitlyUnknown(t *testing.T) {
 	t.Fatal("published lifecycle score dimension disappeared because it has no current controls")
 }
 
+func TestEvaluateRetainsClusterScopedControlsForRollup(t *testing.T) {
+	result, err := Evaluate(
+		[]Pack{builtinPackForTest(t, "MG-EXC-001")},
+		Input{Resources: []ResourceInput{exceptionResource(map[string]any{
+			"validationErrors": []any{"invalid exception"},
+		})}},
+	)
+	if err != nil {
+		t.Fatalf("evaluate cluster-scoped exception control: %v", err)
+	}
+	if len(result.NamespaceScores) != 0 {
+		t.Fatalf("cluster-scoped control created namespace scores: %#v", result.NamespaceScores)
+	}
+	for _, category := range result.ClusterScores {
+		if category.Category != "governance" {
+			continue
+		}
+		if category.PassRate == nil || *category.PassRate != 0 || category.Evaluated != 1 {
+			t.Fatalf("cluster governance score = %#v, want one failed evaluation", category)
+		}
+		return
+	}
+	t.Fatalf("cluster-scoped governance score missing: %#v", result.ClusterScores)
+}
+
 func TestScoringConfigurationRejectsInvalidData(t *testing.T) {
 	tests := []struct {
 		name    string

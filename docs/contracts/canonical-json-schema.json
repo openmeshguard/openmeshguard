@@ -126,11 +126,11 @@
               "additionalProperties": false,
               "properties": {
                 "present": { "type": "boolean" },
-                "nodesCovered": { "type": "integer" },
-                "nodesTotal": { "type": ["integer", "null"], "description": "Null when nodes permission is absent." }
+                "nodesCovered": { "type": "integer", "minimum": 0 },
+                "nodesTotal": { "type": ["integer", "null"], "minimum": 0, "description": "Null when nodes permission is absent." }
               }
             },
-            "waypoints": { "type": "integer" }
+            "waypoints": { "type": "integer", "minimum": 0 }
           }
         },
         "multiCluster": {
@@ -148,9 +148,9 @@
           "type": "object",
           "additionalProperties": false,
           "properties": {
-            "namespacesClassified": { "type": "integer" },
-            "namespacesUnclassified": { "type": "integer" },
-            "byEnvironment": { "type": "object", "additionalProperties": { "type": "integer" } }
+            "namespacesClassified": { "type": "integer", "minimum": 0 },
+            "namespacesUnclassified": { "type": "integer", "minimum": 0 },
+            "byEnvironment": { "type": "object", "additionalProperties": { "type": "integer", "minimum": 0 } }
           }
         }
       }
@@ -179,8 +179,8 @@
               "category": { "type": "string" },
               "grade": { "enum": ["A", "B", "C", "D", "F", "unknown"] },
               "passRate": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
-              "evaluated": { "type": "integer" },
-              "unknown": { "type": "integer" }
+              "evaluated": { "type": "integer", "minimum": 0 },
+              "unknown": { "type": "integer", "minimum": 0 }
             }
           }
         },

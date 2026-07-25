@@ -72,7 +72,7 @@ Status is represented independently:
 | --- | --- |
 | `open` | `kind: fail`, mapped severity |
 | `excepted` | `kind: fail`, mapped severity, accepted external suppression |
-| `unknown` | `kind: review`, `level: warning`; original severity retained in properties |
+| `unknown` | `kind: review`, `level: none`; original severity retained in properties |
 | `not-applicable` | `kind: notApplicable`, `level: none` |
 
 Every result retains the canonical finding ID, status, severity, confidence,
@@ -105,13 +105,15 @@ Unknown categories have no pass rate and are excluded from the weighted
 denominator; unknown state remains separately reported. A published weighted
 dimension with no current controls, such as lifecycle in v0, remains an
 explicit unknown category instead of disappearing. Namespace scores use the
-weights for their resolved environment. The cluster score uses global
-canonical category aggregates so cluster-scoped controls such as exception
-hygiene cannot disappear behind namespace rollups. An open critical finding
-caps the affected namespace score and the cluster score at 59. Excepted,
-unknown, and not-applicable findings do not apply the cap; an expired exception
-is already represented canonically as an open finding and therefore remains
-active risk.
+weights and critical cap for their resolved environment. The cluster score
+rolls up the evaluable namespace scores and a separate global-weighted
+cluster-scoped component, with each component contributing its evaluable
+category weights. That preserves environment overrides without dropping or
+overweighting cluster-scoped controls such as exception hygiene. An open
+critical finding caps its affected namespace component; a cluster-scoped
+critical finding caps the cluster-scoped component. Excepted, unknown, and
+not-applicable findings do not apply a cap; an expired exception is already
+represented canonically as an open finding and therefore remains active risk.
 
 `score --namespace` prints the canonical namespace score followed by clearly
 labeled cluster category grades because the frozen schema does not contain
@@ -160,7 +162,11 @@ Severity order is `critical > high > medium > low > info`, and the boundary is
 inclusive. Only canonical `status: open` findings participate in severity
 thresholds. Unknown findings never affect exit status unless
 `--fail-on-unknown` is explicitly set. Excepted and not-applicable findings do
-not fail CI. Before any projection or threshold decision, the complete input
-is validated against the embedded build-time copy of the frozen canonical
-schema. A parity test requires that copy to remain byte-equivalent after JSON
-compaction to `docs/contracts/canonical-json-schema.json`.
+not fail CI. Output failures, including a broken stdout pipe, are operational
+errors and exit 2 rather than terminating by signal. Before any projection or
+threshold decision, the complete input is validated against the embedded
+build-time copy of the frozen canonical schema. A parity test requires that
+copy to remain byte-equivalent after JSON compaction to
+`docs/contracts/canonical-json-schema.json`. Canonical count fields are
+non-negative; impossible negative inventory, classification, or score counters
+are schema errors and exit 2 before output.

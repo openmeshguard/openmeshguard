@@ -98,7 +98,7 @@ func TestSARIFStatusProjectionIsExplicitAndNonMisleading(t *testing.T) {
 	}{
 		{status: "open", severity: "critical", wantKind: "fail", wantLevel: "error"},
 		{status: "excepted", severity: "critical", wantKind: "fail", wantLevel: "error", wantSuppression: true},
-		{status: "unknown", severity: "critical", wantKind: "review", wantLevel: "warning"},
+		{status: "unknown", severity: "critical", wantKind: "review", wantLevel: "none"},
 		{status: "not-applicable", severity: "critical", wantKind: "notApplicable", wantLevel: "none"},
 	}
 	for _, tt := range tests {
