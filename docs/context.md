@@ -83,6 +83,11 @@ conclusive source wins. Supported source types are:
 - `cluster`: one `environment` value for every namespace in the cluster.
 - `cluster-context`: exact kubeconfig-context-to-environment mappings.
 
+Environment names in mappings, rules, cluster sources, parameter maps, and
+control overrides must be YAML strings without surrounding whitespace.
+Boolean or numeric scalar coercion is rejected instead of creating an
+environment that silently misses an exact control scope.
+
 When `classification.sources` is omitted, the default is one namespace-label
 source with the ordered keys `openmeshguard.io/environment`, `environment`,
 and `env`. Supplying sources replaces that default. If evidence required by a
@@ -100,7 +105,10 @@ Control parameters merge in this order: control-pack parameters, scan-config
 `environments` list replaces the control's list. A
 `severityByEnvironment` entry changes severity only for that environment.
 Unknown control IDs, duplicate overrides, and invalid severities are errors;
-overrides cannot disable a control.
+overrides cannot disable a control. The mandatory coverage controls
+MG-ENV-001, MG-OWN-001, MG-EXC-001, and MG-EXC-002 reject environment-list
+overrides because filtering any of them would remove the governance finding
+that protects an otherwise skipped target.
 
 ## Ownership imports
 
@@ -144,6 +152,15 @@ If Kubernetes metadata needed by a higher-precedence source is unavailable,
 ownership remains unknown; config and imports do not silently override that
 missing evidence.
 
+For controller-backed workloads, resource metadata supplements pod-template
+metadata and wins on a duplicate key. When policy variation requires the
+normalizer to emit per-Pod workload results, metadata from the owning
+ReplicaSet and controller is retained and the highest owning controller wins
+on collisions. Pod and template metadata fill missing keys. This keeps
+ownership and exception references stable during rollouts instead of changing
+governance identity when a controller is temporarily projected as per-Pod
+results.
+
 ## Exception records
 
 OpenMeshGuard consumes exception decisions made in the organization's existing
@@ -186,6 +203,13 @@ resources, and resolution chain remain intact. An expired record leaves the
 finding `open` at its original severity, attaches the expired exception
 evidence, and raises MG-EXC-002. MG-EXC-001 and MG-EXC-002 cannot themselves
 be excepted.
+
+The record `spec.owner` must exactly match the workload's resolved owner before
+the annotation can except a finding. A mismatch raises MG-EXC-001 and leaves
+the original finding open. If owner evidence is unavailable, exception
+matching remains unknown and the original finding also stays open. This
+prevents a valid exception ID approved for one team from being replayed by
+another workload without adding a new scope-selector format.
 
 Removing a record revokes it for the next scan; Git history remains the audit
 trail. Cluster, namespace, selector, and implicit resource scopes, explicit

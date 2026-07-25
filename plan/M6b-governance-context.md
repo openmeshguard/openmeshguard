@@ -33,6 +33,11 @@ Ambient (M6a), HTML/SARIF/score/exit-codes (M6c), Prometheus (M7).
   real users demonstrate that annotation-only references are insufficient.
   M6b deliberately consumes enterprise exception decisions rather than
   implementing a second exception workflow.
+- Add exception owner, justification, source-file, and annotation-binding
+  provenance to canonical output only after the frozen
+  `findings[].exception` and resolution-chain contracts receive explicit human
+  approval. M6b keeps the approved ID, expiry, approver, ticket, evidence
+  source, and unchanged posture chain while enforcing owner-bound matching.
 - Add exception status/revocation, multiple-exception resolution, approval
   workflows, and direct ticket-system integrations after the owning external
   system contract is defined. In M6b, removing a Git-native record revokes it
@@ -63,6 +68,19 @@ Ambient (M6a), HTML/SARIF/score/exit-codes (M6c), Prometheus (M7).
   reason names both namespace label and annotation evidence after the review
   fix that degrades application-ID and owner fields independently. Their
   control/status sets do not change.
+
+### Expected review-remediation delta before regeneration
+
+- No existing golden changes are expected. The governance fixtures already use
+  string-normalized environments, loaded control IDs, matching exception and
+  workload owners, stable controller metadata, and unambiguous enrollment.
+- One new `governance-owner-mismatch` golden is expected. It reuses the active
+  workload with a record owned by another team; MG-MTLS-001 must remain open
+  without exception evidence and MG-EXC-001 must report the invalid binding.
+- The active and expired exception projections remain contract-identical. The
+  E2E semantic guard now additionally requires the existing `expiresAt`,
+  `approver`, `ticket`, and `exception-record` evidence fields, so regeneration
+  cannot silently discard them.
 
 ### Decisions
 
@@ -139,6 +157,57 @@ Ambient (M6a), HTML/SARIF/score/exit-codes (M6c), Prometheus (M7).
    export the branch bundle to an external review service without separate
    authorization. A local read-only adversarial review found and fixed items
    1–5; the final local diff has no remaining actionable finding.
+8. **Mitigated within the approved contract — exception IDs were replayable
+   across workload owners.** The annotation-only format remains unchanged, but
+   a valid record now matches only when `spec.owner` equals the workload's
+   resolved owner. Owner mismatch raises MG-EXC-001; unavailable owner evidence
+   makes the reference unknown; both leave the original finding open.
+   Engine-level owner checks provide defense in depth. A namespace editor who
+   can also forge the approved owner metadata could still replay an ID; fully
+   preventing that requires the scoped-record format already recorded in
+   Deferred and therefore remains an explicit accepted M6b limitation rather
+   than an unapproved contract expansion.
+9. **Fixed — overrides could filter mandatory governance controls.**
+   Environment-list overrides are rejected for MG-ENV-001, MG-OWN-001, and
+   MG-EXC-001/002, preventing an override from removing the coverage finding
+   for an unclassified, unowned, invalid, or expired target.
+10. **Fixed — known non-enrollment dominated unknown enrollment.** Namespace
+    aggregation now uses the lattice enrolled > unknown > not-enrolled. An
+    unknown workload keeps the namespace in MG-ENV-001 evaluation even when a
+    sibling is conclusively outside the mesh; the result is order-independent.
+11. **Fixed — governance metadata depended on normalization shape.** Workload
+    context now includes controller resource labels/annotations, standalone
+    ReplicaSets, and owning controller metadata for per-Pod normalized
+    results. Resource metadata supplements templates, and the highest owning
+    controller wins on collisions, so rollout-driven normalization does not
+    change or discard governance context.
+12. **Fixed — environment scalars were coercible and whitespace-sensitive.**
+    Classification and control environment inputs require YAML strings and
+    reject surrounding whitespace, preventing values such as boolean `true`
+    or `" production "` from silently missing production control scopes.
+13. **Fixed — headerless exception documents were discarded as blank.** Only
+    a structurally empty YAML document is skipped. A document containing
+    `spec` without the required header now fails strict loading.
+14. **Fixed — exception control IDs were only syntax-checked.** Records are
+    now checked against the complete loaded built-in and user control set.
+    Unknown IDs invalidate the record and produce MG-EXC-001 instead of an
+    inert apparently-valid exception.
+15. **Partially accepted; contract-gated — exception provenance could be
+    stronger.** The E2E guard now protects every existing canonical exception
+    field and `exception-record` evidence. Adding owner, justification,
+    source-file, or binding-chain fields would change the frozen canonical
+    output/resolution-chain contract, so that work is recorded in Deferred
+    instead of overloading approved fields.
+16. **Disposed as approved behavior — ordered classification sources.** The
+    exact-mapping, label, configured name-rule, cluster, and cluster-context
+    building blocks execute in the operator-declared order documented in the
+    approved format. A configured regex is an explicit resolved source;
+    `--infer-environments` still controls only the built-in heuristic fallback.
+17. **Disposed as approved behavior — namespace/selector ownership maps.**
+    The approved M6b bridge resolves configurable application-ID metadata to an
+    owner, allowing the same ID across namespaces. Reintroducing the earlier
+    SPEC namespace/selector mapping would reverse the human-approved format
+    rather than fix an implementation defect.
 
 ### Flags raised
 
@@ -177,21 +246,28 @@ Ambient (M6a), HTML/SARIF/score/exit-codes (M6c), Prometheus (M7).
   independent unknown fields, strict file loading, environment parameters and
   overrides, every context-control outcome, and exception never-removal,
   expiry, invalidity, wrong-control, hygiene-control, unknown, and
-  not-applicable cases.
-- The final guarded `UPDATE_GOLDEN=1 make e2e` completed in 70 seconds. It
-  schema-validated all 21 golden reports plus the all-namespaces report, passed
-  semantic guards before copying, and recorded 436 approved list calls and no
-  other scanner calls. Active and expired exception goldens retain exactly one
-  MG-MTLS-001 finding at configured `critical` severity; the active status is
-  `excepted`, while expired is `open` with exception evidence plus
-  MG-EXC-002.
+  not-applicable cases. Review regressions additionally cover all mandatory
+  governance-control override rejections, boolean and whitespace environment
+  inputs, loaded exception control IDs, nonempty headerless documents,
+  cross-owner exception binding, mixed unknown/non-mesh namespace enrollment
+  in both orders, controller metadata collisions, standalone ReplicaSets, and
+  per-Pod normalization.
+- The final guarded `UPDATE_GOLDEN=1 make e2e` completed in 63 seconds. It
+  schema-validated all 22 golden reports plus the all-namespaces report, passed
+  semantic guards before copying, and recorded 456 approved list calls and no
+  other scanner calls. Every existing golden remained unchanged; the only
+  addition was `governance-owner-mismatch`. Active and expired exception
+  goldens retain exactly one MG-MTLS-001 finding at configured `critical`
+  severity; the active status is `excepted`, while expired is `open` with
+  exception evidence plus MG-EXC-002. The owner-mismatch golden keeps
+  MG-MTLS-001 open without exception evidence and raises MG-EXC-001.
 - Two consecutive final non-update `make e2e` runs matched all goldens, passed
   the ClusterRole, namespace Role, and waypoint-limited proofs, and completed
-  in 69 and 74 seconds. Both recorded the same 436 approved events: 396
+  in 74 and 76 seconds. Both recorded the same 456 approved events: 416
   cluster-scanner lists, 20 waypoint-limited lists, and 20 namespace-scanner
   lists, plus the separate denied audit-probe write positive control. No
   scanner credential survived cleanup.
-- `make kind-up` completed in 94 seconds with Kind v0.31.0, digest-pinned
+- `make kind-up` completed in 41 seconds with Kind v0.31.0, digest-pinned
   Kubernetes 1.35.0, Istio 1.30.2 ambient, and Gateway API v1.5.1.
   `make kind-down` removed the disposable cluster in 1 second.
   `git diff --check` and the frozen-contract/RBAC diff checks are clean.

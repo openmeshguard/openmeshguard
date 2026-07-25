@@ -212,9 +212,17 @@ Production-scoped controls require knowing what production is. v1 defines an exp
 
 Classification precedence (highest wins):
 
-1. Explicit mapping in the scan config file.
-2. Documented label convention: `openmeshguard.io/environment` on the namespace, falling back to widely used conventions (`environment`, `env`) when enabled.
-3. Optional name heuristics (`-prod`, `-production` suffixes) behind an explicit `--infer-environments` flag, disabled by default. Results carry `inferred` confidence and the report discloses that heuristic classification was used. (Decided: ships in v1, off by default.)
+1. Configured scan sources in operator-declared order: exact namespace
+   mappings, configured namespace labels, explicit namespace-name regular
+   expressions, a whole-cluster environment, and cluster-context mappings.
+2. When no sources are configured, the documented namespace-label convention:
+   `openmeshguard.io/environment`, then the widely used `environment` and
+   `env` fallbacks.
+3. Optional built-in name heuristics (`-prod`, `-production` suffixes) behind
+   an explicit `--infer-environments` flag, disabled by default. Results carry
+   `inferred` confidence and the report discloses that heuristic
+   classification was used. Explicit configured regular expressions are
+   resolved scan-config sources, not inference.
 4. Otherwise: `unclassified`.
 
 Behavior:
@@ -224,9 +232,14 @@ Behavior:
 
 Ownership precedence:
 
-1. Resource/namespace labels and annotations: `app.kubernetes.io/name`, `app.kubernetes.io/part-of`, plus `openmeshguard.io/owner` and `openmeshguard.io/app-id`.
-2. Scan config file mapping (namespace or selector → owner/app/BU).
-3. Imported mapping file (CSV/YAML) as a last-resort bulk bridge from CMDB exports.
+1. Configurable resource/namespace labels and annotations, with documented
+   defaults including `app.kubernetes.io/name`,
+   `app.kubernetes.io/part-of`, `openmeshguard.io/owner`, and
+   `openmeshguard.io/app-id`.
+2. Scan-config application-ID-to-owner mappings.
+3. Imported application-ID-to-owner mapping files (CSV/YAML) as a last-resort
+   bulk bridge from CMDB exports. One application ID can span any number of
+   namespaces.
 
 Rationale: labels and annotations already live in the manifests and flow through GitOps review. Bespoke files are overrides and bridges, not the primary model.
 
@@ -234,13 +247,21 @@ Rationale: labels and annotations already live in the manifests and flow through
 
 Exceptions are Git-native records, designed to flow through the same review process as the resources they cover.
 
-- An exception is a YAML record: ID, control ID(s), scope (cluster/namespace/selector/resource), owner, approver, justification, ticket link, expiration, status.
-- Resources reference exceptions via annotation: `openmeshguard.io/exception: <id>` (or the exception's scope selector matches them).
+- An exception is a YAML record: ID, control ID(s), owner, approver,
+  justification, ticket link, and expiration.
+- A workload references one exception by exact annotation:
+  `openmeshguard.io/exception: <id>`.
+- The record owner must match the workload's resolved owner. Mismatch or
+  unavailable owner evidence leaves the original finding open and is reported
+  through exception hygiene.
 - Exception records live in the user's repo and are passed to the scanner (`--exceptions ./exceptions/`).
 - Expired exceptions count as active risk (finding severity restored, plus an exception-hygiene finding).
 - The scanner never treats an exception as deletion of a finding — the finding remains in output, marked excepted, with the exception attached as evidence.
 
-Enterprise-tier ideas (approval workflows, ticket integration, expiry escalation routing) stay out of OSS v1, but the record format is designed so those layers consume the same schema later.
+Cluster/namespace/selector/resource scopes, status/revocation fields, approval
+workflows, ticket integration, and expiry escalation routing stay out of OSS
+v1. Removing a record revokes it for the next scan, while the owning Git
+repository preserves review history.
 
 ## 11. MVP Scope
 
