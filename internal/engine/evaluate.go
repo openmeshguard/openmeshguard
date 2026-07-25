@@ -22,6 +22,7 @@ const (
 type evaluationTarget struct {
 	key           string
 	cluster       string
+	namespace     string
 	environment   string
 	dataPlaneMode string
 	activation    map[string]any
@@ -83,8 +84,29 @@ func Evaluate(packs []Pack, input Input) (Result, error) {
 		return Result{}, err
 	}
 
-	result := Result{Findings: []Finding{}}
+	scoreWeights, criticalCap, err := scoringConfiguration(packs, input.Params)
+	if err != nil {
+		return Result{}, err
+	}
+	environments := make([]string, 0, len(input.EnvironmentParams))
+	for environment := range input.EnvironmentParams {
+		environments = append(environments, environment)
+	}
+	sort.Strings(environments)
+	for _, environment := range environments {
+		params := mergeMaps(input.Params, input.EnvironmentParams[environment])
+		if _, _, err := scoringConfiguration(packs, params); err != nil {
+			return Result{}, fmt.Errorf("environment %s scoring configuration: %w", environment, err)
+		}
+	}
+	result := Result{
+		Findings:     []Finding{},
+		ScoreWeights: scoreWeights,
+		CriticalCap:  criticalCap,
+	}
 	categories := map[string]*categoryAccumulator{}
+	namespaceCategories := map[string]map[string]*categoryAccumulator{}
+	namespaceEnvironments := map[string]string{}
 	for _, pack := range packs {
 		baseParams := mergeMaps(pack.Params, input.Params)
 		for _, control := range pack.Controls {
@@ -122,6 +144,26 @@ func Evaluate(packs []Pack, input Input) (Result, error) {
 				case statusNotApplicable:
 					// Binding contract: not-applicable is excluded from pass rates.
 				}
+				if target.namespace != "" {
+					if _, ok := namespaceCategories[target.namespace]; !ok {
+						namespaceCategories[target.namespace] = map[string]*categoryAccumulator{}
+					}
+					if _, ok := namespaceCategories[target.namespace][control.Category]; !ok {
+						namespaceCategories[target.namespace][control.Category] = &categoryAccumulator{}
+					}
+					namespaceEnvironments[target.namespace] = target.environment
+					namespaceCategory := namespaceCategories[target.namespace][control.Category]
+					switch outcome {
+					case "pass":
+						namespaceCategory.pass++
+					case statusOpen:
+						namespaceCategory.fail++
+					case statusUnknown:
+						namespaceCategory.unknown++
+					case statusNotApplicable:
+						// Binding contract: not-applicable is excluded from pass rates.
+					}
+				}
 				if finding != nil {
 					result.Findings = append(result.Findings, *finding)
 				}
@@ -136,6 +178,16 @@ func Evaluate(packs []Pack, input Input) (Result, error) {
 		return result.Findings[i].ID < result.Findings[j].ID
 	})
 	result.Scores = buildScores(categories)
+	result.NamespaceScores, err = buildNamespaceScores(
+		namespaceCategories,
+		namespaceEnvironments,
+		packs,
+		input.Params,
+		input.EnvironmentParams,
+	)
+	if err != nil {
+		return Result{}, err
+	}
 	return result, nil
 }
 
@@ -456,6 +508,7 @@ func workloadTargets(input Input, params map[string]any) []evaluationTarget {
 		name := workload.Posture.Ref.Namespace + "/" + workload.Posture.Ref.Name
 		targets = append(targets, evaluationTarget{
 			key: name, cluster: workload.Posture.Ref.Cluster, environment: environment,
+			namespace:     workload.Posture.Ref.Namespace,
 			dataPlaneMode: string(workload.Posture.Mode), activation: activation,
 			availability: availability,
 			resource:     ResourceRef{Kind: workload.Posture.Ref.Kind, Namespace: workload.Posture.Ref.Namespace, Name: workload.Posture.Ref.Name},
@@ -521,6 +574,7 @@ func namespaceTargets(input Input, params map[string]any) []evaluationTarget {
 		}
 		targets = append(targets, evaluationTarget{
 			key: namespace.Name, environment: namespace.Environment, activation: activation,
+			namespace:    namespace.Name,
 			availability: availability,
 			resource:     ResourceRef{Kind: "Namespace", Name: namespace.Name},
 			evidence:     uniqueStrings(append([]string{"kubernetes-api"}, namespace.EvidenceSources...)),
@@ -559,6 +613,7 @@ func resourceTargets(control Control, input Input, params map[string]any) []eval
 		}
 		targets = append(targets, evaluationTarget{
 			key: key, environment: resource.Environment,
+			namespace:    resource.Namespace,
 			activation:   map[string]any{"resource": value, "inventory": nonNilMap(input.Inventory), "params": params},
 			availability: availability,
 			resource:     ResourceRef{APIVersion: resource.APIVersion, Kind: resource.Kind, Namespace: resource.Namespace, Name: resource.Name},
@@ -920,6 +975,37 @@ func buildScores(categories map[string]*categoryAccumulator) []CategoryScore {
 	return scores
 }
 
+func buildNamespaceScores(
+	categories map[string]map[string]*categoryAccumulator,
+	environments map[string]string,
+	packs []Pack,
+	inputParams map[string]any,
+	environmentParams map[string]map[string]any,
+) ([]NamespaceScore, error) {
+	namespaces := make([]string, 0, len(categories))
+	for namespace := range categories {
+		namespaces = append(namespaces, namespace)
+	}
+	sort.Strings(namespaces)
+	scores := make([]NamespaceScore, 0, len(namespaces))
+	for _, namespace := range namespaces {
+		environment := environments[namespace]
+		params := mergeMaps(inputParams, environmentParams[environment])
+		weights, criticalCap, err := scoringConfiguration(packs, params)
+		if err != nil {
+			return nil, fmt.Errorf("namespace %s scoring configuration: %w", namespace, err)
+		}
+		scores = append(scores, NamespaceScore{
+			Namespace:    namespace,
+			Environment:  environment,
+			Categories:   buildScores(categories[namespace]),
+			ScoreWeights: weights,
+			CriticalCap:  criticalCap,
+		})
+	}
+	return scores, nil
+}
+
 func letterGrade(passRate float64) string {
 	switch {
 	case passRate >= 0.9:
@@ -932,6 +1018,84 @@ func letterGrade(passRate float64) string {
 		return "D"
 	default:
 		return "F"
+	}
+}
+
+func scoringConfiguration(packs []Pack, inputParams map[string]any) (map[string]float64, float64, error) {
+	scoring := map[string]any{}
+	for _, pack := range packs {
+		value, exists := pack.Params["scoring"]
+		if !exists {
+			continue
+		}
+		parsed, ok := value.(map[string]any)
+		if !ok {
+			return nil, 0, fmt.Errorf("%s: params.scoring must be an object", pack.File)
+		}
+		scoring = mergeMaps(scoring, parsed)
+	}
+	if value, exists := inputParams["scoring"]; exists {
+		parsed, ok := value.(map[string]any)
+		if !ok {
+			return nil, 0, fmt.Errorf("scan config controls.parameters.defaults.scoring must be an object")
+		}
+		scoring = mergeMaps(scoring, parsed)
+	}
+	if len(scoring) == 0 {
+		return map[string]float64{}, 0, nil
+	}
+
+	rawWeights, ok := scoring["weights"].(map[string]any)
+	if !ok || len(rawWeights) == 0 {
+		return nil, 0, fmt.Errorf("params.scoring.weights must be a non-empty object")
+	}
+	validCategories := map[string]struct{}{
+		"mtls":       {},
+		"authz":      {},
+		"exposure":   {},
+		"governance": {},
+		"lifecycle":  {},
+	}
+	weights := make(map[string]float64, len(rawWeights))
+	var totalWeight float64
+	for category, value := range rawWeights {
+		if _, exists := validCategories[category]; !exists {
+			return nil, 0, fmt.Errorf("params.scoring.weights.%s is not a control category", category)
+		}
+		weight, ok := numericValue(value)
+		if !ok || weight < 0 {
+			return nil, 0, fmt.Errorf("params.scoring.weights.%s must be a non-negative number", category)
+		}
+		weights[category] = weight
+		totalWeight += weight
+	}
+	for category := range validCategories {
+		if _, exists := weights[category]; !exists {
+			return nil, 0, fmt.Errorf("params.scoring.weights.%s is required", category)
+		}
+	}
+	if totalWeight <= 0 {
+		return nil, 0, fmt.Errorf("params.scoring.weights must contain a positive total weight")
+	}
+	criticalCap, ok := numericValue(scoring["criticalCap"])
+	if !ok || criticalCap < 0 || criticalCap > 100 {
+		return nil, 0, fmt.Errorf("params.scoring.criticalCap must be a number between 0 and 100")
+	}
+	return weights, criticalCap, nil
+}
+
+func numericValue(value any) (float64, bool) {
+	switch typed := value.(type) {
+	case int:
+		return float64(typed), true
+	case int64:
+		return float64(typed), true
+	case uint64:
+		return float64(typed), true
+	case float64:
+		return typed, true
+	default:
+		return 0, false
 	}
 }
 

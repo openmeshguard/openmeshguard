@@ -216,6 +216,12 @@ func TestGeneratedScanOutputMatchesSchema(t *testing.T) {
 	if len(generated.Findings) == 0 {
 		t.Fatal("generated report has no engine findings")
 	}
+	if generated.Scores.Overall == nil {
+		t.Fatal("generated report has no numeric weighted overall score")
+	}
+	if len(generated.Scores.Namespaces) == 0 {
+		t.Fatal("generated report has no namespace score rollup")
+	}
 	seenUnknown := false
 	seenNotApplicable := false
 	seenSuggestedYAML := false
