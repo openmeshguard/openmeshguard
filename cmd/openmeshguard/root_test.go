@@ -159,6 +159,46 @@ func TestExitCodeUsesTwoForScanOrProjectionErrors(t *testing.T) {
 	}
 }
 
+func TestScoreCommandUsesExitTwoForSchemaInvalidCanonicalInput(t *testing.T) {
+	golden := filepath.Join(
+		"..",
+		"..",
+		"test",
+		"fixtures",
+		"governance-context",
+		"golden",
+		"governance-expired-exception.json",
+	)
+	data, err := os.ReadFile(golden)
+	if err != nil {
+		t.Fatalf("read golden: %v", err)
+	}
+	invalid := bytes.Replace(data, []byte(`"status": "open"`), []byte(`"status": "bogus"`), 1)
+	if bytes.Equal(invalid, data) {
+		t.Fatal("golden had no open finding to corrupt")
+	}
+	input := filepath.Join(t.TempDir(), "invalid.json")
+	if err := os.WriteFile(input, invalid, 0o600); err != nil {
+		t.Fatalf("write invalid canonical input: %v", err)
+	}
+
+	_, _, err = executeForTest(
+		t,
+		defaultVersionInfo(),
+		"score",
+		"--input",
+		input,
+		"--fail-on",
+		"info",
+	)
+	if err == nil || !strings.Contains(err.Error(), "validate canonical report") {
+		t.Fatalf("score error = %v, want canonical validation failure", err)
+	}
+	if got := exitCode(err); got != 2 {
+		t.Fatalf("invalid canonical input exit code = %d, want 2", got)
+	}
+}
+
 func TestScanAndScoreRejectInvalidThresholdBeforeWork(t *testing.T) {
 	for _, args := range [][]string{
 		{"scan", "--all-namespaces", "--fail-on", "urgent"},

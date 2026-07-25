@@ -144,6 +144,27 @@ func TestSARIFStatusProjectionIsExplicitAndNonMisleading(t *testing.T) {
 	}
 }
 
+func TestSARIFRuleUsesFirstNonEmptyOptionalTitle(t *testing.T) {
+	first := thresholdFinding("open", "medium")
+	first.Title = ""
+	second := thresholdFinding("open", "medium")
+	second.ID = "MG-TEST-001-deadbeef0002"
+	second.Title = "Test control title"
+	projected, err := projectSARIF(report{
+		SchemaVersion: schemaVersion,
+		Scanner:       scanner{Version: "dev"},
+		Scan:          scan{ClusterContext: "fixture"},
+		Findings:      []finding{first, second},
+	})
+	if err != nil {
+		t.Fatalf("project valid optional titles: %v", err)
+	}
+	rules := projected.Runs[0].Tool.Driver.Rules
+	if len(rules) != 1 || rules[0].ShortDescription.Text != second.Title {
+		t.Fatalf("SARIF rules = %#v, want one rule titled %q", rules, second.Title)
+	}
+}
+
 func equalStrings(left, right []string) bool {
 	if len(left) != len(right) {
 		return false

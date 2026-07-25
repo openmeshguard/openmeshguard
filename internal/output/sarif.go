@@ -158,14 +158,13 @@ func sarifRules(findings []finding) ([]sarifRule, map[string]int, error) {
 	indexes := make(map[string]int, len(controlIDs))
 	for _, controlID := range controlIDs {
 		controlFindings := byControl[controlID]
-		title := controlFindings[0].Title
-		if title == "" {
-			title = controlID
-		}
+		title := ""
 		remediationText := ""
 		severity := "info"
 		for _, item := range controlFindings {
-			if item.Title != "" && item.Title != title {
+			if title == "" && item.Title != "" {
+				title = item.Title
+			} else if item.Title != "" && item.Title != title {
 				return nil, nil, fmt.Errorf(
 					"project SARIF: control %s has conflicting titles %q and %q",
 					controlID,
@@ -179,6 +178,9 @@ func sarifRules(findings []finding) ([]sarifRule, map[string]int, error) {
 			if remediationText == "" && item.Remediation != nil {
 				remediationText = item.Remediation.Guidance
 			}
+		}
+		if title == "" {
+			title = controlID
 		}
 		rule := sarifRule{
 			ID:                   controlID,
