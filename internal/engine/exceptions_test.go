@@ -71,3 +71,36 @@ func TestApplyExceptionsNeverExceptsExceptionHygieneControls(t *testing.T) {
 		t.Fatalf("exception hygiene finding was excepted: %#v", got.Findings[0])
 	}
 }
+
+func TestApplyExceptionsPreservesUnknownAndNotApplicable(t *testing.T) {
+	tests := []struct {
+		name   string
+		status string
+	}{
+		{name: "unknown evidence remains unknown", status: statusUnknown},
+		{name: "not applicable remains not applicable", status: statusNotApplicable},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := Result{Findings: []Finding{{
+				ControlID: "MG-MTLS-001",
+				Status:    tt.status,
+				Severity:  "high",
+				Resources: []ResourceRef{{Kind: "Deployment", Namespace: "payments", Name: "api"}},
+			}}}
+			got := ApplyExceptions(
+				result,
+				[]ExceptionInput{{ID: "EXC-42", ControlIDs: []string{"MG-MTLS-001"}, Valid: true}},
+				[]ExceptionBinding{{
+					Resource:    ResourceRef{Kind: "Deployment", Namespace: "payments", Name: "api"},
+					ExceptionID: "EXC-42",
+				}},
+			)
+			if len(got.Findings) != 1 ||
+				got.Findings[0].Status != tt.status ||
+				got.Findings[0].Exception != nil {
+				t.Fatalf("finding = %#v, want unchanged %s without exception evidence", got.Findings, tt.status)
+			}
+		})
+	}
+}

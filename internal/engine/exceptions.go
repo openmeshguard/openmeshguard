@@ -16,7 +16,10 @@ func ApplyExceptions(result Result, exceptions []ExceptionInput, bindings []Exce
 	}
 	for index := range result.Findings {
 		finding := &result.Findings[index]
-		if finding.ControlID == "MG-EXC-001" || finding.ControlID == "MG-EXC-002" || len(finding.Resources) == 0 {
+		if finding.Status != statusOpen ||
+			finding.ControlID == "MG-EXC-001" ||
+			finding.ControlID == "MG-EXC-002" ||
+			len(finding.Resources) == 0 {
 			continue
 		}
 		exceptionID := strings.TrimSpace(bound[resourceIdentity(finding.Resources[0])])
