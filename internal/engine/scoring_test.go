@@ -53,6 +53,27 @@ func TestScoringConfigurationUsesPublishedDataAndEnvironmentOverrides(t *testing
 	}
 }
 
+func TestWeightedCategoryWithoutControlsRemainsExplicitlyUnknown(t *testing.T) {
+	packs, err := LoadBuiltins()
+	if err != nil {
+		t.Fatalf("load built-ins: %v", err)
+	}
+	result, err := Evaluate(packs, Input{})
+	if err != nil {
+		t.Fatalf("evaluate built-ins: %v", err)
+	}
+	for _, category := range result.Scores {
+		if category.Category != "lifecycle" {
+			continue
+		}
+		if category.Grade != "unknown" || category.PassRate != nil || category.Evaluated != 0 {
+			t.Fatalf("lifecycle score = %#v, want explicit unknown", category)
+		}
+		return
+	}
+	t.Fatal("published lifecycle score dimension disappeared because it has no current controls")
+}
+
 func TestScoringConfigurationRejectsInvalidData(t *testing.T) {
 	tests := []struct {
 		name    string

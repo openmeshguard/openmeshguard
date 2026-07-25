@@ -120,6 +120,35 @@ func TestReportScoresWeightsKnownCategoriesAndAppliesCriticalCap(t *testing.T) {
 	}
 }
 
+func TestReportScoresIncludesClusterScopedControlsInOverall(t *testing.T) {
+	globalRate := 0.5
+	namespaceRate := 1.0
+	weights := map[string]float64{
+		"authz": 0, "exposure": 0, "governance": 100, "lifecycle": 0, "mtls": 0,
+	}
+	scored := reportScores(engine.Result{
+		Scores: []engine.CategoryScore{{
+			Category: "governance", Grade: "F", PassRate: &globalRate, Evaluated: 2,
+		}},
+		NamespaceScores: []engine.NamespaceScore{{
+			Namespace: "payments",
+			Categories: []engine.CategoryScore{{
+				Category: "governance", Grade: "A", PassRate: &namespaceRate, Evaluated: 1,
+			}},
+			ScoreWeights: weights,
+			CriticalCap:  59,
+		}},
+		ScoreWeights: weights,
+		CriticalCap:  59,
+	})
+	if scored.Overall == nil || *scored.Overall != 50 {
+		t.Fatalf("overall = %v, want 50 from global category aggregate", scored.Overall)
+	}
+	if scored.Namespaces[0].Score == nil || *scored.Namespaces[0].Score != 100 {
+		t.Fatalf("namespace score = %#v, want unaffected namespace score 100", scored.Namespaces[0])
+	}
+}
+
 func TestWriteScoreReadsCanonicalScoreWithoutRecomputation(t *testing.T) {
 	scoreValue := 87.5
 	data := thresholdReportJSON(t, []finding{thresholdFinding("unknown", "critical")})
@@ -145,6 +174,7 @@ func TestWriteScoreReadsCanonicalScoreWithoutRecomputation(t *testing.T) {
 	}
 	for _, want := range []string{
 		"score for namespace payments: 59.0/100 (critical cap applied)",
+		"Cluster category grades (namespace category grades are not present in canonical JSON):",
 		"mtls         B  pass=87.5%",
 		"Unknown findings: 1 (excluded from score and exit status by default)",
 	} {
@@ -185,7 +215,7 @@ func thresholdReportJSON(t *testing.T, findings []finding) []byte {
 			MultiCluster: multiCluster{},
 		},
 		WorkloadPostures: []canonicalWorkloadPosture{},
-		Findings:         findings,
+		Findings:         append([]finding{}, findings...),
 		Scores:           scores{Categories: []scoreCategory{}},
 	})
 	if err != nil {

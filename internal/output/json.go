@@ -381,7 +381,6 @@ func scoreCategories(input []engine.CategoryScore) []scoreCategory {
 func reportScores(evaluated engine.Result) scores {
 	categories := scoreCategories(evaluated.Scores)
 	namespaces := make([]namespaceScore, 0, len(evaluated.NamespaceScores))
-	namespaceValues := make([]*float64, 0, len(evaluated.NamespaceScores))
 	for _, namespace := range evaluated.NamespaceScores {
 		score := weightedScore(scoreCategories(namespace.Categories), namespace.ScoreWeights)
 		hasCritical := hasOpenCriticalFinding(evaluated.Findings, namespace.Namespace)
@@ -389,7 +388,6 @@ func reportScores(evaluated engine.Result) scores {
 		if hasCritical {
 			score, capped = capScore(score, namespace.CriticalCap)
 		}
-		namespaceValues = append(namespaceValues, score)
 		namespaces = append(namespaces, namespaceScore{
 			Namespace:   namespace.Namespace,
 			Environment: optionalScoreEnvironment(namespace.Environment),
@@ -397,11 +395,11 @@ func reportScores(evaluated engine.Result) scores {
 			Capped:      capped,
 		})
 	}
-	overall := averageScore(namespaceValues)
-	if overall == nil {
-		overall = weightedScore(categories, evaluated.ScoreWeights)
-	}
-	if hasClusterOpenCriticalFinding(evaluated.Findings) {
+	// Cluster scoring uses the canonical global category aggregates so
+	// cluster-scoped controls (notably exception hygiene) cannot disappear
+	// behind namespace rollups.
+	overall := weightedScore(categories, evaluated.ScoreWeights)
+	if hasOpenCriticalFinding(evaluated.Findings, "") {
 		overall, _ = capScore(overall, evaluated.CriticalCap)
 	}
 	return scores{Overall: overall, Categories: categories, Namespaces: namespaces}
@@ -432,23 +430,6 @@ func capScore(score *float64, cap float64) (*float64, bool) {
 	return &capped, true
 }
 
-func averageScore(values []*float64) *float64 {
-	var total float64
-	var count int
-	for _, value := range values {
-		if value == nil {
-			continue
-		}
-		total += *value
-		count++
-	}
-	if count == 0 {
-		return nil
-	}
-	average := total / float64(count)
-	return &average
-}
-
 func hasOpenCriticalFinding(findings []engine.Finding, namespace string) bool {
 	for _, finding := range findings {
 		if finding.Status != "open" || finding.Severity != "critical" {
@@ -461,21 +442,6 @@ func hasOpenCriticalFinding(findings []engine.Finding, namespace string) bool {
 			if resource.Namespace == namespace || (resource.Kind == "Namespace" && resource.Name == namespace) {
 				return true
 			}
-		}
-	}
-	return false
-}
-
-func hasClusterOpenCriticalFinding(findings []engine.Finding) bool {
-	for _, finding := range findings {
-		if finding.Status != "open" || finding.Severity != "critical" {
-			continue
-		}
-		for _, resource := range finding.Resources {
-			if resource.Namespace != "" || resource.Kind == "Namespace" {
-				continue
-			}
-			return true
 		}
 	}
 	return false

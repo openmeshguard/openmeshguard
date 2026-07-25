@@ -45,7 +45,11 @@ func WriteScore(writer io.Writer, reader io.Reader, namespace string) error {
 		}
 	}
 
-	if _, err := fmt.Fprintln(writer, "Category grades:"); err != nil {
+	categoryHeading := "Category grades:"
+	if namespace != "" {
+		categoryHeading = "Cluster category grades (namespace category grades are not present in canonical JSON):"
+	}
+	if _, err := fmt.Fprintln(writer, categoryHeading); err != nil {
 		return fmt.Errorf("write score: %w", err)
 	}
 	for _, category := range canonical.Scores.Categories {

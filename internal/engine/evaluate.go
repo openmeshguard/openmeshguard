@@ -105,6 +105,9 @@ func Evaluate(packs []Pack, input Input) (Result, error) {
 		CriticalCap:  criticalCap,
 	}
 	categories := map[string]*categoryAccumulator{}
+	for category := range scoreWeights {
+		categories[category] = &categoryAccumulator{}
+	}
 	namespaceCategories := map[string]map[string]*categoryAccumulator{}
 	namespaceEnvironments := map[string]string{}
 	for _, pack := range packs {
