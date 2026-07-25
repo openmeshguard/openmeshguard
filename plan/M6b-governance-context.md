@@ -28,4 +28,34 @@ SPEC.md §9 (classification + ownership precedence), §10 (exceptions), §15 (co
 Ambient (M6a), HTML/SARIF/score/exit-codes (M6c), Prometheus (M7).
 
 ## Deferred
-(record follow-ups here)
+
+- Add cluster-, namespace-, selector-, and exact-resource exception scopes after
+  real users demonstrate that annotation-only references are insufficient.
+  M6b deliberately consumes enterprise exception decisions rather than
+  implementing a second exception workflow.
+- Add exception status/revocation, multiple-exception resolution, approval
+  workflows, and direct ticket-system integrations after the owning external
+  system contract is defined. In M6b, removing a Git-native record revokes it
+  and Git preserves the audit history.
+
+## Summary
+
+### Expected golden delta before regeneration
+
+- MG-MTLS-001 and MG-AUTHZ-001/002 become production-scoped. Existing fixture
+  workloads have no governance classification, so those three controls must no
+  longer emit open/unknown/not-applicable findings for them.
+- Every mesh namespace without classification must instead receive
+  MG-ENV-001, and every mesh workload without resolved ownership must receive
+  MG-OWN-001. This replacement is the coverage guard: a production-only
+  finding may disappear only when the same target is visibly covered by the
+  environment governance finding.
+- MG-OWN-002 evaluates only classified-production workloads and therefore must
+  not appear in existing unclassified fixtures.
+- MG-EXC-001/002 must appear only in the new exception fixtures. An active
+  exception keeps its original finding with `status: excepted`; an expired
+  exception keeps the original finding `open` at its original severity and
+  adds MG-EXC-002.
+- Built-in pack provenance changes from `builtin-mtls`/`builtin-authz` 0.2.0 to
+  0.3.0 and adds `builtin-context` 0.3.0. Resolver provenance remains
+  `mtls/v5,authz/v8`.

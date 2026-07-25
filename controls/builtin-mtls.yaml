@@ -2,7 +2,7 @@ apiVersion: openmeshguard.io/v1alpha1
 kind: ControlPack
 metadata:
   name: builtin-mtls
-  version: 0.2.0
+  version: 0.3.0
 controls:
   - id: MG-MTLS-001
     title: Mesh-managed workloads must resolve to strict mTLS
@@ -10,7 +10,7 @@ controls:
     severity: high
     evidenceType: config
     scope: workload
-    environments: []
+    environments: [production]
     requires:
       - mtls.effective
     applicability: 'workload.dataPlaneMode != "not-applicable"'

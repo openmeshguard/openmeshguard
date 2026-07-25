@@ -410,15 +410,18 @@ func TestEvaluateDeterministicIDsAndCategoryGrades(t *testing.T) {
 			t.Fatalf("finding ID changed: %q and %q", first.Findings[index].ID, second.Findings[index].ID)
 		}
 	}
-	if len(first.Scores) != 3 {
-		t.Fatalf("scores = %#v, want authorization, exposure, and mTLS categories", first.Scores)
+	if len(first.Scores) != 4 {
+		t.Fatalf("scores = %#v, want authorization, exposure, governance, and mTLS categories", first.Scores)
 	}
-	authzScore, exposureScore, mtlsScore := first.Scores[0], first.Scores[1], first.Scores[2]
+	authzScore, exposureScore, governanceScore, mtlsScore := first.Scores[0], first.Scores[1], first.Scores[2], first.Scores[3]
 	if authzScore.Category != "authz" || authzScore.PassRate == nil || *authzScore.PassRate != 1 || authzScore.Grade != "A" {
 		t.Fatalf("authorization score = %#v, want 100%% grade A", authzScore)
 	}
 	if exposureScore.Category != "exposure" || exposureScore.PassRate != nil || exposureScore.Grade != "unknown" {
 		t.Fatalf("exposure score = %#v, want no applicable evaluations", exposureScore)
+	}
+	if governanceScore.Category != "governance" || governanceScore.PassRate == nil || *governanceScore.PassRate != 1 || governanceScore.Grade != "A" {
+		t.Fatalf("governance score = %#v, want evaluated ownership controls with grade A", governanceScore)
 	}
 	if mtlsScore.Category != "mtls" || mtlsScore.PassRate == nil || *mtlsScore.PassRate != float64(5)/6 || mtlsScore.Grade != "B" {
 		t.Fatalf("mTLS score = %#v, want 5/6 grade B", mtlsScore)
@@ -1253,7 +1256,16 @@ func workloadWithMTLS(effective resolver.MTLSEffective, byPort map[int32]resolve
 			},
 			Authz: secureAuthzResult(),
 		},
-		Namespace: NamespaceInput{Name: "payments", Labels: map[string]string{"team": "payments"}},
+		Namespace: NamespaceInput{
+			Name: "payments", Labels: map[string]string{"team": "payments"},
+			Environment: "production", EnvironmentKnown: true,
+		},
+		Environment:      "production",
+		EnvironmentKnown: true,
+		Owner:            "payments-team",
+		OwnerKnown:       true,
+		AppID:            "payments",
+		AppIDKnown:       true,
 	}
 }
 

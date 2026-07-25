@@ -1,0 +1,122 @@
+apiVersion: openmeshguard.io/v1alpha1
+kind: ControlPack
+metadata:
+  name: builtin-context
+  version: 0.3.0
+controls:
+  - id: MG-ENV-001
+    title: Mesh namespaces must be classified to an environment
+    category: governance
+    severity: medium
+    evidenceType: context
+    scope: namespace
+    environments: []
+    requires:
+      - namespace.environment
+      - namespace.meshEnrollment
+    applicability: 'namespace.meshEnrollment != "not-enrolled"'
+    expression: 'namespace.environment != "unclassified"'
+    message: >-
+      Namespace {{ .Namespace }} is not classified to an environment.
+    remediation:
+      guidance: >-
+        Configure an environment source or add the organization-approved
+        environment label to the namespace.
+    frameworks:
+      - nist-csf-2.0/GV.RR-02
+
+  - id: MG-OWN-001
+    title: Mesh workloads must map to an application owner
+    category: governance
+    severity: medium
+    evidenceType: context
+    scope: workload
+    environments: []
+    requires:
+      - workload.owner
+      - workload.dataPlaneMode
+    applicability: 'workload.dataPlaneMode != "not-applicable"'
+    expression: 'workload.owner != ""'
+    message: >-
+      Workload {{ .Workload }} does not resolve to an application owner.
+    remediation:
+      guidance: >-
+        Add an organization-approved owner label or map the workload's
+        application ID through the scan config or ownership import.
+    frameworks:
+      - nist-csf-2.0/GV.RR-02
+
+  - id: MG-OWN-002
+    title: Production mesh workloads must include governance metadata
+    category: governance
+    severity: high
+    evidenceType: context
+    scope: workload
+    environments: [production]
+    requires:
+      - workload.environment
+      - workload.owner
+      - workload.appId
+      - workload.dataPlaneMode
+    applicability: 'workload.dataPlaneMode != "not-applicable"'
+    expression: >-
+      workload.environment != "" &&
+      workload.owner != "" &&
+      workload.appId != ""
+    message: >-
+      Production workload {{ .Workload }} is missing an application ID or
+      owner.
+    remediation:
+      guidance: >-
+        Add the configured application-ID and owner labels, or supply the
+        approved ownership mapping for the resolved application ID.
+    frameworks:
+      - nist-csf-2.0/GV.RR-02
+
+  - id: MG-EXC-001
+    title: Exception records and references must be valid
+    category: governance
+    severity: high
+    evidenceType: context
+    scope: resource
+    environments: []
+    match:
+      apiGroups: [openmeshguard.io]
+      kinds: [Exception, ExceptionReference]
+    requires:
+      - resource.validationErrors
+    applicability: 'true'
+    expression: 'resource.validationErrors.size() == 0'
+    message: >-
+      Exception input {{ .Resource }} is invalid and cannot except a finding.
+    remediation:
+      guidance: >-
+        Correct the exception record or remove the dangling resource
+        annotation. Invalid exception input never changes finding status.
+    frameworks:
+      - nist-csf-2.0/GV.OV-01
+
+  - id: MG-EXC-002
+    title: Approved exception records must not be expired
+    category: governance
+    severity: high
+    evidenceType: context
+    scope: resource
+    environments: []
+    match:
+      apiGroups: [openmeshguard.io]
+      kinds: [Exception]
+    requires:
+      - resource.valid
+      - resource.expired
+    applicability: 'resource.valid == true'
+    expression: 'resource.expired == false'
+    message: >-
+      Exception record {{ .Resource }} is expired; matching findings are
+      restored to open at their original severity.
+    remediation:
+      guidance: >-
+        Remove the expired exception or replace it with a newly reviewed
+        record from the organization's exception system.
+    frameworks:
+      - nist-csf-2.0/GV.OV-01
