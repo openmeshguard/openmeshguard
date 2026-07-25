@@ -181,6 +181,19 @@ func TestEngineExceptionInputsAreAnnotationOnly(t *testing.T) {
 	}
 }
 
+func TestContextEvidenceSourcesIncludeAnnotationOwnership(t *testing.T) {
+	sources := contextEvidenceSources(governance.WorkloadContext{
+		Classification: governance.Classification{Source: "scan-config"},
+		Ownership: governance.Ownership{
+			AppIDSource: "workload annotation platform.example.com/application-id",
+			OwnerSource: "namespace annotation platform.example.com/team",
+		},
+	})
+	if len(sources) != 2 || sources[0] != "scan-config" || sources[1] != "kubernetes-api" {
+		t.Fatalf("context evidence sources = %#v, want scan-config and kubernetes-api", sources)
+	}
+}
+
 func TestControlsValidateCommand(t *testing.T) {
 	validPath := "../../internal/engine/testdata/valid.yaml"
 	stdout, stderr, err := executeForTest(t, defaultVersionInfo(), "controls", "validate", validPath)

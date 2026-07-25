@@ -483,7 +483,7 @@ func contextEvidenceSources(resolved governance.WorkloadContext) []string {
 			values = append(values, "scan-config")
 		case source == "ownership-import":
 			values = append(values, "ownership-import")
-		case strings.Contains(source, "label"):
+		case strings.Contains(source, "label"), strings.Contains(source, "annotation"):
 			values = append(values, "kubernetes-api")
 		}
 	}

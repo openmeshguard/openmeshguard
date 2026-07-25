@@ -51,6 +51,21 @@ func TestInferEnvironmentsIsOptIn(t *testing.T) {
 	}
 }
 
+func TestClusterEnvironmentClassifiesEveryNamespace(t *testing.T) {
+	classification := ClassificationConfig{Sources: []ClassificationSource{{
+		Type:        "cluster",
+		Environment: "production",
+	}}}
+	for _, name := range []string{"payments", "checkout-stage"} {
+		got := classifyNamespace(NamespaceInput{Name: name, LabelsKnown: true}, "", classification, false)
+		if got.Environment != "production" ||
+			got.Confidence != ConfidenceUserSupplied ||
+			!got.Known {
+			t.Fatalf("%s classification = %#v, want cluster-supplied production", name, got)
+		}
+	}
+}
+
 func TestOwnershipUsesConfiguredIdentityThenConfigAndImport(t *testing.T) {
 	config := ScanConfig{Ownership: OwnershipConfig{
 		Labels: OwnershipLabels{
@@ -75,6 +90,7 @@ func TestOwnershipUsesConfiguredIdentityThenConfigAndImport(t *testing.T) {
 			{Ref: workloadRef("checkout-stage", "api"), Labels: map[string]string{}, Namespace: NamespaceInput{Name: "checkout-stage", LabelsKnown: true, Labels: map[string]string{"platform.example.com/application-id": "checkout"}}},
 			{Ref: workloadRef("payments-prod", "worker"), Labels: map[string]string{"platform.example.com/team": "workload-team"}, Namespace: NamespaceInput{Name: "payments-prod", LabelsKnown: true, Labels: map[string]string{"platform.example.com/application-id": "payments"}}},
 			{Ref: workloadRef("payments-prod", "annotated"), Annotations: map[string]string{"platform.example.com/application-id": "payments", "platform.example.com/team": "annotation-team"}, Namespace: NamespaceInput{Name: "payments-prod", LabelsKnown: true}},
+			{Ref: workloadRef("payments-prod", "namespace-annotated"), Namespace: NamespaceInput{Name: "payments-prod", LabelsKnown: true, Annotations: map[string]string{"platform.example.com/application-id": "payments", "platform.example.com/team": "namespace-team"}}},
 		},
 	}
 	got := Resolve(input)
@@ -95,6 +111,11 @@ func TestOwnershipUsesConfiguredIdentityThenConfigAndImport(t *testing.T) {
 		byKey["payments-prod/annotated"].Owner != "annotation-team" ||
 		byKey["payments-prod/annotated"].AppIDSource != "workload annotation platform.example.com/application-id" {
 		t.Fatalf("workload annotations did not resolve ownership: %#v", byKey["payments-prod/annotated"])
+	}
+	if byKey["payments-prod/namespace-annotated"].AppID != "payments" ||
+		byKey["payments-prod/namespace-annotated"].Owner != "namespace-team" ||
+		byKey["payments-prod/namespace-annotated"].OwnerSource != "namespace annotation platform.example.com/team" {
+		t.Fatalf("namespace annotations did not resolve ownership: %#v", byKey["payments-prod/namespace-annotated"])
 	}
 }
 
