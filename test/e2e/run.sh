@@ -712,7 +712,7 @@ assert_json "zero-config scan discloses absent context and runtime inputs" "$res
 	} and
 	.scan.dataSources.prometheus.enabled == false and
 	.inventory.classification.namespacesUnclassified > 0 and
-	([.findings[] | select(.status == "unknown")] | length) > 0
+	all(.workloadPostures[]; has("verified") | not)
 '
 project_cluster_outputs
 assert_json "cluster scan workload targets are globally ordered" "$results/cluster-scan.json" '

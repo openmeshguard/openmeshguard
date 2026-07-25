@@ -838,6 +838,13 @@
         "grade": "unknown",
         "passRate": null
       }
+    ],
+    "namespaces": [
+      {
+        "namespace": "omg-not-in-mesh",
+        "environment": "unclassified",
+        "score": null
+      }
     ]
   }
 }

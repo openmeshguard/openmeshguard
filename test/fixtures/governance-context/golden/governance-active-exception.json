@@ -874,7 +874,7 @@
     }
   ],
   "scores": {
-    "overall": null,
+    "overall": 61.73469387755102,
     "categories": [
       {
         "category": "authz",
@@ -898,6 +898,13 @@
         "grade": "F",
         "passRate": 0.5,
         "evaluated": 4
+      }
+    ],
+    "namespaces": [
+      {
+        "namespace": "omg-governance-active",
+        "environment": "production",
+        "score": 61.73469387755102
       }
     ]
   }

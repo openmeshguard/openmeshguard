@@ -873,7 +873,7 @@
     }
   ],
   "scores": {
-    "overall": null,
+    "overall": 33.33333333333333,
     "categories": [
       {
         "category": "authz",
@@ -897,6 +897,13 @@
         "grade": "F",
         "passRate": 0.3333333333333333,
         "evaluated": 3
+      }
+    ],
+    "namespaces": [
+      {
+        "namespace": "omg-workload-conflict",
+        "environment": "unclassified",
+        "score": 33.33333333333333
       }
     ]
   }

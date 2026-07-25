@@ -852,7 +852,7 @@
     }
   ],
   "scores": {
-    "overall": null,
+    "overall": 73.68421052631578,
     "categories": [
       {
         "category": "authz",
@@ -877,6 +877,13 @@
         "grade": "A",
         "passRate": 1,
         "evaluated": 8
+      }
+    ],
+    "namespaces": [
+      {
+        "namespace": "omg-ambient-ready",
+        "environment": "unclassified",
+        "score": 73.68421052631578
       }
     ]
   }

@@ -778,6 +778,12 @@
         "passRate": null,
         "unknown": 3
       }
+    ],
+    "namespaces": [
+      {
+        "namespace": "omg-strict",
+        "score": null
+      }
     ]
   }
 }
