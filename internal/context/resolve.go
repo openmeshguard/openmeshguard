@@ -49,6 +49,7 @@ type Classification struct {
 	Confidence  string
 	Known       bool
 	Reason      string
+	Source      string
 }
 
 type Ownership struct {
@@ -129,7 +130,7 @@ func classifyNamespace(namespace NamespaceInput, clusterContext string, config C
 		switch source.Type {
 		case "namespace-mapping":
 			if environment := strings.TrimSpace(source.Mappings[namespace.Name]); environment != "" {
-				return Classification{Environment: environment, Confidence: ConfidenceUserSupplied, Known: true}
+				return Classification{Environment: environment, Confidence: ConfidenceUserSupplied, Known: true, Source: "scan-config"}
 			}
 		case "namespace-label":
 			if !namespace.LabelsKnown {
@@ -140,27 +141,27 @@ func classifyNamespace(namespace NamespaceInput, clusterContext string, config C
 			}
 			for _, key := range source.Keys {
 				if environment := strings.TrimSpace(namespace.Labels[key]); environment != "" {
-					return Classification{Environment: environment, Confidence: ConfidenceObserved, Known: true}
+					return Classification{Environment: environment, Confidence: ConfidenceObserved, Known: true, Source: "kubernetes-api"}
 				}
 			}
 		case "namespace-name":
 			if environment := matchNameRules(namespace.Name, source.Rules); environment != "" {
-				return Classification{Environment: environment, Confidence: ConfidenceResolved, Known: true}
+				return Classification{Environment: environment, Confidence: ConfidenceResolved, Known: true, Source: "scan-config"}
 			}
 		case "cluster":
-			return Classification{Environment: source.Environment, Confidence: ConfidenceUserSupplied, Known: true}
+			return Classification{Environment: source.Environment, Confidence: ConfidenceUserSupplied, Known: true, Source: "scan-config"}
 		case "cluster-context":
 			if environment := strings.TrimSpace(source.Mappings[clusterContext]); environment != "" {
-				return Classification{Environment: environment, Confidence: ConfidenceResolved, Known: true}
+				return Classification{Environment: environment, Confidence: ConfidenceResolved, Known: true, Source: "scan-config"}
 			}
 		}
 	}
 	if infer {
 		if environment := matchNameRules(namespace.Name, inferredEnvironmentRules); environment != "" {
-			return Classification{Environment: environment, Confidence: ConfidenceInferred, Known: true}
+			return Classification{Environment: environment, Confidence: ConfidenceInferred, Known: true, Source: "kubernetes-api"}
 		}
 	}
-	return Classification{Environment: EnvironmentUnclassified, Confidence: ConfidenceResolved, Known: true}
+	return Classification{Environment: EnvironmentUnclassified, Confidence: ConfidenceResolved, Known: true, Source: "kubernetes-api"}
 }
 
 func resolveOwnership(

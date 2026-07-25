@@ -93,7 +93,7 @@ type ControlParameters struct {
 
 type ControlOverride struct {
 	ControlID             string            `yaml:"controlId"`
-	Environments          []string          `yaml:"environments,omitempty"`
+	Environments          *[]string         `yaml:"environments,omitempty"`
 	SeverityByEnvironment map[string]string `yaml:"severityByEnvironment,omitempty"`
 }
 
@@ -340,8 +340,10 @@ func validateControls(config ControlsConfig) error {
 			return fmt.Errorf("overrides[%d]: duplicate controlId %q", index, override.ControlID)
 		}
 		seen[override.ControlID] = struct{}{}
-		if err := validateNonEmptyUnique(override.Environments, fmt.Sprintf("overrides[%d].environments", index)); err != nil {
-			return err
+		if override.Environments != nil {
+			if err := validateNonEmptyUnique(*override.Environments, fmt.Sprintf("overrides[%d].environments", index)); err != nil {
+				return err
+			}
 		}
 		for environment, severity := range override.SeverityByEnvironment {
 			if strings.TrimSpace(environment) == "" {

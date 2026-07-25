@@ -86,17 +86,29 @@ func Evaluate(packs []Pack, input Input) (Result, error) {
 	result := Result{Findings: []Finding{}}
 	categories := map[string]*categoryAccumulator{}
 	for _, pack := range packs {
-		params := mergeMaps(pack.Params, input.Params)
+		baseParams := mergeMaps(pack.Params, input.Params)
 		for _, control := range pack.Controls {
 			if _, ok := categories[control.Category]; !ok {
 				categories[control.Category] = &categoryAccumulator{}
 			}
-			targets := targetsFor(control, input, params)
+			targets := targetsFor(control, input, baseParams)
 			for _, target := range targets {
-				if !matchesEnvironment(control.Environments, target.environment) {
+				override := input.ControlOverrides[control.ID]
+				environments := control.Environments
+				if override.Environments != nil {
+					environments = *override.Environments
+				}
+				if !matchesEnvironment(environments, target.environment) {
 					continue
 				}
-				finding, outcome, err := evaluateControl(pack, control, target)
+				params := mergeMaps(baseParams, input.EnvironmentParams[target.environment])
+				target.activation["params"] = params
+				target.templateData.Params = params
+				effectiveControl := control
+				if severity := override.SeverityByEnvironment[target.environment]; severity != "" {
+					effectiveControl.Severity = severity
+				}
+				finding, outcome, err := evaluateControl(pack, effectiveControl, target)
 				if err != nil {
 					return Result{}, err
 				}
@@ -429,7 +441,7 @@ func workloadTargets(input Input, params map[string]any) []evaluationTarget {
 			namespace.Name = workload.Posture.Ref.Namespace
 		}
 		environment := workload.Environment
-		if environment == "" {
+		if !workload.EnvironmentKnown {
 			environment = namespace.Environment
 		}
 		availability := evaluationAvailability(input.InventoryAvailability)
@@ -448,7 +460,7 @@ func workloadTargets(input Input, params map[string]any) []evaluationTarget {
 			availability: availability,
 			resource:     ResourceRef{Kind: workload.Posture.Ref.Kind, Namespace: workload.Posture.Ref.Namespace, Name: workload.Posture.Ref.Name},
 			workload:     workload,
-			evidence:     []string{"kubernetes-api"},
+			evidence:     uniqueStrings(append([]string{"kubernetes-api"}, workload.EvidenceSources...)),
 			templateData: messageData{
 				Workload:  name,
 				Namespace: namespace.Name,
@@ -511,7 +523,7 @@ func namespaceTargets(input Input, params map[string]any) []evaluationTarget {
 			key: namespace.Name, environment: namespace.Environment, activation: activation,
 			availability: availability,
 			resource:     ResourceRef{Kind: "Namespace", Name: namespace.Name},
-			evidence:     []string{"kubernetes-api"},
+			evidence:     uniqueStrings(append([]string{"kubernetes-api"}, namespace.EvidenceSources...)),
 			templateData: messageData{Namespace: namespace.Name, Inventory: nonNilMap(input.Inventory), Params: params},
 		})
 	}
@@ -615,11 +627,14 @@ func defaultWorkloadAvailability(workload WorkloadInput, namespace NamespaceInpu
 	if workload.Verified == nil {
 		setDefaultAvailability(availability, "workload.verified", Availability{Reason: "runtime verification unavailable"})
 	}
-	if workload.Environment == "" && namespace.Environment == "" {
+	if !workload.EnvironmentKnown && !namespace.EnvironmentKnown {
 		setDefaultAvailability(availability, "workload.environment", Availability{Reason: "environment classification unavailable"})
 	}
-	if workload.Owner == "" {
+	if !workload.OwnerKnown {
 		setDefaultAvailability(availability, "workload.owner", Availability{Reason: "ownership unavailable"})
+	}
+	if !workload.AppIDKnown {
+		setDefaultAvailability(availability, "workload.appId", Availability{Reason: "application identity unavailable"})
 	}
 	return availability
 }
@@ -676,15 +691,15 @@ func workloadValue(workload WorkloadInput, availability map[string]Availability)
 	if workload.Verified != nil {
 		value["verified"] = copyMap(workload.Verified)
 	}
-	if workload.Environment != "" {
+	if workload.EnvironmentKnown {
 		value["environment"] = workload.Environment
-	} else if workload.Namespace.Environment != "" {
+	} else if workload.Namespace.EnvironmentKnown {
 		value["environment"] = workload.Namespace.Environment
 	}
-	if workload.Owner != "" {
+	if workload.OwnerKnown {
 		value["owner"] = workload.Owner
 	}
-	if workload.AppID != "" {
+	if workload.AppIDKnown {
 		value["appId"] = workload.AppID
 	}
 	return value
@@ -717,7 +732,7 @@ func namespaceValue(namespace NamespaceInput) map[string]any {
 		"name":   namespace.Name,
 		"labels": copyStringMap(namespace.Labels),
 	}
-	if namespace.Environment != "" {
+	if namespace.EnvironmentKnown {
 		value["environment"] = namespace.Environment
 	}
 	if namespace.MeshEnrollment != "" {
