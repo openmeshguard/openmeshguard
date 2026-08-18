@@ -22,6 +22,17 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      # Istio's ambient CNI agent creates ipsets in the Kind node's host netns,
+      # which relies on the runner host kernel. These modules are not present or
+      # auto-loaded on every runner image, and without them the agent crash-loops
+      # with "error initializing host addressSet manager: invalid type", leaving
+      # istio-cni-node and ztunnel permanently unready.
+      # https://istio.io/latest/docs/ops/deployment/platform-requirements/
+      - name: Load ipset kernel modules required by Istio ambient
+        run: |
+          sudo modprobe ip_set ip_set_hash_ip xt_set
+          lsmod | grep -E '^(ip_set|ip_set_hash_ip|xt_set)\b' || true
+
       - name: Create pinned Kind and Istio cluster
         run: make kind-up
 
