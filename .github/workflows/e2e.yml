@@ -10,7 +10,12 @@ concurrency:
 jobs:
   kind-e2e:
     name: Kind, Istio, RBAC, and no-write proofs
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    # Stays on a GitHub-hosted runner: Istio's ambient dataplane creates ipsets
+    # in the Kind node's host netns, and the Blacksmith runner kernel (6.6.141)
+    # ships no ip_set support, so istio-cni-node crash-loops with
+    # "error initializing host addressSet manager: invalid type".
+    # https://istio.io/latest/docs/ops/deployment/platform-requirements/
+    runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
       - name: Checkout
@@ -21,17 +26,6 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
-
-      # Istio's ambient CNI agent creates ipsets in the Kind node's host netns,
-      # which relies on the runner host kernel. These modules are not present or
-      # auto-loaded on every runner image, and without them the agent crash-loops
-      # with "error initializing host addressSet manager: invalid type", leaving
-      # istio-cni-node and ztunnel permanently unready.
-      # https://istio.io/latest/docs/ops/deployment/platform-requirements/
-      - name: Load ipset kernel modules required by Istio ambient
-        run: |
-          sudo modprobe ip_set ip_set_hash_ip xt_set
-          lsmod | grep -E '^(ip_set|ip_set_hash_ip|xt_set)\b' || true
 
       - name: Create pinned Kind and Istio cluster
         run: make kind-up
