@@ -64,8 +64,31 @@ Other telemetry backends, recording-rule management (docs only), runtime authz v
   `audit.jsonl`. The report passed schema validation and the scanner audit
   contained 20 API events with only permitted reads. Harness administrator
   fixture setup and forwarding remain separate from scanner actions.
-- Implementation acceptance is complete. v0.2.0 release publication remains
-  pending the reviewed commit/tag and release workflow verification.
+- Implementation acceptance is complete. The reviewed v0.2.0 tag points to
+  `20fcbe3`; release workflow verification and publication are complete.
+
+## Release closeout
+
+- [x] Reviewed implementation tagged `v0.2.0` at `20fcbe3`.
+- [x] Signed release archives for macOS/Linux amd64/arm64 and the checksum file
+  independently verified against the exact v0.2.0 release workflow identity.
+  Native macOS arm64 binary verification artifacts are preserved at
+  `/private/tmp/openmeshguard-v0.2.0-verified`.
+- [x] Downloaded signed macOS arm64 v0.2.0 binary completed the live runtime
+  demonstration. Its canonical report identifies `runtime-receiver` with
+  `plaintextObserved: true`, mTLS event share `0.5`, and both runtime controls open;
+  schema and scanner read-only audit validation passed. Separate release-binary
+  evidence is preserved in `.e2e/runtime-v0.2.0-results/{report.json,metrics.json,audit.jsonl}`;
+  the initial implementation evidence remains in `.e2e/runtime-results/`.
+- [x] [Release workflow 36629280924](https://github.com/openmeshguard/openmeshguard/actions/runs/36629280924)
+  succeeded, including clean tagged Go installation, downloaded Linux binary
+  live scan/schema validation, and the full Kind acceptance/read-only suite.
+  [v0.2.0 is public](https://github.com/openmeshguard/openmeshguard/releases/tag/v0.2.0),
+  published `2026-09-29T21:01:34Z` with four archives, their four Sigstore bundles,
+  the checksum file, and its bundle (10 assets).
+- The local OpenMeshGuard test cluster was removed after verification; cleanup
+  was limited to that disposable cluster. Homebrew formula and website updates
+  remain separate follow-up work.
 
 ## Deferred
 
