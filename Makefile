@@ -27,11 +27,13 @@ lint: fmt-check
 
 schema-test:
 	@set -e; \
-	tests="$$( $(GO) test ./internal/output -list '^(TestReportSchemaFixtures|TestGeneratedScanOutputMatchesSchema|TestExternalScanOutputMatchesSchema)$$' )"; \
+	tests="$$( $(GO) test ./internal/output -list '^(TestReportSchemaFixtures|TestGeneratedScanOutputMatchesSchema|TestExternalScanOutputMatchesSchema|TestCanonicalSchemaRejectsNegativeCounters|TestWriteSARIFValidatesOfficialSchemaAndPreservesFindingParity)$$' )"; \
 	echo "$$tests" | grep -q '^TestReportSchemaFixtures$$'; \
 	echo "$$tests" | grep -q '^TestGeneratedScanOutputMatchesSchema$$'; \
-	echo "$$tests" | grep -q '^TestExternalScanOutputMatchesSchema$$'
-	$(GO) test ./internal/output -run '^(TestReportSchemaFixtures|TestGeneratedScanOutputMatchesSchema|TestExternalScanOutputMatchesSchema)$$' -count=1
+	echo "$$tests" | grep -q '^TestExternalScanOutputMatchesSchema$$'; \
+	echo "$$tests" | grep -q '^TestCanonicalSchemaRejectsNegativeCounters$$'; \
+	echo "$$tests" | grep -q '^TestWriteSARIFValidatesOfficialSchemaAndPreservesFindingParity$$'
+	$(GO) test ./internal/output -run '^(TestReportSchemaFixtures|TestGeneratedScanOutputMatchesSchema|TestExternalScanOutputMatchesSchema|TestCanonicalSchemaRejectsNegativeCounters|TestWriteSARIFValidatesOfficialSchemaAndPreservesFindingParity)$$' -count=1
 
 fmt-check:
 	@files="$$(git ls-files '*.go')"; \

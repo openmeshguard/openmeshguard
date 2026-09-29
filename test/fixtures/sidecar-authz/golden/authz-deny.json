@@ -665,7 +665,7 @@
     }
   ],
   "scores": {
-    "overall": null,
+    "overall": 71.42857142857143,
     "categories": [
       {
         "category": "authz",
@@ -685,10 +685,22 @@
         "evaluated": 2
       },
       {
+        "category": "lifecycle",
+        "grade": "unknown",
+        "passRate": null
+      },
+      {
         "category": "mtls",
         "grade": "A",
         "passRate": 1,
         "evaluated": 3
+      }
+    ],
+    "namespaces": [
+      {
+        "namespace": "omg-authz-deny",
+        "environment": "unclassified",
+        "score": 71.42857142857143
       }
     ]
   }

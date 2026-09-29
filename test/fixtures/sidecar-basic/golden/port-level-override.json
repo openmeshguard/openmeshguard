@@ -913,7 +913,7 @@
     }
   ],
   "scores": {
-    "overall": null,
+    "overall": 33.33333333333333,
     "categories": [
       {
         "category": "authz",
@@ -933,10 +933,22 @@
         "evaluated": 2
       },
       {
+        "category": "lifecycle",
+        "grade": "unknown",
+        "passRate": null
+      },
+      {
         "category": "mtls",
         "grade": "F",
         "passRate": 0.3333333333333333,
         "evaluated": 3
+      }
+    ],
+    "namespaces": [
+      {
+        "namespace": "omg-port-override",
+        "environment": "unclassified",
+        "score": 33.33333333333333
       }
     ]
   }

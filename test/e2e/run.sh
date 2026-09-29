@@ -330,12 +330,18 @@ assert_scanner_bindings() {
 	assert_waypoint_limited_bindings "$bindings"
 }
 
-assert_schema_test_available() {
-	tests=$(go test ./internal/output -list '^TestExternalScanOutputMatchesSchema$')
-	if ! printf '%s\n' "$tests" | grep -Fx 'TestExternalScanOutputMatchesSchema' >/dev/null; then
-		echo "schema test TestExternalScanOutputMatchesSchema was not discovered" >&2
-		exit 1
-	fi
+assert_output_tests_available() {
+	tests=$(go test ./internal/output -list '^(TestExternalScanOutputMatchesSchema|TestWriteHTMLGoldenHasKeySectionsAndHonestUnknowns|TestWriteSARIFValidatesOfficialSchemaAndPreservesFindingParity)$')
+	for test_name in \
+		TestExternalScanOutputMatchesSchema \
+		TestWriteHTMLGoldenHasKeySectionsAndHonestUnknowns \
+		TestWriteSARIFValidatesOfficialSchemaAndPreservesFindingParity
+	do
+		if ! printf '%s\n' "$tests" | grep -Fx "$test_name" >/dev/null; then
+			echo "required output test $test_name was not discovered" >&2
+			exit 1
+		fi
+	done
 }
 
 validate_schema() {
@@ -421,12 +427,57 @@ scan_cluster() {
 	validate_schema "$results/cluster-scan.json"
 }
 
+project_cluster_outputs() {
+	run_scanner report \
+		--input "$results/cluster-scan.json" \
+		--format html \
+		--output "$results/cluster-scan.html"
+	run_scanner export \
+		--input "$results/cluster-scan.json" \
+		--format sarif \
+		--output "$results/cluster-scan.sarif"
+	run_scanner score \
+		--input "$results/cluster-scan.json" \
+		--output "$results/cluster-scan.score.txt"
+
+	for section in \
+		'id="declared-verified-unknown"' \
+		'id="unknowns"' \
+		'id="category-grades"' \
+		'id="classification-coverage"' \
+		'id="evidence-summary"' \
+		'id="findings"'
+	do
+		if ! grep -F "$section" "$results/cluster-scan.html" >/dev/null; then
+			echo "zero-config HTML report missing $section" >&2
+			exit 1
+		fi
+	done
+	if ! grep -F 'runtime verification unavailable' "$results/cluster-scan.html" >/dev/null; then
+		echo "zero-config HTML report hid unavailable runtime verification" >&2
+		exit 1
+	fi
+	if ! jq -e --slurpfile canonical "$results/cluster-scan.json" '
+		.version == "2.1.0" and
+		(.runs[0].results | length) == ($canonical[0].findings | length) and
+		([.runs[0].results[].fingerprints["openmeshguardFindingId/v1"]] | sort) ==
+		([$canonical[0].findings[].id] | sort)
+	' "$results/cluster-scan.sarif" >/dev/null; then
+		echo "cluster SARIF does not preserve canonical finding count and ID parity" >&2
+		exit 1
+	fi
+	if [ ! -s "$results/cluster-scan.score.txt" ]; then
+		echo "cluster score command produced no output" >&2
+		exit 1
+	fi
+}
+
 capture_audit() {
 	audit_output=${1:-"$results/audit.jsonl"}
 	docker exec "$E2E_CLUSTER_NAME-control-plane" cat /var/log/kubernetes/audit.log >"$audit_output"
 }
 
-assert_schema_test_available
+assert_output_tests_available
 assert_golden_case_bijection "$basic_fixtures/cases.tsv" "$basic_fixtures/golden" true
 assert_golden_case_bijection "$authz_fixtures/cases.tsv" "$authz_fixtures/golden"
 assert_golden_case_bijection "$ambient_fixtures/cases.tsv" "$ambient_fixtures/golden"
@@ -653,6 +704,17 @@ done <"$cases"
 
 echo "e2e: exercise the published ClusterRole with an all-namespaces scan"
 scan_cluster
+assert_json "zero-config scan discloses absent context and runtime inputs" "$results/cluster-scan.json" '
+	.scan.dataSources.contextFiles == {
+	  "scanConfig": false,
+	  "ownershipImport": false,
+	  "exceptions": false
+	} and
+	.scan.dataSources.prometheus.enabled == false and
+	.inventory.classification.namespacesUnclassified > 0 and
+	all(.workloadPostures[]; has("verified") | not)
+'
+project_cluster_outputs
 assert_json "cluster scan workload targets are globally ordered" "$results/cluster-scan.json" '
 	[.workloadPostures[].workload | "\(.namespace)/\(.kind)/\(.name)"] as $targets |
 	$targets == ($targets | sort)

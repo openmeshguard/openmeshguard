@@ -216,6 +216,12 @@ func TestGeneratedScanOutputMatchesSchema(t *testing.T) {
 	if len(generated.Findings) == 0 {
 		t.Fatal("generated report has no engine findings")
 	}
+	if generated.Scores.Overall == nil {
+		t.Fatal("generated report has no numeric weighted overall score")
+	}
+	if len(generated.Scores.Namespaces) == 0 {
+		t.Fatal("generated report has no namespace score rollup")
+	}
 	seenUnknown := false
 	seenNotApplicable := false
 	seenSuggestedYAML := false
@@ -242,8 +248,8 @@ func TestGeneratedScanOutputMatchesSchema(t *testing.T) {
 	if !seenSuggestedYAML {
 		t.Fatal("generated findings missing rendered suggestedYAML remediation")
 	}
-	if len(generated.Scores.Categories) != 4 {
-		t.Fatalf("score categories = %#v, want authorization, exposure, governance, and mTLS categories", generated.Scores.Categories)
+	if len(generated.Scores.Categories) != 5 {
+		t.Fatalf("score categories = %#v, want every published weighted category", generated.Scores.Categories)
 	}
 	authzCategory := generated.Scores.Categories[0]
 	if authzCategory.Category != "authz" || authzCategory.Grade != "unknown" || authzCategory.PassRate != nil || authzCategory.Unknown != 7 {
@@ -257,7 +263,11 @@ func TestGeneratedScanOutputMatchesSchema(t *testing.T) {
 	if governanceCategory.Category != "governance" || governanceCategory.Grade != "A" || governanceCategory.PassRate == nil || *governanceCategory.PassRate != 1 {
 		t.Fatalf("generated governance category = %#v, want complete governance metadata", governanceCategory)
 	}
-	mtlsCategory := generated.Scores.Categories[3]
+	lifecycleCategory := generated.Scores.Categories[3]
+	if lifecycleCategory.Category != "lifecycle" || lifecycleCategory.Grade != "unknown" || lifecycleCategory.PassRate != nil {
+		t.Fatalf("generated lifecycle category = %#v, want explicit unknown", lifecycleCategory)
+	}
+	mtlsCategory := generated.Scores.Categories[4]
 	if mtlsCategory.Category != "mtls" || mtlsCategory.Grade != "F" || mtlsCategory.PassRate == nil || *mtlsCategory.PassRate != 0.5 {
 		t.Fatalf("generated mTLS category = %#v, want F grade at 50%% pass rate", mtlsCategory)
 	}
@@ -336,4 +346,35 @@ func compileSchemaForTest(t *testing.T) *jsonschema.Schema {
 		t.Fatalf("compile canonical schema: %v", err)
 	}
 	return schema
+}
+
+func TestEmbeddedCanonicalSchemaMatchesFrozenContract(t *testing.T) {
+	contract, err := os.ReadFile(filepath.Join("..", "..", "docs", "contracts", "canonical-json-schema.json"))
+	if err != nil {
+		t.Fatalf("read frozen canonical schema: %v", err)
+	}
+	var compact bytes.Buffer
+	if err := json.Compact(&compact, contract); err != nil {
+		t.Fatalf("compact frozen canonical schema: %v", err)
+	}
+	if !bytes.Equal(compact.Bytes(), bytes.TrimSpace(embeddedCanonicalSchema)) {
+		t.Fatal("embedded runtime schema drifted from docs/contracts/canonical-json-schema.json")
+	}
+}
+
+func TestCanonicalSchemaRejectsNegativeCounters(t *testing.T) {
+	schema := compileSchemaForTest(t)
+	valid := thresholdReportJSON(t, []finding{thresholdFinding("open", "high")})
+	for _, tt := range negativeCanonicalCounterMutations() {
+		t.Run(tt.name, func(t *testing.T) {
+			data := mutateCanonicalDocument(t, valid, tt.mutate)
+			document, err := jsonschema.UnmarshalJSON(bytes.NewReader(data))
+			if err != nil {
+				t.Fatalf("decode mutated canonical report: %v", err)
+			}
+			if err := schema.Validate(document); err == nil {
+				t.Fatal("canonical schema accepted a negative counter")
+			}
+		})
+	}
 }

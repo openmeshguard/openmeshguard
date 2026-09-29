@@ -773,10 +773,21 @@
         "unknown": 2
       },
       {
+        "category": "lifecycle",
+        "grade": "unknown",
+        "passRate": null
+      },
+      {
         "category": "mtls",
         "grade": "unknown",
         "passRate": null,
         "unknown": 3
+      }
+    ],
+    "namespaces": [
+      {
+        "namespace": "omg-strict",
+        "score": null
       }
     ]
   }

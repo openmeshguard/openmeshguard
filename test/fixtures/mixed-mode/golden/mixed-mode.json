@@ -806,7 +806,7 @@
     }
   ],
   "scores": {
-    "overall": null,
+    "overall": 78.94736842105263,
     "categories": [
       {
         "category": "authz",
@@ -827,10 +827,22 @@
         "evaluated": 3
       },
       {
+        "category": "lifecycle",
+        "grade": "unknown",
+        "passRate": null
+      },
+      {
         "category": "mtls",
         "grade": "A",
         "passRate": 1,
         "evaluated": 8
+      }
+    ],
+    "namespaces": [
+      {
+        "namespace": "omg-mixed-mode",
+        "environment": "unclassified",
+        "score": 78.94736842105263
       }
     ]
   }

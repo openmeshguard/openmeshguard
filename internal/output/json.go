@@ -96,10 +96,7 @@ func buildReport(input ScanInput, packs []engine.Pack, evaluated engine.Result) 
 		Inventory:         inventory(input.Inventory, evaluated.Context.Classification),
 		WorkloadPostures:  workloadPostures(input.WorkloadPostures, evaluated.Context.Workloads),
 		Findings:          findings(evaluated.Findings),
-		Scores: scores{
-			Overall:    nil,
-			Categories: scoreCategories(evaluated.Scores),
-		},
+		Scores:            reportScores(evaluated),
 	}
 }
 
@@ -381,6 +378,144 @@ func scoreCategories(input []engine.CategoryScore) []scoreCategory {
 	return out
 }
 
+func reportScores(evaluated engine.Result) scores {
+	categories := scoreCategories(evaluated.Scores)
+	namespaces := make([]namespaceScore, 0, len(evaluated.NamespaceScores))
+	rollupScores := make([]weightedRollup, 0, len(evaluated.NamespaceScores)+1)
+	for _, namespace := range evaluated.NamespaceScores {
+		score, rollupWeight := weightedScoreAndWeight(
+			scoreCategories(namespace.Categories),
+			namespace.ScoreWeights,
+		)
+		hasCritical := hasOpenCriticalFinding(evaluated.Findings, namespace.Namespace)
+		capped := false
+		if hasCritical {
+			score, capped = capScore(score, namespace.CriticalCap)
+		}
+		namespaces = append(namespaces, namespaceScore{
+			Namespace:   namespace.Namespace,
+			Environment: optionalScoreEnvironment(namespace.Environment),
+			Score:       score,
+			Capped:      capped,
+		})
+		if score != nil {
+			rollupScores = append(rollupScores, weightedRollup{
+				Score:  score,
+				Weight: rollupWeight,
+			})
+		}
+	}
+
+	clusterScore, clusterWeight := weightedScoreAndWeight(
+		scoreCategories(evaluated.ClusterScores),
+		evaluated.ScoreWeights,
+	)
+	if hasOpenCriticalClusterFinding(evaluated.Findings) {
+		clusterScore, _ = capScore(clusterScore, evaluated.CriticalCap)
+	}
+	if clusterScore != nil {
+		rollupScores = append(rollupScores, weightedRollup{
+			Score:  clusterScore,
+			Weight: clusterWeight,
+		})
+	}
+	overall := rollupScore(rollupScores)
+	return scores{Overall: overall, Categories: categories, Namespaces: namespaces}
+}
+
+func weightedScoreAndWeight(
+	categories []scoreCategory,
+	weights map[string]float64,
+) (*float64, float64) {
+	var weighted, totalWeight float64
+	for _, category := range categories {
+		weight, exists := weights[category.Category]
+		if !exists || weight <= 0 || category.PassRate == nil {
+			continue
+		}
+		weighted += *category.PassRate * weight
+		totalWeight += weight
+	}
+	if totalWeight == 0 {
+		return nil, 0
+	}
+	score := weighted / totalWeight * 100
+	return &score, totalWeight
+}
+
+type weightedRollup struct {
+	Score  *float64
+	Weight float64
+}
+
+func rollupScore(values []weightedRollup) *float64 {
+	if len(values) == 0 {
+		return nil
+	}
+	var weighted, totalWeight float64
+	for _, value := range values {
+		weighted += *value.Score * value.Weight
+		totalWeight += value.Weight
+	}
+	if totalWeight == 0 {
+		return nil
+	}
+	score := weighted / totalWeight
+	return &score
+}
+
+func capScore(score *float64, cap float64) (*float64, bool) {
+	if score == nil || *score <= cap {
+		return score, false
+	}
+	capped := cap
+	return &capped, true
+}
+
+func hasOpenCriticalFinding(findings []engine.Finding, namespace string) bool {
+	for _, finding := range findings {
+		if finding.Status != "open" || finding.Severity != "critical" {
+			continue
+		}
+		if namespace == "" {
+			return true
+		}
+		for _, resource := range finding.Resources {
+			if resource.Namespace == namespace || (resource.Kind == "Namespace" && resource.Name == namespace) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func hasOpenCriticalClusterFinding(findings []engine.Finding) bool {
+	for _, finding := range findings {
+		if finding.Status != "open" || finding.Severity != "critical" {
+			continue
+		}
+		clusterScoped := len(finding.Resources) > 0
+		for _, resource := range finding.Resources {
+			if resource.Namespace != "" || resource.Kind == "Namespace" {
+				clusterScoped = false
+				break
+			}
+		}
+		if clusterScoped {
+			return true
+		}
+	}
+	return false
+}
+
+func optionalScoreEnvironment(environment string) *string {
+	if environment == "" {
+		return nil
+	}
+	copied := environment
+	return &copied
+}
+
 type report struct {
 	SchemaVersion     string                     `json:"schemaVersion"`
 	GeneratedAt       string                     `json:"generatedAt"`
@@ -510,6 +645,15 @@ type canonicalWorkloadPosture struct {
 	DataPlaneMode         resolver.DataPlaneMode `json:"dataPlaneMode"`
 	MTLS                  resolver.MTLSResult    `json:"mtls"`
 	Authorization         resolver.AuthzResult   `json:"authorization"`
+	Verified              *verifiedPosture       `json:"verified,omitempty"`
+}
+
+type verifiedPosture struct {
+	Status            string   `json:"status"`
+	Window            string   `json:"window"`
+	MTLSTrafficShare  *float64 `json:"mtlsTrafficShare,omitempty"`
+	PlaintextObserved *bool    `json:"plaintextObserved,omitempty"`
+	PlaintextSources  []string `json:"plaintextSources,omitempty"`
 }
 
 type remediation struct {
@@ -525,8 +669,9 @@ type resourceRef struct {
 }
 
 type scores struct {
-	Overall    *float64        `json:"overall"`
-	Categories []scoreCategory `json:"categories"`
+	Overall    *float64         `json:"overall"`
+	Categories []scoreCategory  `json:"categories"`
+	Namespaces []namespaceScore `json:"namespaces,omitempty"`
 }
 
 type scoreCategory struct {
@@ -535,4 +680,11 @@ type scoreCategory struct {
 	PassRate  *float64 `json:"passRate"`
 	Evaluated int      `json:"evaluated,omitempty"`
 	Unknown   int      `json:"unknown,omitempty"`
+}
+
+type namespaceScore struct {
+	Namespace   string   `json:"namespace"`
+	Environment *string  `json:"environment,omitempty"`
+	Score       *float64 `json:"score"`
+	Capped      bool     `json:"capped,omitempty"`
 }

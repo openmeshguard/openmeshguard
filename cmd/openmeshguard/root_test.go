@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -41,17 +42,375 @@ func TestVersionCommandPrintsScannerAndResolverVersions(t *testing.T) {
 	}
 }
 
-func TestStubCommandsReturnNotImplementedExitCode(t *testing.T) {
-	for _, name := range []string{"report", "export", "score"} {
-		t.Run(name, func(t *testing.T) {
-			_, _, err := executeForTest(t, defaultVersionInfo(), name)
-			if !errors.Is(err, errNotImplemented) {
-				t.Fatalf("%s returned %v, want errNotImplemented", name, err)
+func TestProjectionCommandsReadCanonicalJSON(t *testing.T) {
+	root := filepath.Join("..", "..")
+	golden := filepath.Join(
+		root,
+		"test",
+		"fixtures",
+		"governance-context",
+		"golden",
+		"governance-active-exception.json",
+	)
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{name: "report", args: []string{"report", "--input", golden}, want: "<!doctype html>"},
+		{name: "export", args: []string{"export", "--input", golden}, want: `"version": "2.1.0"`},
+		{name: "score", args: []string{"score", "--input", golden}, want: "OpenMeshGuard score:"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			stdout, stderr, err := executeForTest(t, defaultVersionInfo(), tt.args...)
+			if err != nil {
+				t.Fatalf("%s returned error: %v", tt.name, err)
 			}
-			if got := exitCode(err); got != 2 {
-				t.Fatalf("%s exit code = %d, want 2", name, got)
+			if stderr != "" {
+				t.Fatalf("%s wrote stderr %q", tt.name, stderr)
+			}
+			if !strings.Contains(stdout, tt.want) {
+				t.Fatalf("%s output missing %q: %q", tt.name, tt.want, stdout)
 			}
 		})
+	}
+}
+
+func TestProjectionCommandWritesRequestedOutput(t *testing.T) {
+	golden := filepath.Join(
+		"..",
+		"..",
+		"test",
+		"fixtures",
+		"sidecar-basic",
+		"golden",
+		"namespace-role-degraded.json",
+	)
+	outputPath := filepath.Join(t.TempDir(), "report.html")
+	stdout, _, err := executeForTest(
+		t,
+		defaultVersionInfo(),
+		"report",
+		"--input",
+		golden,
+		"--output",
+		outputPath,
+	)
+	if err != nil {
+		t.Fatalf("report command returned error: %v", err)
+	}
+	if stdout != "" {
+		t.Fatalf("report command wrote stdout with --output: %q", stdout)
+	}
+	data, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatalf("read report output: %v", err)
+	}
+	if !bytes.Contains(data, []byte("Declared / Verified / Unknown")) {
+		t.Fatalf("report output missing summary: %s", data)
+	}
+}
+
+func TestScoreCommandExitCodeContract(t *testing.T) {
+	root := filepath.Join("..", "..", "test", "fixtures")
+	active := filepath.Join(root, "governance-context", "golden", "governance-active-exception.json")
+	degraded := filepath.Join(root, "sidecar-basic", "golden", "namespace-role-degraded.json")
+	tests := []struct {
+		name     string
+		input    string
+		flags    []string
+		wantCode int
+	}{
+		{name: "excepted critical does not fail critical", input: active, flags: []string{"--fail-on", "critical"}, wantCode: 0},
+		{name: "open high fails high", input: active, flags: []string{"--fail-on", "high"}, wantCode: 1},
+		{name: "unknown critical excluded by default", input: degraded, flags: []string{"--fail-on", "critical"}, wantCode: 0},
+		{name: "unknown opt in", input: degraded, flags: []string{"--fail-on", "critical", "--fail-on-unknown"}, wantCode: 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			args := []string{"score", "--input", tt.input}
+			args = append(args, tt.flags...)
+			stdout, _, err := executeForTest(t, defaultVersionInfo(), args...)
+			if !strings.Contains(stdout, "OpenMeshGuard score:") {
+				t.Fatalf("score output missing despite exit contract evaluation: %q", stdout)
+			}
+			if tt.wantCode == 0 {
+				if err != nil {
+					t.Fatalf("score returned error: %v", err)
+				}
+				return
+			}
+			if !errors.Is(err, errFindingsThreshold) {
+				t.Fatalf("score error = %v, want threshold sentinel", err)
+			}
+			if got := exitCode(err); got != tt.wantCode {
+				t.Fatalf("score exit code = %d, want %d", got, tt.wantCode)
+			}
+		})
+	}
+}
+
+func TestExitCodeUsesTwoForScanOrProjectionErrors(t *testing.T) {
+	if got := exitCode(fmt.Errorf("scan failed")); got != 2 {
+		t.Fatalf("scan error exit code = %d, want 2", got)
+	}
+	if got := exitCode(fmt.Errorf("wrapped: %w", errFindingsThreshold)); got != 1 {
+		t.Fatalf("threshold error exit code = %d, want 1", got)
+	}
+}
+
+func TestProjectionBrokenPipeUsesExitTwo(t *testing.T) {
+	command := exec.Command(
+		os.Args[0],
+		"-test.run=^TestProjectionBrokenPipeHelper$",
+	)
+	command.Env = append(os.Environ(), "OPENMESHGUARD_BROKEN_PIPE_HELPER=1")
+	stdout, err := command.StdoutPipe()
+	if err != nil {
+		t.Fatalf("create helper stdout pipe: %v", err)
+	}
+	var stderr bytes.Buffer
+	command.Stderr = &stderr
+	if err := command.Start(); err != nil {
+		t.Fatalf("start helper: %v", err)
+	}
+	if err := stdout.Close(); err != nil {
+		t.Fatalf("close helper stdout reader: %v", err)
+	}
+	err = command.Wait()
+	var exitError *exec.ExitError
+	if !errors.As(err, &exitError) {
+		t.Fatalf("helper error = %v, want exit status 2; stderr=%q", err, stderr.String())
+	}
+	if exitError.ExitCode() != 2 {
+		t.Fatalf("broken-pipe exit code = %d, want 2; stderr=%q", exitError.ExitCode(), stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "broken pipe") {
+		t.Fatalf("broken-pipe stderr = %q, want operational error", stderr.String())
+	}
+}
+
+func TestProjectionBrokenPipeHelper(t *testing.T) {
+	if os.Getenv("OPENMESHGUARD_BROKEN_PIPE_HELPER") != "1" {
+		return
+	}
+	ignoreBrokenPipeSignal()
+	golden := filepath.Join(
+		"..",
+		"..",
+		"test",
+		"fixtures",
+		"sidecar-basic",
+		"golden",
+		"namespace-role-degraded.json",
+	)
+	command := newRootCommand(defaultVersionInfo())
+	command.SetArgs([]string{"report", "--input", golden})
+	command.SetOut(os.Stdout)
+	command.SetErr(os.Stderr)
+	if err := command.Execute(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(exitCode(err))
+	}
+	os.Exit(0)
+}
+
+func TestScoreCommandUsesExitTwoForSchemaInvalidCanonicalInput(t *testing.T) {
+	golden := filepath.Join(
+		"..",
+		"..",
+		"test",
+		"fixtures",
+		"governance-context",
+		"golden",
+		"governance-expired-exception.json",
+	)
+	data, err := os.ReadFile(golden)
+	if err != nil {
+		t.Fatalf("read golden: %v", err)
+	}
+	invalid := bytes.Replace(data, []byte(`"status": "open"`), []byte(`"status": "bogus"`), 1)
+	if bytes.Equal(invalid, data) {
+		t.Fatal("golden had no open finding to corrupt")
+	}
+	input := filepath.Join(t.TempDir(), "invalid.json")
+	if err := os.WriteFile(input, invalid, 0o600); err != nil {
+		t.Fatalf("write invalid canonical input: %v", err)
+	}
+
+	_, _, err = executeForTest(
+		t,
+		defaultVersionInfo(),
+		"score",
+		"--input",
+		input,
+		"--fail-on",
+		"info",
+	)
+	if err == nil || !strings.Contains(err.Error(), "validate canonical report") {
+		t.Fatalf("score error = %v, want canonical validation failure", err)
+	}
+	if got := exitCode(err); got != 2 {
+		t.Fatalf("invalid canonical input exit code = %d, want 2", got)
+	}
+}
+
+func TestProjectionCommandsUseExitTwoForFormatAndEncodingErrors(t *testing.T) {
+	golden := filepath.Join(
+		"..",
+		"..",
+		"test",
+		"fixtures",
+		"sidecar-basic",
+		"golden",
+		"strict.json",
+	)
+	valid, err := os.ReadFile(golden)
+	if err != nil {
+		t.Fatalf("read golden: %v", err)
+	}
+	invalidDate := bytes.Replace(
+		valid,
+		[]byte(`"generatedAt": "2000-01-01T00:00:00Z"`),
+		[]byte(`"generatedAt": "not-a-date"`),
+		1,
+	)
+	if bytes.Equal(invalidDate, valid) {
+		t.Fatal("golden had no generatedAt fixture to corrupt")
+	}
+	invalidUTF8 := bytes.Replace(
+		valid,
+		[]byte(`"clusterContext": "openmeshguard-e2e"`),
+		append(
+			[]byte(`"clusterContext": "openmeshguard-`),
+			append([]byte{0xff}, []byte(`e2e"`)...)...,
+		),
+		1,
+	)
+	if bytes.Equal(invalidUTF8, valid) {
+		t.Fatal("golden had no clusterContext fixture to corrupt")
+	}
+
+	inputs := []struct {
+		name      string
+		data      []byte
+		wantError string
+	}{
+		{name: "date format", data: invalidDate, wantError: "validate canonical report"},
+		{name: "UTF-8", data: invalidUTF8, wantError: "valid UTF-8"},
+	}
+	for _, input := range inputs {
+		t.Run(input.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "invalid.json")
+			if err := os.WriteFile(path, input.data, 0o600); err != nil {
+				t.Fatalf("write invalid canonical input: %v", err)
+			}
+			for _, projection := range []string{"report", "export", "score"} {
+				t.Run(projection, func(t *testing.T) {
+					stdout, _, err := executeForTest(
+						t,
+						defaultVersionInfo(),
+						projection,
+						"--input",
+						path,
+					)
+					if err == nil || !strings.Contains(err.Error(), input.wantError) {
+						t.Fatalf("%s error = %v, want %q", projection, err, input.wantError)
+					}
+					if stdout != "" {
+						t.Fatalf("%s emitted output before rejecting canonical input: %q", projection, stdout)
+					}
+					if got := exitCode(err); got != 2 {
+						t.Fatalf("%s exit code = %d, want 2", projection, got)
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestProjectionCommandsUseExitTwoForNegativeCanonicalCounters(t *testing.T) {
+	golden := filepath.Join(
+		"..",
+		"..",
+		"test",
+		"fixtures",
+		"sidecar-basic",
+		"golden",
+		"strict.json",
+	)
+	valid, err := os.ReadFile(golden)
+	if err != nil {
+		t.Fatalf("read golden: %v", err)
+	}
+	tests := []struct {
+		name        string
+		old         []byte
+		replacement []byte
+	}{
+		{
+			name:        "score evaluated",
+			old:         []byte(`"evaluated": 5`),
+			replacement: []byte(`"evaluated": -1`),
+		},
+		{
+			name:        "waypoints",
+			old:         []byte(`"waypoints": 0`),
+			replacement: []byte(`"waypoints": -1`),
+		},
+		{
+			name:        "classified namespaces",
+			old:         []byte(`"namespacesClassified": 0`),
+			replacement: []byte(`"namespacesClassified": -1`),
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			invalid := bytes.Replace(valid, tt.old, tt.replacement, 1)
+			if bytes.Equal(invalid, valid) {
+				t.Fatalf("golden had no %q counter to corrupt", tt.old)
+			}
+			path := filepath.Join(t.TempDir(), "invalid.json")
+			if err := os.WriteFile(path, invalid, 0o600); err != nil {
+				t.Fatalf("write invalid canonical input: %v", err)
+			}
+			for _, projection := range []string{"report", "export", "score"} {
+				t.Run(projection, func(t *testing.T) {
+					stdout, _, err := executeForTest(
+						t,
+						defaultVersionInfo(),
+						projection,
+						"--input",
+						path,
+					)
+					if err == nil || !strings.Contains(err.Error(), "validate canonical report") {
+						t.Fatalf("%s error = %v, want negative-counter schema failure", projection, err)
+					}
+					if stdout != "" {
+						t.Fatalf("%s emitted output before rejecting negative counter: %q", projection, stdout)
+					}
+					if got := exitCode(err); got != 2 {
+						t.Fatalf("%s exit code = %d, want 2", projection, got)
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestScanAndScoreRejectInvalidThresholdBeforeWork(t *testing.T) {
+	for _, args := range [][]string{
+		{"scan", "--all-namespaces", "--fail-on", "urgent"},
+		{"score", "--fail-on", "urgent"},
+	} {
+		_, _, err := executeForTest(t, defaultVersionInfo(), args...)
+		if err == nil || !strings.Contains(err.Error(), "invalid --fail-on severity") {
+			t.Fatalf("%v error = %v, want threshold validation", args, err)
+		}
+		if got := exitCode(err); got != 2 {
+			t.Fatalf("%v exit code = %d, want 2", args, got)
+		}
 	}
 }
 
@@ -109,7 +468,14 @@ func TestScanControlPackFlagIsRepeatable(t *testing.T) {
 
 func TestScanGovernanceFlags(t *testing.T) {
 	cmd := newScanCommand(defaultVersionInfo())
-	for _, name := range []string{"scan-config", "ownership-import", "exceptions", "infer-environments"} {
+	for _, name := range []string{
+		"scan-config",
+		"ownership-import",
+		"exceptions",
+		"infer-environments",
+		"fail-on",
+		"fail-on-unknown",
+	} {
 		if cmd.Flags().Lookup(name) == nil {
 			t.Fatalf("scan command missing %s flag", name)
 		}

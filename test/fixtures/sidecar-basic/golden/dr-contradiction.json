@@ -816,7 +816,7 @@
     }
   ],
   "scores": {
-    "overall": null,
+    "overall": 45.238095238095234,
     "categories": [
       {
         "category": "authz",
@@ -836,10 +836,22 @@
         "evaluated": 2
       },
       {
+        "category": "lifecycle",
+        "grade": "unknown",
+        "passRate": null
+      },
+      {
         "category": "mtls",
         "grade": "D",
         "passRate": 0.6666666666666666,
         "evaluated": 3
+      }
+    ],
+    "namespaces": [
+      {
+        "namespace": "omg-dr-contradiction",
+        "environment": "unclassified",
+        "score": 45.238095238095234
       }
     ]
   }

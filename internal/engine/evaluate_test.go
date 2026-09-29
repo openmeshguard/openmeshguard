@@ -410,10 +410,10 @@ func TestEvaluateDeterministicIDsAndCategoryGrades(t *testing.T) {
 			t.Fatalf("finding ID changed: %q and %q", first.Findings[index].ID, second.Findings[index].ID)
 		}
 	}
-	if len(first.Scores) != 4 {
-		t.Fatalf("scores = %#v, want authorization, exposure, governance, and mTLS categories", first.Scores)
+	if len(first.Scores) != 5 {
+		t.Fatalf("scores = %#v, want every published weighted category", first.Scores)
 	}
-	authzScore, exposureScore, governanceScore, mtlsScore := first.Scores[0], first.Scores[1], first.Scores[2], first.Scores[3]
+	authzScore, exposureScore, governanceScore, lifecycleScore, mtlsScore := first.Scores[0], first.Scores[1], first.Scores[2], first.Scores[3], first.Scores[4]
 	if authzScore.Category != "authz" || authzScore.PassRate == nil || *authzScore.PassRate != 1 || authzScore.Grade != "A" {
 		t.Fatalf("authorization score = %#v, want 100%% grade A", authzScore)
 	}
@@ -422,6 +422,9 @@ func TestEvaluateDeterministicIDsAndCategoryGrades(t *testing.T) {
 	}
 	if governanceScore.Category != "governance" || governanceScore.PassRate == nil || *governanceScore.PassRate != 1 || governanceScore.Grade != "A" {
 		t.Fatalf("governance score = %#v, want evaluated ownership controls with grade A", governanceScore)
+	}
+	if lifecycleScore.Category != "lifecycle" || lifecycleScore.PassRate != nil || lifecycleScore.Grade != "unknown" {
+		t.Fatalf("lifecycle score = %#v, want explicit unknown", lifecycleScore)
 	}
 	if mtlsScore.Category != "mtls" || mtlsScore.PassRate == nil || *mtlsScore.PassRate != float64(5)/6 || mtlsScore.Grade != "B" {
 		t.Fatalf("mTLS score = %#v, want 5/6 grade B", mtlsScore)

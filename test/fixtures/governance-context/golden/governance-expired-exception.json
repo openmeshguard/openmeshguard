@@ -906,7 +906,7 @@
     }
   ],
   "scores": {
-    "overall": null,
+    "overall": 57,
     "categories": [
       {
         "category": "authz",
@@ -926,10 +926,23 @@
         "evaluated": 5
       },
       {
+        "category": "lifecycle",
+        "grade": "unknown",
+        "passRate": null
+      },
+      {
         "category": "mtls",
         "grade": "F",
         "passRate": 0.5,
         "evaluated": 4
+      }
+    ],
+    "namespaces": [
+      {
+        "namespace": "omg-governance-expired",
+        "environment": "production",
+        "score": 59,
+        "capped": true
       }
     ]
   }

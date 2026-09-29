@@ -201,10 +201,22 @@ type CategoryScore struct {
 	Unknown   int
 }
 
+type NamespaceScore struct {
+	Namespace    string
+	Environment  string
+	Categories   []CategoryScore
+	ScoreWeights map[string]float64
+	CriticalCap  float64
+}
+
 type Result struct {
-	Findings []Finding
-	Scores   []CategoryScore
-	Context  ReportContext
+	Findings        []Finding
+	Scores          []CategoryScore
+	ClusterScores   []CategoryScore
+	NamespaceScores []NamespaceScore
+	ScoreWeights    map[string]float64
+	CriticalCap     float64
+	Context         ReportContext
 }
 
 type ReportContext struct {

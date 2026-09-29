@@ -3,6 +3,18 @@ kind: ControlPack
 metadata:
   name: builtin-context
   version: 0.3.0
+params:
+  scoring:
+    # The frozen control taxonomy combines exposure + egress and governance +
+    # exception hygiene. These published weights preserve SPEC §16's 100-point
+    # allocation without inventing categories outside the control contract.
+    weights:
+      mtls: 25
+      authz: 25
+      exposure: 25
+      governance: 20
+      lifecycle: 5
+    criticalCap: 59
 controls:
   - id: MG-ENV-001
     title: Mesh namespaces must be classified to an environment

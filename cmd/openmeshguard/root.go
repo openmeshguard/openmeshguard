@@ -16,7 +16,7 @@ const (
 // version is set via -ldflags "-X main.version=..." on release builds.
 var version string
 
-var errNotImplemented = errors.New("not implemented")
+var errFindingsThreshold = errors.New("findings threshold met")
 
 type versionInfo struct {
 	Version         string
@@ -64,9 +64,9 @@ func newRootCommand(info versionInfo) *cobra.Command {
 	cmd.AddCommand(newVersionCommand(info))
 	cmd.AddCommand(newScanCommand(info))
 	cmd.AddCommand(newControlsCommand())
-	for _, name := range []string{"report", "export", "score"} {
-		cmd.AddCommand(newStubCommand(name))
-	}
+	cmd.AddCommand(newReportCommand())
+	cmd.AddCommand(newExportCommand())
+	cmd.AddCommand(newScoreCommand())
 
 	return cmd
 }
@@ -87,20 +87,9 @@ func newVersionCommand(info versionInfo) *cobra.Command {
 	}
 }
 
-func newStubCommand(name string) *cobra.Command {
-	return &cobra.Command{
-		Use:   name,
-		Short: fmt.Sprintf("%s is not implemented yet", name),
-		RunE: func(_ *cobra.Command, _ []string) error {
-			return errNotImplemented
-		},
-	}
-}
-
 func exitCode(err error) int {
-	if errors.Is(err, errNotImplemented) {
-		return 2
+	if errors.Is(err, errFindingsThreshold) {
+		return 1
 	}
-
-	return 1
+	return 2
 }

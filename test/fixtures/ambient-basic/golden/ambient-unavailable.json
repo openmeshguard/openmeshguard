@@ -866,7 +866,7 @@
     }
   ],
   "scores": {
-    "overall": null,
+    "overall": 100,
     "categories": [
       {
         "category": "authz",
@@ -887,10 +887,21 @@
         "unknown": 2
       },
       {
+        "category": "lifecycle",
+        "grade": "unknown",
+        "passRate": null
+      },
+      {
         "category": "mtls",
         "grade": "A",
         "passRate": 1,
         "evaluated": 5
+      }
+    ],
+    "namespaces": [
+      {
+        "namespace": "omg-ambient-unavailable",
+        "score": 100
       }
     ]
   }
