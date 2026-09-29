@@ -17,15 +17,31 @@ OpenMeshGuard is a read-only CLI scanner that tells you what your mesh security 
 
 ## Install
 
+The first Community release is `v0.1.0`. It ships declared and resolved posture;
+Prometheus runtime verification is the next milestone. Download the archive for
+your platform from [GitHub Releases](https://github.com/openmeshguard/openmeshguard/releases/tag/v0.1.0):
+
+| Platform | Archive |
+| --- | --- |
+| macOS Apple silicon | `openmeshguard_0.1.0_darwin_arm64.tar.gz` |
+| macOS Intel | `openmeshguard_0.1.0_darwin_amd64.tar.gz` |
+| Linux arm64 | `openmeshguard_0.1.0_linux_arm64.tar.gz` |
+| Linux amd64 | `openmeshguard_0.1.0_linux_amd64.tar.gz` |
+
+Before extraction, [verify the archive and signed checksums](docs/releases/verification.md)
+using the accompanying Sigstore bundles. Extract the archive, put `openmeshguard`
+on your `PATH`, then run `openmeshguard version`; it reports `version=v0.1.0`.
+
 With a Go 1.24+ toolchain:
 
 ```bash
-go install github.com/openmeshguard/openmeshguard/cmd/openmeshguard@latest
-
-openmeshguard version   # prints the module version for tagged builds, "dev" for local builds
+go install github.com/openmeshguard/openmeshguard/cmd/openmeshguard@v0.1.0
+openmeshguard version
 ```
 
-Prebuilt release binaries will ship with the first tagged release. To build from a clone instead: `make build` (binary lands in `bin/openmeshguard`).
+For development, clone the repository and run `make build`. The binary lands in
+`bin/openmeshguard` and reports `version=dev`. A release build uses
+`VERSION=v0.1.0 make build`. No Istio installation is performed by the scanner.
 
 ## Try it today
 
@@ -68,7 +84,7 @@ What to expect in the output:
 
 The report is canonical JSON validating against [`docs/contracts/canonical-json-schema.json`](docs/contracts/canonical-json-schema.json). HTML, SARIF, score display, and CI thresholds are projections of that JSON. See [consumable outputs and the CI contract](docs/outputs.md).
 
-## Quickstart (full surface — in progress)
+## Quickstart
 
 ```bash
 # Scan a cluster (read-only; see deploy/rbac for the exact permissions)
@@ -130,6 +146,17 @@ You can ship your own control packs alongside the built-ins, and contributing a 
 - Sidecar and ambient modes (including mixed) are first-class.
 - Multi-cluster: v1 scans one cluster at a time and *detects* multi-cluster participation (east-west gateways, network topology labels), reporting honestly that cross-cluster posture is not yet evaluated. Full multi-cluster correlation is on the roadmap.
 
+## What works and what is next
+
+| Capability | v0.1.0 |
+| --- | --- |
+| Effective sidecar/ambient mTLS and authorization, mixed mesh detection | Shipped |
+| CEL controls, ownership, environment classification, Git-native exceptions | Shipped |
+| Canonical JSON, HTML, SARIF, scores, opt-in CI thresholds | Shipped |
+| Prometheus collection and runtime-verified posture | Next: M7; unavailable in v0 |
+| Lifecycle controls | Future; lifecycle score remains unknown |
+| Offline manifests and cross-cluster correlation | Future |
+
 ## Roadmap (abridged)
 
 1. Scanner core, effective posture resolver, CEL rule engine, canonical JSON
@@ -142,13 +169,13 @@ See [SPEC.md](SPEC.md) for the full design.
 
 ## Contributing
 
-The project is in early design. The most valuable contributions right now:
+The project is in its first Community release. Useful contributions include:
 
 - Try it against a real Istio environment and file honest issues — especially resolver disagreements ("OpenMeshGuard says X, my mesh does Y"). Those are gold.
 - Propose or contribute controls (YAML + CEL — no Go required).
-- Review the canonical JSON schema and control format before they stabilize.
+- Propose improvements to the frozen contracts for maintainer review; contract changes need explicit approval.
 
-See `CONTRIBUTING.md` (coming with the repo opening) for details.
+Run `make build test lint schema-test` before submitting a change. See [development and acceptance testing](docs/dev.md) and [AGENTS.md](AGENTS.md) for the architecture and contribution constraints. Report vulnerabilities through [SECURITY.md](SECURITY.md).
 
 ## License
 
