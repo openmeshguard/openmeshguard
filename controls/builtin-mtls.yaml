@@ -2,7 +2,7 @@ apiVersion: openmeshguard.io/v1alpha1
 kind: ControlPack
 metadata:
   name: builtin-mtls
-  version: 0.3.0
+  version: 0.4.0
 controls:
   - id: MG-MTLS-001
     title: Mesh-managed workloads must resolve to strict mTLS
@@ -135,3 +135,35 @@ controls:
     frameworks:
       - nist-csf-2.0/PR.DS-02
       - owasp-k8s-2025/K05
+
+  - id: MG-MTLS-101
+    title: No plaintext traffic observed to mesh workloads
+    category: mtls
+    severity: high
+    evidenceType: runtime
+    scope: workload
+    requires: [verified.plaintextObserved]
+    applicability: 'workload.dataPlaneMode != "not-applicable"'
+    expression: 'workload.verified.plaintextObserved == false'
+    message: >-
+      Plaintext traffic was observed to {{ .Workload }} within
+      {{ .Verified.Window }}. Source attribution is unavailable because queries
+      retain only destination workload aggregates.
+    remediation:
+      guidance: Investigate plaintext callers and enforce STRICT PeerAuthentication after validating traffic compatibility.
+
+  - id: MG-MTLS-102
+    title: Observed inbound events must use mutual TLS
+    category: mtls
+    severity: medium
+    evidenceType: runtime
+    scope: workload
+    requires: [verified.mtlsTrafficShare]
+    applicability: 'workload.dataPlaneMode != "not-applicable"'
+    expression: 'workload.verified.mtlsTrafficShare == 1.0'
+    message: >-
+      Verified mutual TLS event share for {{ .Workload }} is
+      {{ .Verified.MTLSTrafficShare }} within {{ .Verified.Window }}.
+      This combines HTTP request and TCP connection-opening events.
+    remediation:
+      guidance: Identify plaintext traffic and migrate callers to mutual TLS before enforcing a strict cutover.
