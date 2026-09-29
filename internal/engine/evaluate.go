@@ -275,6 +275,16 @@ func evaluateControl(pack Pack, control Control, target evaluationTarget) (*Find
 		return nil, "", fmt.Errorf("%s: control %s: render message for %s: %w", pack.File, control.ID, target.key, err)
 	}
 	finding.Reasoning = reasoning
+	if control.EvidenceType == "runtime" {
+		finding.Confidence = "observed"
+	}
+	// SPEC section 16 requires a severity floor for the runtime contradiction.
+	// Pass/fail remains entirely in the control pack's CEL expression.
+	if control.ID == "MG-MTLS-101" && target.workload != nil &&
+		target.workload.Posture.MTLS.Effective == resolver.MTLSStrict &&
+		target.workload.Verified["plaintextObserved"] == true {
+		finding.Severity = "critical"
+	}
 	return &finding, statusOpen, nil
 }
 
@@ -367,6 +377,13 @@ func assembleFinding(control Control, target evaluationTarget, status, confidenc
 		remediation.SuggestedYAML = rendered
 	}
 	chain := resolutionChain(control, target.workload)
+	if control.EvidenceType == "runtime" && status == statusOpen && target.workload != nil {
+		if control.ID == "MG-MTLS-101" && target.workload.Posture.MTLS.Effective == resolver.MTLSStrict {
+			chain = append(chain, target.workload.Posture.MTLS.Chain...)
+		}
+		window, _ := target.workload.Verified["window"].(string)
+		chain = append(chain, resolver.Step{Order: len(chain) + 1, Kind: "Prometheus", Field: "verified", Effect: "destination HTTP request and TCP connection-opening counter increases observed over " + window})
+	}
 	if status != statusUnknown && len(chain) == 0 {
 		field := "expression"
 		effect := fmt.Sprintf("control %s expression resolved to an open finding", control.ID)
@@ -391,21 +408,21 @@ func assembleFinding(control Control, target evaluationTarget, status, confidenc
 		Status:          status,
 		Confidence:      confidence,
 		DataPlaneMode:   target.dataPlaneMode,
-		EvidenceSources: findingEvidence(control, target, status),
+		EvidenceSources: findingEvidence(control, target, status, chain),
 		Resources:       []ResourceRef{target.resource},
 		ResolutionChain: chain,
 		Remediation:     remediation,
 	}, nil
 }
 
-func findingEvidence(control Control, target evaluationTarget, status string) []string {
+func findingEvidence(control Control, target evaluationTarget, status string, chain []resolver.Step) []string {
 	evidence := append([]string(nil), target.evidence...)
 	usesMTLS, usesAuthz := controlPostureDependencies(control)
 	if target.workload != nil && ((usesMTLS && target.workload.Posture.MTLS.Effective != resolver.MTLSUnknown) ||
 		(usesAuthz && target.workload.Posture.Authz.Effective != resolver.AuthzUnknown)) {
 		evidence = append(evidence, "istio-crd")
 	}
-	for _, step := range resolutionChain(control, target.workload) {
+	for _, step := range chain {
 		switch step.Kind {
 		case "PeerAuthentication", "DestinationRule", "AuthorizationPolicy":
 			evidence = append(evidence, "istio-crd")

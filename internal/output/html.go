@@ -162,7 +162,7 @@ func canonicalSummaryRows(canonical report) []summaryRow {
 	}
 	classificationTotal := classified + unclassified
 	verifiedCell := summaryCell{
-		Value: fmt.Sprintf("Unknown — runtime verification unavailable for %d workload(s)", meshWorkloads),
+		Value: fmt.Sprintf("Unknown — no telemetry access; runtime verification unavailable for %d workload(s)", meshWorkloads),
 		Tone:  "unknown",
 	}
 	verification := summarizeVerification(canonical.WorkloadPostures)
@@ -492,6 +492,7 @@ const htmlReportTemplate = `<!doctype html>
   <section id="evidence-summary">
     <h2>Permission &amp; evidence summary</h2>
     <p>Kubernetes API: <strong>{{if .Report.Scan.DataSources.KubernetesAPI}}enabled{{else}}unavailable{{end}}</strong> · Prometheus: <strong class="{{if not .Report.Scan.DataSources.Prometheus.Enabled}}unknown{{end}}">{{if .Report.Scan.DataSources.Prometheus.Enabled}}enabled{{else}}not enabled{{end}}</strong></p>
+    {{if .Report.Scan.DataSources.Prometheus.DegradedTo}}<p class="unknown">Telemetry query cost reduced verification to {{.Report.Scan.DataSources.Prometheus.DegradedTo}}. Requested lookback: {{.Report.Scan.DataSources.Prometheus.Lookback}}.</p>{{end}}
     <div class="wide"><table>
       <thead><tr><th>API group / resource</th><th>Verbs</th><th>Granted</th><th>Impact</th><th>Affected controls</th></tr></thead>
       <tbody>{{range .Report.PermissionSummary}}<tr><td>{{.APIGroup}} / {{.Resource}}</td><td>{{join .Verbs ", "}}</td><td><span class="pill {{if .Granted}}known{{else}}unknown{{end}}">{{if .Granted}}yes{{else}}no{{end}}</span></td><td>{{.Impact}}</td><td>{{join .AffectedControls ", "}}</td></tr>{{else}}<tr><td colspan="5" class="muted">No permission attempts were recorded.</td></tr>{{end}}</tbody>

@@ -378,6 +378,7 @@ compare_golden() {
 	golden="$E2E_ROOT/test/fixtures/$group/golden/$name.json"
 	update_golden=$(printenv UPDATE_GOLDEN 2>/dev/null || true)
 	if [ "$update_golden" = 1 ]; then
+		if [ -f "$golden" ]; then assert_m7_declared_compatibility "$golden" "$actual"; fi
 		cp "$actual" "$golden"
 		echo "updated $golden"
 		return
@@ -779,10 +780,11 @@ while IFS="$tab" read -r group name namespace deployment proxy expected_postures
 done <"$cases"
 assert_json "namespace Role scan emits one workload posture and all built-in findings" "$results/namespace-role-degraded.json" '
 	(.workloadPostures | length) == 1 and
-	(.findings | length) == 13
+	(.findings | map(select(.evidenceType != "runtime")) | length) == 13 and
+	(.findings | map(select(.evidenceType == "runtime")) | length) == 2
 '
 assert_report_update_guard namespace-role-degraded "$results/namespace-role-degraded.json" \
-	"MG-AUTHZ-003=unknown,MG-AUTHZ-004=unknown,MG-AUTHZ-005=unknown,MG-AUTHZ-006=unknown,MG-AUTHZ-007=unknown,MG-ENV-001=unknown,MG-GW-005=not-applicable,MG-MTLS-002=unknown,MG-MTLS-003=unknown,MG-MTLS-005=not-applicable,MG-MTLS-006=not-applicable,MG-MTLS-007=unknown,MG-OWN-001=unknown"
+	"MG-AUTHZ-003=unknown,MG-AUTHZ-004=unknown,MG-AUTHZ-005=unknown,MG-AUTHZ-006=unknown,MG-AUTHZ-007=unknown,MG-ENV-001=unknown,MG-GW-005=not-applicable,MG-MTLS-002=unknown,MG-MTLS-003=unknown,MG-MTLS-005=not-applicable,MG-MTLS-006=not-applicable,MG-MTLS-007=unknown,MG-MTLS-101=unknown,MG-MTLS-102=unknown,MG-OWN-001=unknown"
 
 assert_json "strict namespace resolves strict" "$results/strict.json" '
 	.workloadPostures | length == 1 and .[0].mtls.effective == "strict"

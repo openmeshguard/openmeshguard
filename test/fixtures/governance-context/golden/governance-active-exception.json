@@ -17,7 +17,7 @@
       },
       {
         "name": "builtin-mtls",
-        "version": "0.3.0",
+        "version": "0.4.0",
         "source": "builtin"
       },
       {
@@ -73,6 +73,8 @@
         "MG-MTLS-005",
         "MG-MTLS-006",
         "MG-MTLS-007",
+        "MG-MTLS-101",
+        "MG-MTLS-102",
         "MG-OWN-001",
         "MG-OWN-002"
       ]
@@ -111,6 +113,8 @@
         "MG-MTLS-005",
         "MG-MTLS-006",
         "MG-MTLS-007",
+        "MG-MTLS-101",
+        "MG-MTLS-102",
         "MG-OWN-001",
         "MG-OWN-002"
       ]
@@ -159,6 +163,8 @@
         "MG-MTLS-005",
         "MG-MTLS-006",
         "MG-MTLS-007",
+        "MG-MTLS-101",
+        "MG-MTLS-102",
         "MG-OWN-001",
         "MG-OWN-002"
       ]
@@ -186,6 +192,8 @@
         "MG-MTLS-005",
         "MG-MTLS-006",
         "MG-MTLS-007",
+        "MG-MTLS-101",
+        "MG-MTLS-102",
         "MG-OWN-001",
         "MG-OWN-002"
       ]
@@ -213,6 +221,8 @@
         "MG-MTLS-005",
         "MG-MTLS-006",
         "MG-MTLS-007",
+        "MG-MTLS-101",
+        "MG-MTLS-102",
         "MG-OWN-001",
         "MG-OWN-002"
       ]
@@ -240,6 +250,8 @@
         "MG-MTLS-005",
         "MG-MTLS-006",
         "MG-MTLS-007",
+        "MG-MTLS-101",
+        "MG-MTLS-102",
         "MG-OWN-001",
         "MG-OWN-002"
       ]
@@ -343,6 +355,20 @@
         "MG-MTLS-005",
         "MG-MTLS-006",
         "MG-MTLS-007"
+      ]
+    },
+    {
+      "apiGroup": "prometheus",
+      "resource": "query",
+      "verbs": [
+        "get"
+      ],
+      "granted": false,
+      "optional": true,
+      "impact": "Runtime verification unavailable: no telemetry access",
+      "affectedControls": [
+        "MG-MTLS-101",
+        "MG-MTLS-102"
       ]
     }
   ],
@@ -871,6 +897,58 @@
       "remediation": {
         "guidance": "Restore a Ready ztunnel DaemonSet pod on every node that schedules ambient workloads."
       }
+    },
+    {
+      "id": "MG-MTLS-101-6a46ff92aa2f",
+      "controlId": "MG-MTLS-101",
+      "title": "No plaintext traffic observed to mesh workloads",
+      "severity": "high",
+      "evidenceType": "runtime",
+      "status": "unknown",
+      "confidence": "unavailable",
+      "dataPlaneMode": "sidecar",
+      "evidenceSources": [
+        "kubernetes-api",
+        "ownership-import"
+      ],
+      "resources": [
+        {
+          "kind": "Deployment",
+          "namespace": "omg-governance-active",
+          "name": "active-api"
+        }
+      ],
+      "reasoning": "Control MG-MTLS-101 could not be evaluated for omg-governance-active/active-api: verified.plaintextObserved unavailable: no telemetry access: Prometheus endpoint not configured.",
+      "remediation": {
+        "guidance": "Investigate plaintext callers and enforce STRICT PeerAuthentication after validating traffic compatibility."
+      },
+      "unknownReason": "verified.plaintextObserved unavailable: no telemetry access: Prometheus endpoint not configured"
+    },
+    {
+      "id": "MG-MTLS-102-98ff8b498a1c",
+      "controlId": "MG-MTLS-102",
+      "title": "Observed inbound events must use mutual TLS",
+      "severity": "medium",
+      "evidenceType": "runtime",
+      "status": "unknown",
+      "confidence": "unavailable",
+      "dataPlaneMode": "sidecar",
+      "evidenceSources": [
+        "kubernetes-api",
+        "ownership-import"
+      ],
+      "resources": [
+        {
+          "kind": "Deployment",
+          "namespace": "omg-governance-active",
+          "name": "active-api"
+        }
+      ],
+      "reasoning": "Control MG-MTLS-102 could not be evaluated for omg-governance-active/active-api: verified.mtlsTrafficShare unavailable: no telemetry access: Prometheus endpoint not configured.",
+      "remediation": {
+        "guidance": "Identify plaintext traffic and migrate callers to mutual TLS before enforcing a strict cutover."
+      },
+      "unknownReason": "verified.mtlsTrafficShare unavailable: no telemetry access: Prometheus endpoint not configured"
     }
   ],
   "scores": {
@@ -902,7 +980,8 @@
         "category": "mtls",
         "grade": "F",
         "passRate": 0.5,
-        "evaluated": 4
+        "evaluated": 4,
+        "unknown": 2
       }
     ],
     "namespaces": [

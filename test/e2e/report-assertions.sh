@@ -65,3 +65,37 @@ assert_report_update_guard() {
 		return 1
 	fi
 }
+
+# Human-approved M7 migration boundary. Compare every existing field except
+# the new runtime outcomes and their explicitly associated metadata. This guard
+# runs BEFORE an update can replace a pre-M7 golden.
+assert_m7_declared_compatibility() {
+ m7_previous=$1
+ m7_actual=$2
+ m7_temporary=$(mktemp -d "${TMPDIR:-/tmp}/openmeshguard-m7-compat.XXXXXX")
+ m7_projection='
+   ([.findings[] | select(.evidenceType == "runtime" and
+     (.controlId == "MG-MTLS-101" or .controlId == "MG-MTLS-102") and .status == "unknown")] | length) as $runtime_unknown |
+   .findings |= map(select((.evidenceType == "runtime" and
+     (.controlId == "MG-MTLS-101" or .controlId == "MG-MTLS-102")) | not)) |
+   .permissionSummary |= map(select((.apiGroup == "prometheus" and .resource == "query") | not)) |
+   (.permissionSummary[] | select(has("affectedControls")) | .affectedControls) |=
+     map(select(. != "MG-MTLS-101" and . != "MG-MTLS-102")) |
+   (.scanner.controlPacks[] | select(.name == "builtin-mtls" and .source == "builtin") | .version) = "0.3.0" |
+   .scores.categories |= map(if .category == "mtls" then
+     .unknown = ((.unknown // 0) - $runtime_unknown) |
+     if .unknown == 0 then del(.unknown) else . end
+     else . end)
+ '
+ if ! jq -S "$m7_projection" "$m7_previous" >"$m7_temporary/previous.json" ||
+    ! jq -S "$m7_projection" "$m7_actual" >"$m7_temporary/actual.json"; then
+  rm -rf "$m7_temporary"
+  return 1
+ fi
+ if ! diff -u "$m7_temporary/previous.json" "$m7_temporary/actual.json"; then
+  echo "M7 golden update rejected: existing declared report changed ($m7_actual)" >&2
+  rm -rf "$m7_temporary"
+  return 1
+ fi
+ rm -rf "$m7_temporary"
+}

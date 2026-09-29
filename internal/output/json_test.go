@@ -111,6 +111,28 @@ func TestEngineFindingsReplaceProvisionalPathEndToEnd(t *testing.T) {
 				ClusterContext: "fixture", Scope: ScanScope{AllNamespaces: true},
 				WorkloadPostures: []resolver.WorkloadResult{tt.workload.Posture},
 			}, packs, evaluated)
+			// M7 adds exactly two runtime outcomes; all established declared
+			// expectations below remain unchanged.
+			declared := make([]finding, 0, len(report.Findings))
+			runtimeCount := 0
+			for _, item := range report.Findings {
+				if item.EvidenceType != "runtime" {
+					declared = append(declared, item)
+					continue
+				}
+				runtimeCount++
+				want := "unknown"
+				if tt.workload.Posture.Mode == resolver.ModeNotApplicable {
+					want = "not-applicable"
+				}
+				if item.Status != want || (want == "unknown" && item.UnknownReason == "") {
+					t.Fatalf("runtime addition = %#v, want %s", item, want)
+				}
+			}
+			if runtimeCount != 2 {
+				t.Fatalf("runtime additions = %d, want 2", runtimeCount)
+			}
+			report.Findings = declared
 			if len(report.Findings) != tt.wantCount {
 				t.Fatalf("findings = %d, want %d: %#v", len(report.Findings), tt.wantCount, report.Findings)
 			}

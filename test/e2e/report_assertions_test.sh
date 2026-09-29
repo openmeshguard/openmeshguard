@@ -102,3 +102,28 @@ if assert_report_update_guard namespace-role-degraded "$TEST_ROOT/missing-degrad
 fi
 
 echo "E2E report assertion tests passed"
+
+# The additive migration must accept runtime metadata, but must reject changes
+# to any established conclusion, finding, permission, or unrelated score count.
+base="$fixtures/golden/strict.json"
+jq '
+ .findings += [{controlId:"MG-MTLS-101",evidenceType:"runtime",status:"unknown"}] |
+ .permissionSummary += [{apiGroup:"prometheus",resource:"query",verbs:["get"],granted:false,optional:true}] |
+ (.scanner.controlPacks[] | select(.name=="builtin-mtls") | .version) = "0.4.0" |
+ (.scores.categories[] | select(.category=="mtls") | .unknown) += 1
+' "$base" >"$TEST_ROOT/approved-runtime-addition.json"
+assert_m7_declared_compatibility "$base" "$TEST_ROOT/approved-runtime-addition.json"
+for mutation in \
+ '(.workloadPostures[0].mtls.effective)="disabled"' \
+ '(.findings[0].reasoning)="changed existing reasoning"' \
+ '(.permissionSummary[0].granted)=false' \
+ '(.scores.categories[] | select(.category=="authz") | .unknown)+=1' \
+ '(.scores.categories[] | select(.category=="mtls") | .unknown)+=1'
+do
+ jq "$mutation" "$TEST_ROOT/approved-runtime-addition.json" >"$TEST_ROOT/declared-drift.json"
+ if assert_m7_declared_compatibility "$base" "$TEST_ROOT/declared-drift.json" >/dev/null 2>&1; then
+  echo "M7 guard accepted declared drift: $mutation" >&2
+  exit 1
+ fi
+done
+echo "M7 declared compatibility guard tests passed"

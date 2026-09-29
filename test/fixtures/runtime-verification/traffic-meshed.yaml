@@ -1,0 +1,29 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: runtime-meshed
+  namespace: omg-runtime
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 240
+  template:
+    metadata:
+      labels: {app: runtime-meshed}
+      annotations: {sidecar.istio.io/inject: "true"}
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      containers:
+        - name: traffic
+          image: python:3.13.5-alpine
+          command: [python, /scripts/client.py]
+          env:
+            - {name: MESHED, value: "true"}
+          resources:
+            requests: {cpu: 10m, memory: 16Mi}
+            limits: {cpu: 100m, memory: 64Mi}
+          volumeMounts:
+            - {name: scripts, mountPath: /scripts, readOnly: true}
+      volumes:
+        - name: scripts
+          configMap: {name: runtime-programs}

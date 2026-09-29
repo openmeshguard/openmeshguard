@@ -14,8 +14,9 @@ to the Linux/macOS and amd64/arm64 filename for your machine. Requires `curl`,
 Run in a new empty directory.
 
 ```sh
-tag=v0.1.0
-archive=openmeshguard_0.1.0_darwin_arm64.tar.gz
+tag=v0.2.0
+release_version=${tag#v}
+archive="openmeshguard_${release_version}_darwin_arm64.tar.gz"
 base="https://github.com/openmeshguard/openmeshguard/releases/download/$tag"
 for file in "$archive" "$archive.sigstore.json" checksums.txt checksums.txt.sigstore.json; do
   curl --fail --location --output "$file" "$base/$file" || exit 1
@@ -34,16 +35,16 @@ tar -xzf "$archive" openmeshguard
 ./openmeshguard version
 ```
 
-Expect `version=v0.1.0`. Only run the binary after all signature and checksum
+Expect `version=v0.2.0`. Only run the binary after all signature and checksum
 checks succeed. Signature verification uses Sigstore trust infrastructure; the
-scanner itself connects only to your configured cluster API (and, when M7 ships,
-configured Prometheus endpoint).
+scanner itself connects only to your configured cluster API (and, optionally,
+the configured Prometheus endpoint).
 
 ## Maintainer release procedure
 
-1. Merge the M6.5 branch after independent reviews and green build/unit/lint/schema
+1. Merge the M7 branch after independent reviews and green build/unit/lint/schema
    and Kind acceptance proofs. Enable private vulnerability reporting before
-   publishing SECURITY.md. Create an annotated `v0.1.0` tag on that reviewed commit
+   publishing SECURITY.md. Create an annotated `v0.2.0` tag on that reviewed commit
    and push the tag; do not move a published version tag.
 2. An authenticated preflight rejects an already public release for the exact
    tag before any upload; only an absent release or confirmed draft proceeds.
@@ -66,7 +67,7 @@ The all-archive verifier is also runnable from a checkout with authenticated
 `gh`, Cosign v3, Python 3, and tar. The destination must not already exist:
 
 ```sh
-./scripts/release/verify-download.sh v0.1.0 /tmp/openmeshguard-release-verification
+./scripts/release/verify-download.sh v0.2.0 /tmp/openmeshguard-release-verification
 /tmp/openmeshguard-release-verification/bin/openmeshguard scan \
   --context my-cluster --all-namespaces > /tmp/openmeshguard-release-report.json
 OPENMESHGUARD_SCHEMA_REPORT=/tmp/openmeshguard-release-report.json \
