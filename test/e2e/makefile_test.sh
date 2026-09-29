@@ -18,3 +18,9 @@ if ! printf '%s\n' "$dry_run" | grep -F "OPENMESHGUARD_E2E_BINARY=\"$test_binary
 fi
 
 echo "E2E Makefile binary propagation test passed"
+
+runtime_dry_run=$(make -n -C "$TEST_ROOT" BINARY="$test_binary" e2e-runtime)
+if ! printf '%s\n' "$runtime_dry_run" | grep -F "OPENMESHGUARD_E2E_BINARY=\"$test_binary\" sh ./test/e2e/runtime-verification.sh" >/dev/null; then
+ echo "make e2e-runtime did not pass the overridden binary to the harness" >&2
+ exit 1
+fi

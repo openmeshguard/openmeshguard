@@ -1340,3 +1340,34 @@ func optionalNegation(value *bool) *bool {
 	}
 	return boolPointer(!*value)
 }
+
+func TestRuntimeContradictionIncludesDeclaredEvidenceSource(t *testing.T) {
+	packs, err := LoadBuiltins()
+	if err != nil {
+		t.Fatal(err)
+	}
+	workload := workloadWithMTLS(resolver.MTLSStrict, nil)
+	workload.Posture.MTLS.Chain = []resolver.Step{{Order: 1, Kind: "PeerAuthentication", Name: "strict", Effect: "requires strict mTLS"}}
+	workload.EvidenceSources = nil
+	workload.Verified = map[string]any{"status": "contradicted", "window": "1h", "plaintextObserved": true, "mtlsTrafficShare": 0.0}
+	result, err := Evaluate(packs, Input{Workloads: []WorkloadInput{workload}, NamespaceTargetsComplete: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, finding := range result.Findings {
+		if finding.ControlID != "MG-MTLS-101" {
+			continue
+		}
+		found = true
+		if !containsString(finding.EvidenceSources, "istio-crd") || !containsString(finding.EvidenceSources, "prometheus") {
+			t.Fatalf("missing source for final chain: %+v", finding)
+		}
+		if len(finding.ResolutionChain) != 2 || finding.ResolutionChain[0].Kind != "PeerAuthentication" || finding.ResolutionChain[1].Kind != "Prometheus" {
+			t.Fatalf("unexpected contradiction chain: %+v", finding.ResolutionChain)
+		}
+	}
+	if !found {
+		t.Fatal("missing contradiction finding")
+	}
+}

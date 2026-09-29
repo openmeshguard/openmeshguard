@@ -1,0 +1,173 @@
+# Harness-only resources. OpenMeshGuard never creates these objects.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: omg-runtime
+  labels:
+    istio-injection: enabled
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: runtime-programs
+  namespace: omg-runtime
+data:
+  server.py: |
+    import http.server
+    import socketserver
+    import threading
+    class HTTP(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b"runtime verification fixture\n")
+    class TCP(socketserver.BaseRequestHandler):
+        def handle(self):
+            self.request.sendall(self.request.recv(1024))
+    socketserver.ThreadingTCPServer.allow_reuse_address = True
+    threading.Thread(target=socketserver.ThreadingTCPServer(("", 9090), TCP).serve_forever, daemon=True).start()
+    http.server.ThreadingHTTPServer(("", 8080), HTTP).serve_forever()
+  client.py: |
+    import os
+    import socket
+    import time
+    import urllib.request
+    meshed = os.environ.get("MESHED") == "true"
+    if meshed:
+        for attempt in range(120):
+            try:
+                urllib.request.urlopen("http://127.0.0.1:15021/healthz/ready", timeout=1).close()
+                break
+            except Exception:
+                time.sleep(1)
+        else:
+            raise RuntimeError("sidecar never became ready")
+    # Warm-up establishes counters; subsequent requests span many scrapes.
+    for attempt in range(40):
+        with urllib.request.urlopen("http://runtime-receiver:8080/", timeout=5) as response:
+            assert response.status == 200
+        with socket.create_connection(("runtime-receiver", 9090), timeout=5) as connection:
+            connection.sendall(b"proof")
+            received = b""
+            while len(received) < 5:
+                chunk = connection.recv(5 - len(received))
+                if not chunk:
+                    raise RuntimeError("truncated TCP response")
+                received += chunk
+            assert received == b"proof"
+        time.sleep(1)
+    if meshed:
+        urllib.request.urlopen(urllib.request.Request("http://127.0.0.1:15020/quitquitquit", data=b""), timeout=5).close()
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: runtime-receiver
+  namespace: omg-runtime
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: runtime-receiver}
+  template:
+    metadata:
+      labels: {app: runtime-receiver}
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: receiver
+          image: python:3.13.5-alpine
+          command: [python, /scripts/server.py]
+          ports:
+            - {name: http, containerPort: 8080}
+            - {name: tcp, containerPort: 9090}
+          readinessProbe:
+            tcpSocket: {port: 8080}
+          resources:
+            requests: {cpu: 10m, memory: 32Mi}
+            limits: {cpu: 200m, memory: 64Mi}
+          volumeMounts:
+            - {name: scripts, mountPath: /scripts, readOnly: true}
+      volumes:
+        - name: scripts
+          configMap: {name: runtime-programs}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: runtime-receiver
+  namespace: omg-runtime
+spec:
+  selector: {app: runtime-receiver}
+  ports:
+    - {name: http, port: 8080}
+    - {name: tcp, port: 9090}
+    - {name: http-envoy-prom, port: 15090, targetPort: 15090}
+---
+apiVersion: security.istio.io/v1
+kind: PeerAuthentication
+metadata:
+  name: allow-mixed-proof
+  namespace: omg-runtime
+spec:
+  mtls: {mode: PERMISSIVE}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: runtime-prometheus
+  namespace: omg-runtime
+data:
+  prometheus.yml: |
+    global:
+      scrape_interval: 2s
+    scrape_configs:
+      - job_name: receiver-envoy
+        metrics_path: /stats/prometheus
+        static_configs:
+          - targets: [runtime-receiver:15090]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: runtime-prometheus
+  namespace: omg-runtime
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: runtime-prometheus}
+  template:
+    metadata:
+      labels: {app: runtime-prometheus}
+      annotations: {sidecar.istio.io/inject: "false"}
+    spec:
+      automountServiceAccountToken: false
+      securityContext: {fsGroup: 65534}
+      containers:
+        - name: prometheus
+          image: prom/prometheus:v3.5.0
+          args: [--config.file=/etc/prometheus/prometheus.yml, --storage.tsdb.path=/prometheus, --storage.tsdb.retention.time=1h]
+          ports:
+            - {name: http, containerPort: 9090}
+          readinessProbe:
+            httpGet: {path: /-/ready, port: 9090}
+          resources:
+            requests: {cpu: 50m, memory: 64Mi}
+            limits: {cpu: 500m, memory: 256Mi}
+          volumeMounts:
+            - {name: config, mountPath: /etc/prometheus, readOnly: true}
+            - {name: data, mountPath: /prometheus}
+      volumes:
+        - name: config
+          configMap: {name: runtime-prometheus}
+        - name: data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: runtime-prometheus
+  namespace: omg-runtime
+spec:
+  selector: {app: runtime-prometheus}
+  ports:
+    - {name: http, port: 9090}

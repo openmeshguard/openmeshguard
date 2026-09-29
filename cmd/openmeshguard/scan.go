@@ -15,6 +15,7 @@ import (
 	"github.com/openmeshguard/openmeshguard/internal/normalize"
 	"github.com/openmeshguard/openmeshguard/internal/output"
 	"github.com/openmeshguard/openmeshguard/internal/resolver"
+	"github.com/openmeshguard/openmeshguard/internal/telemetry"
 	"github.com/spf13/cobra"
 	istioclient "istio.io/client-go/pkg/clientset/versioned"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -25,18 +26,20 @@ import (
 )
 
 type scanOptions struct {
-	Kubeconfig        string
-	Context           string
-	AllNamespaces     bool
-	Namespaces        []string
-	RootNamespace     string
-	ControlPacks      []string
-	ScanConfig        string
-	OwnershipImport   string
-	Exceptions        []string
-	InferEnvironments bool
-	FailOn            string
-	FailOnUnknown     bool
+	Prometheus          telemetry.Config
+	PrometheusTokenFile string
+	Kubeconfig          string
+	Context             string
+	AllNamespaces       bool
+	Namespaces          []string
+	RootNamespace       string
+	ControlPacks        []string
+	ScanConfig          string
+	OwnershipImport     string
+	Exceptions          []string
+	InferEnvironments   bool
+	FailOn              string
+	FailOnUnknown       bool
 }
 
 func newScanCommand(info versionInfo) *cobra.Command {
@@ -63,6 +66,14 @@ func newScanCommand(info versionInfo) *cobra.Command {
 	cmd.Flags().BoolVar(&opts.InferEnvironments, "infer-environments", false, "infer production from namespace names and disclose inferred confidence")
 	cmd.Flags().StringVar(&opts.FailOn, "fail-on", "", "exit 1 for open findings at or above this severity")
 	cmd.Flags().BoolVar(&opts.FailOnUnknown, "fail-on-unknown", false, "exit 1 when any finding is unknown")
+	cmd.Flags().StringVar(&opts.Prometheus.URL, "prometheus-url", "", "Prometheus endpoint scoped to this cluster")
+	cmd.Flags().StringVar(&opts.PrometheusTokenFile, "prometheus-token-file", "", "file containing Prometheus bearer token")
+	cmd.Flags().StringVar(&opts.Prometheus.CAFile, "prometheus-ca-file", "", "additional Prometheus CA certificates")
+	cmd.Flags().StringVar(&opts.Prometheus.CertFile, "prometheus-client-cert", "", "Prometheus mTLS client certificate")
+	cmd.Flags().StringVar(&opts.Prometheus.KeyFile, "prometheus-client-key", "", "Prometheus mTLS client private key")
+	cmd.Flags().DurationVar(&opts.Prometheus.Lookback, "prometheus-lookback", telemetry.DefaultLookback, "runtime verification lookback, in whole seconds")
+	cmd.Flags().DurationVar(&opts.Prometheus.Step, "prometheus-step", telemetry.DefaultStep, "Prometheus range API step; totals evaluate once over full lookback")
+	cmd.Flags().DurationVar(&opts.Prometheus.Timeout, "prometheus-timeout", telemetry.DefaultTimeout, "per-query Prometheus timeout")
 	return cmd
 }
 
@@ -120,6 +131,13 @@ func (o *scanOptions) normalizeAndValidate() error {
 }
 
 func runScan(ctx context.Context, info versionInfo, opts scanOptions, stdout io.Writer) error {
+	prometheusClient, err := runtimeClient(opts)
+	if err != nil {
+		return err
+	}
+	if prometheusClient != nil {
+		defer prometheusClient.Close()
+	}
 	scanConfig, err := governance.LoadScanConfig(opts.ScanConfig)
 	if err != nil {
 		return fmt.Errorf("load scan config: %w", err)
@@ -226,6 +244,8 @@ func runScan(ctx context.Context, info versionInfo, opts scanOptions, stdout io.
 		engineWorkloads = append(engineWorkloads, engineWorkload)
 	}
 	evaluationTime := time.Now().UTC()
+	runtimeEvidence, runtimePermission := runtimeInputs(ctx, prometheusClient, opts, engineWorkloads, evaluationTime)
+	snapshot.PermissionSummary = append(snapshot.PermissionSummary, runtimePermission)
 	exceptionResources, exceptionInputs, exceptionBindings := engineExceptionInputs(
 		exceptionRecords,
 		contextResult.Workloads,
@@ -268,7 +288,7 @@ func runScan(ctx context.Context, info versionInfo, opts scanOptions, stdout io.
 	)
 
 	var canonical bytes.Buffer
-	if err := output.WriteScanJSONWithEvaluation(&canonical, output.ScanInput{
+	if err := output.WriteScanJSONWithRuntime(&canonical, output.ScanInput{
 		GeneratedAt:       evaluationTime,
 		ScannerVersion:    info.Version,
 		ResolverVersion:   resolved.Version(),
@@ -277,7 +297,7 @@ func runScan(ctx context.Context, info versionInfo, opts scanOptions, stdout io.
 		PermissionSummary: snapshot.PermissionSummary,
 		Inventory:         normalized.Inventory,
 		WorkloadPostures:  workloadPostures,
-	}, packs, evaluated); err != nil {
+	}, packs, evaluated, runtimeEvidence); err != nil {
 		return err
 	}
 	if _, err := io.Copy(stdout, bytes.NewReader(canonical.Bytes())); err != nil {

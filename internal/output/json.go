@@ -559,7 +559,10 @@ type dataSources struct {
 }
 
 type prometheus struct {
-	Enabled bool `json:"enabled"`
+	Enabled    bool    `json:"enabled"`
+	URL        string  `json:"url,omitempty"`
+	Lookback   string  `json:"lookback,omitempty"`
+	DegradedTo *string `json:"degradedTo,omitempty"`
 }
 
 type contextFiles struct {

@@ -17,7 +17,7 @@
       },
       {
         "name": "builtin-mtls",
-        "version": "0.3.0",
+        "version": "0.4.0",
         "source": "builtin"
       }
     ]
@@ -68,6 +68,8 @@
         "MG-MTLS-005",
         "MG-MTLS-006",
         "MG-MTLS-007",
+        "MG-MTLS-101",
+        "MG-MTLS-102",
         "MG-OWN-001",
         "MG-OWN-002"
       ]
@@ -106,6 +108,8 @@
         "MG-MTLS-005",
         "MG-MTLS-006",
         "MG-MTLS-007",
+        "MG-MTLS-101",
+        "MG-MTLS-102",
         "MG-OWN-001",
         "MG-OWN-002"
       ]
@@ -154,6 +158,8 @@
         "MG-MTLS-005",
         "MG-MTLS-006",
         "MG-MTLS-007",
+        "MG-MTLS-101",
+        "MG-MTLS-102",
         "MG-OWN-001",
         "MG-OWN-002"
       ]
@@ -181,6 +187,8 @@
         "MG-MTLS-005",
         "MG-MTLS-006",
         "MG-MTLS-007",
+        "MG-MTLS-101",
+        "MG-MTLS-102",
         "MG-OWN-001",
         "MG-OWN-002"
       ]
@@ -208,6 +216,8 @@
         "MG-MTLS-005",
         "MG-MTLS-006",
         "MG-MTLS-007",
+        "MG-MTLS-101",
+        "MG-MTLS-102",
         "MG-OWN-001",
         "MG-OWN-002"
       ]
@@ -235,6 +245,8 @@
         "MG-MTLS-005",
         "MG-MTLS-006",
         "MG-MTLS-007",
+        "MG-MTLS-101",
+        "MG-MTLS-102",
         "MG-OWN-001",
         "MG-OWN-002"
       ]
@@ -338,6 +350,20 @@
         "MG-MTLS-005",
         "MG-MTLS-006",
         "MG-MTLS-007"
+      ]
+    },
+    {
+      "apiGroup": "prometheus",
+      "resource": "query",
+      "verbs": [
+        "get"
+      ],
+      "granted": false,
+      "optional": true,
+      "impact": "Runtime verification unavailable: no telemetry access",
+      "affectedControls": [
+        "MG-MTLS-101",
+        "MG-MTLS-102"
       ]
     }
   ],
@@ -614,6 +640,56 @@
       }
     },
     {
+      "id": "MG-MTLS-101-a3bdd27ad8f9",
+      "controlId": "MG-MTLS-101",
+      "title": "No plaintext traffic observed to mesh workloads",
+      "severity": "high",
+      "evidenceType": "runtime",
+      "status": "unknown",
+      "confidence": "unavailable",
+      "dataPlaneMode": "sidecar",
+      "evidenceSources": [
+        "kubernetes-api"
+      ],
+      "resources": [
+        {
+          "kind": "Deployment",
+          "namespace": "omg-authz-allow-only",
+          "name": "authz-allow-only"
+        }
+      ],
+      "reasoning": "Control MG-MTLS-101 could not be evaluated for omg-authz-allow-only/authz-allow-only: verified.plaintextObserved unavailable: no telemetry access: Prometheus endpoint not configured.",
+      "remediation": {
+        "guidance": "Investigate plaintext callers and enforce STRICT PeerAuthentication after validating traffic compatibility."
+      },
+      "unknownReason": "verified.plaintextObserved unavailable: no telemetry access: Prometheus endpoint not configured"
+    },
+    {
+      "id": "MG-MTLS-102-bc5d3f2edb5f",
+      "controlId": "MG-MTLS-102",
+      "title": "Observed inbound events must use mutual TLS",
+      "severity": "medium",
+      "evidenceType": "runtime",
+      "status": "unknown",
+      "confidence": "unavailable",
+      "dataPlaneMode": "sidecar",
+      "evidenceSources": [
+        "kubernetes-api"
+      ],
+      "resources": [
+        {
+          "kind": "Deployment",
+          "namespace": "omg-authz-allow-only",
+          "name": "authz-allow-only"
+        }
+      ],
+      "reasoning": "Control MG-MTLS-102 could not be evaluated for omg-authz-allow-only/authz-allow-only: verified.mtlsTrafficShare unavailable: no telemetry access: Prometheus endpoint not configured.",
+      "remediation": {
+        "guidance": "Identify plaintext traffic and migrate callers to mutual TLS before enforcing a strict cutover."
+      },
+      "unknownReason": "verified.mtlsTrafficShare unavailable: no telemetry access: Prometheus endpoint not configured"
+    },
+    {
       "id": "MG-OWN-001-e331f6d26a5c",
       "controlId": "MG-OWN-001",
       "title": "Mesh workloads must map to an application owner",
@@ -676,7 +752,8 @@
         "category": "mtls",
         "grade": "A",
         "passRate": 1,
-        "evaluated": 3
+        "evaluated": 3,
+        "unknown": 2
       }
     ],
     "namespaces": [
