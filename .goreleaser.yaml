@@ -1,0 +1,50 @@
+version: 2
+project_name: openmeshguard
+builds:
+  - id: openmeshguard
+    main: ./cmd/openmeshguard
+    binary: openmeshguard
+    env: [CGO_ENABLED=0]
+    goos: [darwin, linux]
+    goarch: [amd64, arm64]
+    flags: [-trimpath]
+    ldflags:
+      - -s -w -X main.version={{ .Tag }}
+archives:
+  - id: openmeshguard
+    ids: [openmeshguard]
+    formats: [tar.gz]
+    name_template: '{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}'
+    builds_info:
+      mtime: '{{ .CommitDate }}'
+    files:
+      - src: LICENSE
+        info: {mtime: '{{ .CommitDate }}'}
+      - src: README.md
+        info: {mtime: '{{ .CommitDate }}'}
+      - src: CHANGELOG.md
+        info: {mtime: '{{ .CommitDate }}'}
+      - src: SECURITY.md
+        info: {mtime: '{{ .CommitDate }}'}
+checksum:
+  name_template: checksums.txt
+  algorithm: sha256
+signs:
+  - id: archives
+    artifacts: archive
+    cmd: cosign
+    signature: '${artifact}.sigstore.json'
+    args: [sign-blob, '--yes', '--bundle=${signature}', '${artifact}']
+  - id: checksums
+    artifacts: checksum
+    cmd: cosign
+    signature: '${artifact}.sigstore.json'
+    args: [sign-blob, '--yes', '--bundle=${signature}', '${artifact}']
+release:
+  github:
+    owner: openmeshguard
+    name: openmeshguard
+  draft: true
+  prerelease: auto
+changelog:
+  disable: true
