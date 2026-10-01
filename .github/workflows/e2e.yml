@@ -10,6 +10,11 @@ concurrency:
 jobs:
   kind-e2e:
     name: Kind, Istio, RBAC, and no-write proofs
+    # Stays on a GitHub-hosted runner: Istio's ambient dataplane creates ipsets
+    # in the Kind node's host netns, and the Blacksmith runner kernel (6.6.141)
+    # ships no ip_set support, so istio-cni-node crash-loops with
+    # "error initializing host addressSet manager: invalid type".
+    # https://istio.io/latest/docs/ops/deployment/platform-requirements/
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
